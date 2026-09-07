@@ -324,6 +324,13 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "icon": "💻",
                     },
                     {
+                        "key": "traktor_playlist_sync",
+                        "name": "Sync Traktor Playlists",
+                        "module": "PipelineScript_Audio_TraktorPlaylistSync",
+                        "description": "Export native Traktor playlists/smart lists to a portable NML for Import Collection on another machine",
+                        "icon": "🗂️",
+                    },
+                    {
                         "key": "poweramp_sync",
                         "name": "Sync to PowerAmp",
                         "module": "PipelineScript_Audio_PowerAmpSync",
