@@ -41,23 +41,9 @@ def _to_active_base_path(folder: str) -> str:
     (e.g. ``D:\\_work\\Active\\Web\\...``). npm/pnpm misbehave on subst drives
     when node_modules contains symlinks, so we always run from the real path."""
     try:
-        settings = get_rak_settings()
-        work_drive = settings.get_work_drive().rstrip("\\")
-        active_base = settings.get_active_base().rstrip("\\")
+        return get_rak_settings().to_active_base_path(folder)
     except Exception:
         return folder
-
-    if not work_drive or not active_base:
-        return folder
-
-    normalized = folder.replace("/", "\\")
-    work_prefix = work_drive + "\\"
-    if normalized.lower().startswith(work_prefix.lower()):
-        relative = normalized[len(work_prefix):]
-        return f"{active_base}\\{relative}"
-    if normalized.lower() == work_drive.lower():
-        return active_base
-    return folder
 
 
 def _find_dev_folder(project_folder: str) -> Optional[Path]:

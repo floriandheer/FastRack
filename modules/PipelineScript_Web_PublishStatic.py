@@ -28,7 +28,7 @@ from urllib.parse import quote
 # Setup logging using shared utility
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import is_wordpress_folder
-from rak_settings import get_rak_settings
+from rak_settings import get_rak_settings, join_native_path
 
 # Get logger reference (configured in main())
 logger = get_logger("web_publish_static")
@@ -68,7 +68,7 @@ class WebPublishConfig:
     def _discover_sites(self) -> Dict:
         """Scan Web folder for site directories (work at root, personal under _Personal/)."""
         work = get_rak_settings().get_work_drive()
-        web_root = os.path.join(work, "Web")
+        web_root = join_native_path(work, "Web")
         sites = {}
 
         if not os.path.isdir(web_root):

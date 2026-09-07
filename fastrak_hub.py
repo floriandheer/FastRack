@@ -45,7 +45,8 @@ SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from shared_logging import get_logger, setup_logging
-from rak_settings import get_rak_settings
+from rak_settings import get_rak_settings, join_native_path
+from shared_open_path import open_path
 
 from ui_theme import COLORS, CATEGORY_COLORS
 from ui_pipeline_categories import (
@@ -791,7 +792,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         """Lazy-create the embedded Sandbox Browser on first Sandbox select."""
         if self.sandbox_browser is not None:
             return
-        root_path = get_rak_settings().get_work_drive() + "\\_Sandbox"
+        root_path = join_native_path(get_rak_settings().get_work_drive(), "_Sandbox")
         self.sandbox_browser = SandboxBrowserPanel(
             self.sandbox_browser_panel, root_path, status_callback=self.update_status,
         )
@@ -1618,10 +1619,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         scroll_frame.rebind_mousewheel()
 
     def open_folder(self, folder_path):
-        """Open a folder in Windows File Explorer."""
+        """Open a folder in the OS file browser."""
         try:
             # Special handling for Business category - open current quarter folder
-            library_path = get_rak_settings().get_work_drive() + "\\_LIBRARY"
+            library_path = join_native_path(get_rak_settings().get_work_drive(), "_LIBRARY")
             if folder_path == library_path:
                 # Get current year and quarter
                 now = datetime.datetime.now()
@@ -1630,10 +1631,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
                 # Construct the quarterly folder path
                 boekhouding_base = get_rak_settings().get_boekhouding_base()
-                folder_path = f"{boekhouding_base}\\{current_year}\\Q{current_quarter}"
+                folder_path = join_native_path(boekhouding_base, str(current_year), f"Q{current_quarter}")
 
             if os.path.exists(folder_path):
-                os.startfile(folder_path)
+                open_path(folder_path)
                 self.update_status(f"Opened folder: {folder_path}", "info")
             else:
                 self.update_status(f"Folder not found: {folder_path}", "warning")
@@ -1641,12 +1642,12 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.update_status(f"Error opening folder: {e}", "error")
 
     def open_logs_folder(self):
-        """Open the centralized logs folder in Windows File Explorer."""
+        """Open the centralized logs folder in the OS file browser."""
         logs_folder = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager", "logs")
         try:
             # Create the folder if it doesn't exist
             os.makedirs(logs_folder, exist_ok=True)
-            os.startfile(logs_folder)
+            open_path(logs_folder)
             self.update_status(f"Opened logs folder: {logs_folder}", "info")
         except Exception as e:
             self.update_status(f"Error opening logs folder: {e}", "error")
@@ -1734,7 +1735,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         shortcuts_path = os.path.join(SCRIPT_FILE_DIR, "SHORTCUTS.md")
         try:
             if os.path.exists(shortcuts_path):
-                os.startfile(shortcuts_path)
+                open_path(shortcuts_path)
                 self.update_status("Opened keyboard shortcuts documentation", "info")
             else:
                 self.update_status(f"Shortcuts file not found: {shortcuts_path}", "error")
@@ -1766,7 +1767,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 self.update_status(f"Created new note file: {note_filename}", "info")
 
             # Open the note file with default text editor
-            os.startfile(note_path)
+            open_path(note_path)
             self.update_status(f"Opened notes: {note_filename}", "info")
 
         except Exception as e:

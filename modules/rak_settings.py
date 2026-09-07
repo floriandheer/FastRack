@@ -21,6 +21,8 @@ def _get_appdata_path() -> Path:
     """Get the appropriate AppData path for the platform."""
     if sys.platform == "win32":
         return Path.home() / "AppData" / "Local" / "PipelineManager"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "PipelineManager"
     else:
         # WSL/Linux: use Windows user profile via /mnt/c
         windows_appdata = Path("/mnt/c/Users")
@@ -31,6 +33,83 @@ def _get_appdata_path() -> Path:
                 return user_path / "AppData" / "Local" / "PipelineManager"
         # Fallback to Linux standard location
         return Path.home() / ".local" / "share" / "PipelineManager"
+
+
+def _is_bare_drive_letter(value: str) -> bool:
+    """True if `value` is a Windows drive letter shorthand ('I' or 'I:'),
+    as opposed to a full path. Only meaningful on Windows - macOS/Linux have
+    no drive-letter concept, so a "work root" there is always a full path."""
+    if sys.platform != "win32" or not value:
+        return False
+    letter = value.rstrip(':')
+    return len(letter) == 1 and letter.isalpha()
+
+
+def join_native_path(base: str, *parts: str) -> str:
+    """Join a base path with subpath parts using the current OS's separator.
+
+    Plain os.path.join() mishandles a bare Windows drive letter: on Windows,
+    os.path.join("I:", "Visual") == "I:Visual" (drive-relative, no
+    separator), not "I:\\Visual" - because Python treats a 2-char drive
+    string as already having an implicit anchor. This normalizes that one
+    case before delegating to os.path.join, so callers never have to hand-rebuild
+    paths with a literal "\\" (which corrupts POSIX paths on macOS/Linux).
+    """
+    if _is_bare_drive_letter(base):
+        base = base + "\\"
+    return os.path.join(base, *parts) if parts else base
+
+
+def _normalize_user_path(path: str) -> str:
+    """Normalize a user-entered path's separators for the current OS.
+
+    Unlike the old ``path.replace('/', '\\\\')`` this never runs on
+    macOS/Linux, where it would otherwise mangle a genuine POSIX path
+    (e.g. "/Users/flori/work") into something invalid. An empty string
+    (meaning "unset - use the derived default") is passed through as-is
+    rather than becoming os.path.normpath's ".".
+    """
+    if not path:
+        return ""
+    if _is_bare_drive_letter(path):
+        return path.upper() if path.endswith(':') else path.upper() + ':'
+    return os.path.normpath(path)
+
+
+def _default_work_root() -> str:
+    """Default work root: a drive letter on Windows (mapped via VisualSubst
+    to active_base), or - since macOS/Linux have no drive-substitution
+    equivalent - the same real folder as the active base."""
+    if sys.platform == "win32":
+        return "I:"
+    return _default_active_base()
+
+
+def _default_active_base() -> str:
+    if sys.platform == "win32":
+        return "D:\\_work\\Active"
+    return str(Path.home() / "_work" / "Active")
+
+
+def _default_archive_base() -> str:
+    if sys.platform == "win32":
+        return "D:\\_work\\Archive"
+    return str(Path.home() / "_work" / "Archive")
+
+
+def _default_software_sync() -> Dict[str, str]:
+    if sys.platform == "win32":
+        return {
+            "nas_software_path": "D:\\_work\\_PIPELINE\\Software",
+            "mapped_software_path": "P:\\Software",
+            "launchers_base_path": "P:\\Launchers",
+        }
+    home = Path.home()
+    return {
+        "nas_software_path": "",
+        "mapped_software_path": str(home / "_work" / "Software"),
+        "launchers_base_path": str(home / "_work" / "Launchers"),
+    }
 
 
 def _load_setup_seed() -> Optional[Dict]:
@@ -84,8 +163,10 @@ class RakSettings:
     with support for drive validation and per-category configuration.
 
     Default configuration:
-    - Work drive: I:\\ (mapped via VisualSubst)
-    - Archive base: D:\\_work\\Archive
+    - Work root: I:\\ on Windows (mapped via VisualSubst to Active); the
+      Active base path directly on macOS/Linux, which have no drive-letter
+      substitution equivalent
+    - Archive base: D:\\_work\\Archive (or ~/_work/Archive off Windows)
 
     Categories and their default subpaths:
     - Visual: Visual/ (includes GD, CG, VJ subcategories)
@@ -100,9 +181,9 @@ class RakSettings:
     DEFAULT_CONFIG = {
         "version": "1.1.0",
         "drives": {
-            "work": "I:",
-            "active_base": "D:\\_work\\Active",
-            "archive_base": "D:\\_work\\Archive"
+            "work": _default_work_root(),
+            "active_base": _default_active_base(),
+            "archive_base": _default_archive_base()
         },
         "categories": {
             "Visual": {
@@ -172,11 +253,7 @@ class RakSettings:
             "renderer": "Forward+",
             "resolution": "1920x1080"
         },
-        "software_sync": {
-            "nas_software_path": "D:\\_work\\_PIPELINE\\Software",
-            "mapped_software_path": "P:\\Software",
-            "launchers_base_path": "P:\\Launchers"
-        },
+        "software_sync": _default_software_sync(),
         # Business / invoices — authoritative paths for InvoiceManager.
         # Empty strings mean "auto-derive" (see getters): boekhouding_base
         # falls back to <active_base>/_LIBRARY/Boekhouding, invoice_db_path
@@ -352,26 +429,27 @@ class RakSettings:
         self._save()
 
     def get_work_drive(self) -> str:
-        """Get the work drive letter (e.g., 'I:')."""
+        """Get the work root - a drive letter on Windows (e.g. 'I:'), or a
+        full path on macOS/Linux (no drive-substitution equivalent there)."""
         return self.config["drives"]["work"]
 
     def get_active_base(self) -> str:
         """Get the active base path (e.g., 'D:\\_work\\Active')."""
-        return self.config["drives"].get("active_base", "D:\\_work\\Active")
+        return self.config["drives"].get("active_base") or _default_active_base()
 
     def get_archive_base(self) -> str:
         """Get the archive base path (e.g., 'D:\\_work\\Archive')."""
-        return self.config["drives"]["archive_base"]
+        return self.config["drives"].get("archive_base") or _default_archive_base()
 
     def get_mapped_software_path(self) -> str:
         """Get the mapped drive path for software sync (e.g., 'P:\\Software')."""
         return self.config.get("software_sync", {}).get(
-            "mapped_software_path", "P:\\Software")
+            "mapped_software_path") or _default_software_sync()["mapped_software_path"]
 
     def get_launchers_base_path(self) -> str:
         """Get the base path for software launchers (e.g., 'D:\\_work\\_PIPELINE\\Launchers')."""
         return self.config.get("software_sync", {}).get(
-            "launchers_base_path", "D:\\_work\\_PIPELINE\\Launchers")
+            "launchers_base_path") or _default_software_sync()["launchers_base_path"]
 
     # ----- Business / invoices paths --------------------------------
 
@@ -389,7 +467,7 @@ class RakSettings:
         explicit = self.get_boekhouding_base_explicit()
         if explicit:
             return explicit
-        return f"{self.get_active_base()}\\_LIBRARY\\Boekhouding"
+        return join_native_path(self.get_active_base(), "_LIBRARY", "Boekhouding")
 
     def get_invoice_db_path(self) -> str:
         """Override path for the invoice registry SQLite DB.
@@ -420,7 +498,7 @@ class RakSettings:
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("work_subpath", category)
 
-        return f"{work_drive}\\{subpath}"
+        return join_native_path(work_drive, subpath)
 
     def get_active_path(self, category: str) -> str:
         """
@@ -436,7 +514,7 @@ class RakSettings:
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("work_subpath", category)
 
-        return f"{active_base}\\{subpath}"
+        return join_native_path(active_base, subpath)
 
     def get_archive_path(self, category: str) -> str:
         """
@@ -452,7 +530,7 @@ class RakSettings:
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("archive_subpath", category)
 
-        return f"{archive_base}\\{subpath}"
+        return join_native_path(archive_base, subpath)
 
     def get_category_config(self, category: str) -> Dict:
         """Get the full configuration for a category."""
@@ -482,19 +560,17 @@ class RakSettings:
 
     def set_work_drive(self, drive: str):
         """
-        Set the work drive letter.
+        Set the work root.
 
         Args:
-            drive: Drive letter (e.g., 'I:' or 'I')
+            drive: A drive letter on Windows (e.g. 'I:' or 'I'), or a full
+                path on macOS/Linux (e.g. '/Users/name/_work/Active').
         """
-        # Normalize to include colon
-        if not drive.endswith(':'):
-            drive = f"{drive}:"
-        drive = drive.upper()
+        drive = _normalize_user_path((drive or "").strip())
 
         self.config["drives"]["work"] = drive
         self._save()
-        logger.info(f"Work drive set to: {drive}")
+        logger.info(f"Work root set to: {drive}")
 
     def set_active_base(self, path: str):
         """
@@ -503,7 +579,7 @@ class RakSettings:
         Args:
             path: Active base path (e.g., 'D:\\_work\\Active')
         """
-        path = path.replace('/', '\\')
+        path = _normalize_user_path(path)
 
         self.config["drives"]["active_base"] = path
         self._save()
@@ -516,8 +592,7 @@ class RakSettings:
         Args:
             path: Archive base path (e.g., 'D:\\_work\\Archive')
         """
-        # Normalize path separators
-        path = path.replace('/', '\\')
+        path = _normalize_user_path(path)
 
         self.config["drives"]["archive_base"] = path
         self._save()
@@ -525,7 +600,7 @@ class RakSettings:
 
     def set_mapped_software_path(self, path: str):
         """Set the mapped drive path for software sync."""
-        path = path.replace('/', '\\')
+        path = _normalize_user_path(path)
         if "software_sync" not in self.config:
             self.config["software_sync"] = {}
         self.config["software_sync"]["mapped_software_path"] = path
@@ -534,7 +609,7 @@ class RakSettings:
 
     def set_launchers_base_path(self, path: str):
         """Set the base path for software launchers."""
-        path = path.replace('/', '\\')
+        path = _normalize_user_path(path)
         if "software_sync" not in self.config:
             self.config["software_sync"] = {}
         self.config["software_sync"]["launchers_base_path"] = path
@@ -544,7 +619,7 @@ class RakSettings:
     def set_boekhouding_base(self, path: str):
         """Set the bookkeeping root path. Empty string restores the
         derived default (<active_base>/_LIBRARY/Boekhouding)."""
-        path = (path or "").replace('/', '\\')
+        path = _normalize_user_path(path or "")
         if "business" not in self.config:
             self.config["business"] = {}
         self.config["business"]["boekhouding_base"] = path
@@ -553,7 +628,7 @@ class RakSettings:
 
     def set_invoice_db_path(self, path: str):
         """Set the invoice registry DB override. Empty restores default."""
-        path = (path or "").replace('/', '\\')
+        path = _normalize_user_path(path or "")
         if "business" not in self.config:
             self.config["business"] = {}
         self.config["business"]["invoice_db_path"] = path
@@ -562,7 +637,7 @@ class RakSettings:
 
     def set_soffice_path(self, path: str):
         """Set the LibreOffice soffice path. Empty restores autodetect."""
-        path = (path or "").replace('/', '\\')
+        path = _normalize_user_path(path or "")
         if "business" not in self.config:
             self.config["business"] = {}
         self.config["business"]["soffice_path"] = path
@@ -622,11 +697,21 @@ class RakSettings:
         Returns:
             Tuple of (is_valid, status_message)
         """
-        # Extract drive letter if full path given
+        if not drive_or_path:
+            return False, "No path configured"
+
+        # Extract drive letter if a "X:" / "X:\..." form was given.
         if len(drive_or_path) >= 2 and drive_or_path[1] == ':':
             drive = drive_or_path[:2].upper()
             check_path = drive_or_path
+        elif os.path.isabs(drive_or_path) or drive_or_path.startswith('\\\\'):
+            # A genuine full path with no drive-letter notation - a POSIX
+            # path on macOS/Linux, or a UNC share. Not a bare drive letter,
+            # so leave it untouched rather than mangling it as one below.
+            drive = None
+            check_path = drive_or_path
         else:
+            # Bare drive-letter shorthand, e.g. "I" (Windows-only concept).
             drive = drive_or_path.upper()
             if not drive.endswith(':'):
                 drive = f"{drive}:"
@@ -650,7 +735,7 @@ class RakSettings:
                     return False, f"Access error: {e}"
             else:
                 # Check if it's a subst/mapped drive that might not be mounted
-                is_subst = self._is_subst_drive(drive)
+                is_subst = drive is not None and self._is_subst_drive(drive)
                 if is_subst:
                     return False, "Mapped drive not mounted (VisualSubst)"
                 else:
@@ -728,6 +813,26 @@ class RakSettings:
 
     # ==================== UTILITIES ====================
 
+    @staticmethod
+    def _translate_prefix(path: str, from_base: str, to_base: str) -> str:
+        """If `path` lives under `from_base`, rewrite that prefix to `to_base`
+        (keeping the rest of the path unchanged); otherwise return `path` as-is.
+
+        Comparison and joining use the current OS's native separator -
+        forcing backslash unconditionally here used to corrupt POSIX paths
+        on macOS/Linux.
+        """
+        sep = '\\' if sys.platform == "win32" else '/'
+        other_sep = '/' if sep == '\\' else '\\'
+        normalized_path = path.replace(other_sep, sep)
+        normalized_base = from_base.replace(other_sep, sep)
+
+        if not normalized_base or not normalized_path.lower().startswith(normalized_base.lower()):
+            return path
+
+        relative = normalized_path[len(normalized_base):].lstrip(sep)
+        return join_native_path(to_base, relative) if relative else to_base
+
     def convert_to_work_drive_path(self, stored_path: str) -> str:
         """
         Convert a stored D:\\_work\\Active path to the configured work drive path.
@@ -741,33 +846,25 @@ class RakSettings:
         Returns:
             Path with work drive (e.g., 'I:\\Visual\\Project') or original if not applicable
         """
-        # The active base path that gets mapped
-        active_base = self.get_active_base()
+        return self._translate_prefix(stored_path, self.get_active_base(), self.get_work_drive())
 
-        # Normalize path separators for comparison
-        normalized_path = stored_path.replace('/', '\\')
-        normalized_base = active_base.replace('/', '\\')
+    def to_active_base_path(self, work_path: str) -> str:
+        """
+        The reverse of convert_to_work_drive_path: rewrite a work-drive path
+        to its underlying active-base path (e.g. 'I:\\Web\\site' ->
+        'D:\\_work\\Active\\Web\\site').
 
-        # Check if this is an active project path
-        if normalized_path.lower().startswith(normalized_base.lower()):
-            # Extract the relative path after D:\_work\Active
-            relative = normalized_path[len(normalized_base):]
-            if relative.startswith('\\'):
-                relative = relative[1:]
-
-            # Build new path with work drive
-            work_drive = self.get_work_drive()
-            if relative:
-                return f"{work_drive}\\{relative}"
-            else:
-                return work_drive
-
-        # Not an active path - return unchanged
-        return stored_path
+        Useful where tools misbehave against a subst-mapped drive (e.g.
+        npm/pnpm resolving symlinks under node_modules) and need the real
+        path instead. On macOS/Linux, work root and active base are the
+        same path by default, so this is typically a no-op there.
+        """
+        return self._translate_prefix(work_path, self.get_work_drive(), self.get_active_base())
 
     def reset_to_defaults(self):
         """Reset configuration to defaults."""
-        self.config = self.DEFAULT_CONFIG.copy()
+        import copy
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         self._save()
         logger.info("Configuration reset to defaults")
 

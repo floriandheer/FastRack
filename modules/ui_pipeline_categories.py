@@ -24,7 +24,7 @@ in pipeline_categories.py, not here.
 import os
 from typing import Dict, Any
 
-from rak_settings import get_rak_settings
+from rak_settings import get_rak_settings, join_native_path
 from pipeline_categories import CATEGORIES, creative_categories
 
 # Base script directory (relative to the main pipeline file)
@@ -46,9 +46,9 @@ def _resolve_folder_path(category_name: str, work_path_key) -> str:
     Sandbox uses the _Sandbox drive root (same root the Sandbox Browser panel
     shows), Global has no folder, others use settings.get_work_path(work_path_key)."""
     if category_name == "Business":
-        return get_rak_settings().get_work_drive() + "\\_LIBRARY"
+        return join_native_path(get_rak_settings().get_work_drive(), "_LIBRARY")
     if category_name == "Sandbox":
-        return get_rak_settings().get_work_drive() + "\\_Sandbox"
+        return join_native_path(get_rak_settings().get_work_drive(), "_Sandbox")
     if work_path_key is None:
         return ""
     return get_rak_settings().get_work_path(work_path_key)

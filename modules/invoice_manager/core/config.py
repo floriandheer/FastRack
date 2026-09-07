@@ -234,12 +234,15 @@ class GlobalInvoiceConfig:
         found = shutil.which("soffice") or shutil.which("soffice.exe")
         if found:
             return Path(found)
-        # Common Windows install locations (works from WSL via /mnt/c too)
+        # Common install locations per platform (Windows, WSL via /mnt/c,
+        # macOS .app bundle - not on PATH by default even when installed -
+        # and generic Linux).
         candidates = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
             "/mnt/c/Program Files/LibreOffice/program/soffice.exe",
             "/mnt/c/Program Files (x86)/LibreOffice/program/soffice.exe",
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
             "/usr/bin/soffice",
             "/usr/bin/libreoffice",
         ]

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
-from rak_settings import get_rak_settings
+from rak_settings import get_rak_settings, join_native_path
 
 logger = get_logger("laragon_workspace")
 
@@ -164,9 +164,9 @@ class JunctionManager:
         """Compute the target path on the work drive for a project."""
         work = get_rak_settings().get_work_drive()
         if category == "personal":
-            return f"{work}\\Web\\_Personal\\{project_name}\\02_Development"
+            return join_native_path(work, "Web", "_Personal", project_name, "02_Development")
         else:
-            return f"{work}\\Web\\{project_name}\\02_Development"
+            return join_native_path(work, "Web", project_name, "02_Development")
 
     @staticmethod
     def create_junction(project_name: str, www_path: str, target_path: str,

@@ -14,6 +14,7 @@ from typing import Optional
 
 from ui_theme import COLORS
 from sandbox_tag_store import SandboxTagStore
+from shared_open_path import open_path
 
 # Sentinel text for the lazy-load placeholder child inserted under every
 # unexpanded folder node, so the expand arrow shows without scanning the
@@ -337,11 +338,10 @@ class SandboxBrowserPanel(tk.Frame):
             else:
                 self.tree.item(iid, open=False)
         else:
-            try:
-                os.startfile(path)
+            if open_path(path):
                 self._notify(f"Opened: {os.path.basename(path)}", "info")
-            except OSError as e:
-                self._notify(f"Failed to open {path}: {e}", "error")
+            else:
+                self._notify(f"Failed to open {path}", "error")
 
     def _save_tags(self):
         path = self._selected_path()
@@ -377,7 +377,5 @@ class SandboxBrowserPanel(tk.Frame):
         self.tags_var.set(", ".join(current))
 
     def _open_in_explorer(self):
-        try:
-            os.startfile(self.root_path)
-        except OSError as e:
-            self._notify(f"Failed to open Explorer: {e}", "error")
+        if not open_path(self.root_path):
+            self._notify("Failed to open file browser", "error")
