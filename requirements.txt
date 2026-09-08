@@ -8,6 +8,7 @@
 
 # --- Core (always required) ---
 pillow>=10.0.0            # Image processing and logo display
+requests>=2.28.0          # WooCommerce order sync (invoice_manager.wc_bridge / wc_monitor)
 
 # --- Image metadata ---
 pyexiv2>=2.8.0            # EXIF metadata read/write for image scripts
