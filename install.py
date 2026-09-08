@@ -109,7 +109,10 @@ def step_header(num: int, total: int, text: str):
 
 
 def status(label: str, ok: bool, detail: str = "", warn: bool = False):
-    icon = (WARN if warn else CHECK) if ok else CROSS
+    # warn always wins: it means "not a failure, just worth noting" - a
+    # missing-but-optional tool (git, external tools) or a platform note
+    # shouldn't render as the same red [xx] as an actual failed check.
+    icon = WARN if warn else (CHECK if ok else CROSS)
     line = f"  {icon} {label}"
     if detail:
         line += f"  {dim(detail)}"
@@ -232,7 +235,8 @@ def step_prereq(opts) -> bool:
     # Platform
     is_windows = sys.platform == "win32"
     status("Windows", is_windows,
-           "drive mappings, shortcut, winget require Windows"
+           "not required - drive-letter mapping and the desktop shortcut "
+           "are skipped automatically, everything else works here too"
            if not is_windows else f"{sys.platform}",
            warn=not is_windows)
 
@@ -313,6 +317,7 @@ EXTERNAL_TOOLS = [
         "name": "FFmpeg",
         "exe": "ffmpeg",
         "winget_id": "Gyan.FFmpeg",
+        "brew_id": "ffmpeg",
         "url": "https://ffmpeg.org/download.html",
         "why": "audio conversion + format handling",
     },
@@ -320,6 +325,7 @@ EXTERNAL_TOOLS = [
         "name": "FLAC (metaflac)",
         "exe": "metaflac",
         "winget_id": "Xiph.Flac",
+        "brew_id": "flac",
         "url": "https://xiph.org/flac/download.html",
         "why": "writing iTunes playlist metadata into FLAC tags",
     },
@@ -327,6 +333,7 @@ EXTERNAL_TOOLS = [
         "name": "rclone",
         "exe": "rclone",
         "winget_id": "Rclone.Rclone",
+        "brew_id": "rclone",
         "url": "https://rclone.org/downloads/",
         "why": "cloud sync (OneDrive / Google Drive / etc.)",
         "local_fallback": SCRIPT_DIR / "tools" / "rclone" / "rclone.exe",
@@ -339,7 +346,12 @@ def step_externals(opts) -> bool:
     print(f"  {dim('Optional helpers used by specific pipeline scripts.')}")
     print()
 
-    winget_available = shutil.which("winget") is not None
+    if sys.platform == "win32":
+        pkg_manager = "winget" if shutil.which("winget") else None
+    elif sys.platform == "darwin":
+        pkg_manager = "brew" if shutil.which("brew") else None
+    else:
+        pkg_manager = None
 
     missing = []
     for tool in EXTERNAL_TOOLS:
@@ -363,24 +375,27 @@ def step_externals(opts) -> bool:
         return True
 
     print()
-    if not winget_available:
-        print(f"  {WARN} winget not found - cannot auto-install.")
+    if not pkg_manager:
+        hint = {"win32": "winget", "darwin": "brew"}.get(sys.platform, "a package manager")
+        print(f"  {WARN} {hint} not found - cannot auto-install.")
         print(f"  {dim('Download each missing tool from its homepage:')}")
         for t in missing:
             print(f"    {BULLET}{t['name']:<18} {cyn(t['url'])}")
         return True  # not fatal
 
-    print(f"  {ARROW} winget can install these for you:")
+    print(f"  {ARROW} {pkg_manager} can install these for you:")
     for t in missing:
-        print(f"    {BULLET}{t['name']:<18} {dim('winget install --id ' + t['winget_id'])}")
+        cmd_hint = (f"winget install --id {t['winget_id']}" if pkg_manager == "winget"
+                    else f"brew install {t['brew_id']}")
+        print(f"    {BULLET}{t['name']:<18} {dim(cmd_hint)}")
 
     print()
-    if not confirm(f"Install {len(missing)} missing tool(s) via winget?", opts.yes, default_yes=True):
+    if not confirm(f"Install {len(missing)} missing tool(s) via {pkg_manager}?", opts.yes, default_yes=True):
         print(f"  {dim('Skipped. Install manually later if you need those scripts.')}")
         return True
 
     if opts.dry_run:
-        print(f"  {dim('[dry-run] would install via winget')}")
+        print(f"  {dim('[dry-run] would install via ' + pkg_manager)}")
         return True
 
     failed = []
@@ -388,24 +403,29 @@ def step_externals(opts) -> bool:
         print()
         print(f"  {ARROW} Installing {bold(t['name'])} {DOTS}")
         try:
-            subprocess.run(
-                ["winget", "install", "--id", t["winget_id"],
-                 "--accept-source-agreements", "--accept-package-agreements",
-                 "--silent"],
-                check=True,
-            )
+            if pkg_manager == "winget":
+                subprocess.run(
+                    ["winget", "install", "--id", t["winget_id"],
+                     "--accept-source-agreements", "--accept-package-agreements",
+                     "--silent"],
+                    check=True,
+                )
+            else:
+                subprocess.run(["brew", "install", t["brew_id"]], check=True)
             print(f"     {CHECK} {t['name']}")
         except subprocess.CalledProcessError:
             print(f"     {CROSS} {t['name']} - install via {cyn(t['url'])}")
             failed.append(t)
 
-    # Tools just got added to the system PATH — pick that up in-process
-    # so the doctor step (and any later shutil.which call) sees them
-    # without waiting for a shell restart.
-    try:
-        _import_workstation_apps().refresh_path_from_registry()
-    except Exception:
-        pass
+    # Tools just got added to PATH — refresh in-process so the doctor step
+    # (and any later shutil.which call) sees them without a shell restart.
+    # Windows-only mechanism (registry-based PATH); brew's symlinks under
+    # /usr/local or /opt/homebrew are already visible to a fresh which().
+    if pkg_manager == "winget":
+        try:
+            _import_workstation_apps().refresh_path_from_registry()
+        except Exception:
+            pass
 
     if failed:
         print()

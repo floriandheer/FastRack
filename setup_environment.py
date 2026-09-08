@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Florian Dheer Pipeline - Environment Setup Script
--------------------------------------------------
+Fastrak - Environment Setup Script
+-----------------------------------
 Automates pipeline environment provisioning: folder creation, subst drive
 mappings with registry persistence, Synology Drive status checks, and
 pipeline config generation.
@@ -151,12 +151,14 @@ def step_prerequisites(cfg: dict) -> bool:
 
     ok = True
 
-    # Platform
-    if sys.platform != "win32":
-        print("  ERROR: This script must be run on Windows (not WSL/Linux).")
-        print("         Drive mappings and registry entries require native Windows.")
-        return False
-    status_line("Platform", True, "Windows")
+    # Platform (informational only). Steps that need Windows-only mechanics
+    # (drive-letter subst, registry persistence, the Windows shortcut) skip
+    # themselves individually below - this no longer blocks the rest of setup.
+    is_windows = sys.platform == "win32"
+    status_line("Platform", True, sys.platform)
+    if not is_windows:
+        print("  Drive-letter mapping, registry persistence, and the Windows")
+        print("  shortcut have no macOS/Linux equivalent and will be skipped.")
 
     # Python version
     ver = sys.version_info
@@ -184,15 +186,40 @@ def step_prerequisites(cfg: dict) -> bool:
 # Step 2: Folder Structure
 # ============================================================
 
+def _looks_like_windows_path(path: str) -> bool:
+    """True for a drive-letter ('D:\\...') or backslash-style path - the
+    shape every path in setup_config.json.example currently uses. Meaningless
+    (and not safely creatable) on macOS/Linux."""
+    return (len(path) >= 2 and path[1] == ':') or '\\' in path
+
+
 def step_folders(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
     """Create folder structure from config."""
     banner("Step 2: Folder Structure")
 
     fs = cfg["folder_structure"]
-    bases = fs.get("bases", [])
     categories = fs.get("categories", [])
     subcategories = fs.get("subcategories", {})
     extra_dirs = fs.get("extra_dirs", [])
+
+    if sys.platform == "win32":
+        bases = fs.get("bases", [])
+    else:
+        # setup_config.json.example's bases are Windows-only paths
+        # (D:\_work\...). Off Windows, build the same structure under
+        # rak_settings' own platform-aware defaults instead (e.g.
+        # ~/_work/Active) rather than trying to create a literal
+        # "D:\_work\Active"-named folder.
+        try:
+            from rak_settings import RakSettings
+            settings = RakSettings()
+            bases = [settings.get_active_base(), settings.get_archive_base()]
+            print(f"  Non-Windows: using platform defaults instead of setup_config.json's paths:")
+            for b in bases:
+                print(f"    {b}")
+        except Exception as e:
+            print(f"  ERROR: could not resolve default folders: {e}")
+            return False
 
     # Build full list of directories
     dirs_to_create = []
@@ -205,8 +232,14 @@ def step_folders(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
             for sub in subcategories.get(cat, []):
                 dirs_to_create.append(os.path.join(cat_path, sub))
 
+    skipped_extra = 0
     for d in extra_dirs:
+        if sys.platform != "win32" and _looks_like_windows_path(d):
+            skipped_extra += 1
+            continue
         dirs_to_create.append(d)
+    if skipped_extra:
+        print(f"  Skipping {skipped_extra} Windows-only extra folder(s) from setup_config.json.")
 
     # Check status
     existing = []
@@ -259,6 +292,10 @@ def step_folders(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
 def step_drives(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
     """Set up subst drive mappings and registry autorun entries."""
     banner("Step 3: Drive Mappings (subst + Registry)")
+
+    if sys.platform != "win32":
+        print("  Skipping (Windows-only - drive letters have no macOS/Linux equivalent).")
+        return True
 
     mappings = cfg.get("drive_mappings", [])
     if not mappings:
@@ -505,6 +542,11 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
     """
     banner("Step 4: Synology Drive Check")
 
+    if sys.platform != "win32":
+        print("  Skipping the automated check (this detection is Windows-only for now).")
+        print("  Synology Drive Client for Mac: https://www.synology.com/en-global/dsm/feature/drive")
+        return True
+
     sd_cfg = cfg.get("synology_drive", {})
     conn = sd_cfg.get("connection", {}) or {}
     sync_folders = sd_cfg.get("sync_folders", [])
@@ -629,6 +671,16 @@ def step_config(cfg: dict, dry_run: bool) -> bool:
 
     pc = cfg.get("pipeline_config", {})
 
+    if sys.platform != "win32":
+        # setup_config.json.example's pipeline_config values are Windows
+        # drive letters / D:\ paths - meaningless (and would corrupt the
+        # config) off Windows. Skip applying them and let RakSettings' own
+        # platform-aware defaults (~/_work/Active etc.) stand; paths can
+        # still be customized anytime via Settings (Ctrl+,).
+        print("  Non-Windows: skipping setup_config.json's Windows-specific")
+        print("  path overrides - using platform defaults instead.")
+        pc = {}
+
     if dry_run:
         print("  [DRY RUN] Would apply the following settings:")
         for key, val in pc.items():
@@ -745,11 +797,19 @@ def final_report(results: dict):
         print("\n  All steps completed successfully.")
 
     print("\n  Manual steps remaining:")
-    print("    1. Create Synology Drive sync tasks (if not done)")
-    print("    2. Reboot to verify drive persistence via registry")
-    print("    3. Launch Pipeline Manager and verify paths in Settings (Ctrl+,)")
-    print("    4. In Pipeline Manager > Settings, run 'Install Dependencies'")
-    print("       and 'Create Shortcut' if not already done.")
+    step_num = 1
+    print(f"    {step_num}. Create Synology Drive sync tasks (if not done)")
+    step_num += 1
+    if sys.platform == "win32":
+        print(f"    {step_num}. Reboot to verify drive persistence via registry")
+        step_num += 1
+    print(f"    {step_num}. Launch Pipeline Manager and verify paths in Settings (Ctrl+,)")
+    step_num += 1
+    if sys.platform == "win32":
+        print(f"    {step_num}. In Pipeline Manager > Settings, run 'Install Dependencies'")
+        print("       and 'Create Shortcut' if not already done.")
+    else:
+        print(f"    {step_num}. In Pipeline Manager > Settings, run 'Install Dependencies' if not already done.")
 
 
 # ============================================================
@@ -758,7 +818,7 @@ def final_report(results: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Florian Dheer Pipeline - Environment Setup"
+        description="Fastrak - Environment Setup"
     )
     parser.add_argument(
         "--config", default="./setup_config.json",
@@ -784,7 +844,7 @@ def main():
 
     # Banner
     print("=" * BANNER_WIDTH)
-    print("  Florian Dheer Pipeline - Environment Setup")
+    print("  Fastrak - Environment Setup")
     print("=" * BANNER_WIDTH)
     print(f"  Python:  {sys.version.split()[0]}")
     print(f"  Config:  {args.config}")
