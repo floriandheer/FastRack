@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Florian Dheer Pipeline - Friendly First-Run Installer
------------------------------------------------------
+Fastrak - Friendly First-Run Installer
+---------------------------------------
 A single command that takes a brand-new machine to a working Pipeline Hub.
 
 It walks you through seven small steps, asks before touching anything, and
@@ -42,7 +42,7 @@ from typing import Callable, Iterable
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-APP_NAME = "Florian Dheer Pipeline"
+APP_NAME = "Fastrak"
 STEPS = ("prereq", "deps", "externals", "env", "apps", "shortcut", "doctor")
 TOTAL_STEPS = 7
 
@@ -1140,10 +1140,10 @@ def step_doctor(opts) -> bool:
 # ============================================================
 
 def welcome():
-    title_box(f"Welcome to {APP_NAME}")
+    title_box(APP_NAME)
     print()
-    print(f"  This installer takes you from a fresh machine to a working")
-    print(f"  {bold('Pipeline Hub')} in seven small steps:")
+    print(f"  This installer helps to provide you with a pipeline compatible")
+    print(f"  machine in {TOTAL_STEPS} steps:")
     print()
     print(f"    {cyn('1.')} Prerequisites      {dim('Python, pip, git')}")
     print(f"    {cyn('2.')} Python packages    {dim('pillow, pdfplumber, invoice2data, ...')}")
@@ -1154,8 +1154,7 @@ def welcome():
     print(f"    {cyn('7.')} Doctor             {dim('verify everything works')}")
     print()
     print(f"  {dim('Every step asks before touching anything. Safe to re-run.')}")
-    print(f"  {dim('Tip: pass --yes / --unattended (or press A at the start prompt)')}")
-    print(f"  {dim('     to accept every prompt automatically.')}")
+    print(f"  {dim('Tip: press A at the start prompt to accept every prompt automatically.')}")
     print()
 
 
