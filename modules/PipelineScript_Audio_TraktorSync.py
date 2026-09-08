@@ -297,7 +297,7 @@ class PlaylistSyncUI:
         self._itunes_autoload_after_id = None
         self._loaded_xml_path = None
         self._loaded_xml_mtime = None
-        self.itunes_xml_var.trace('w', lambda *args: self._schedule_autoload_playlists())
+        self.itunes_xml_var.trace_add('write', lambda *args: self._schedule_autoload_playlists())
         ttk.Entry(config_frame, textvariable=self.itunes_xml_var, width=50).grid(row=current_row, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(config_frame, text="Browse", command=self.browse_itunes_xml).grid(row=current_row, column=2, padx=5, pady=10)
 
@@ -316,7 +316,7 @@ class PlaylistSyncUI:
         # DJ Library path (destination)
         ttk.Label(config_frame, text="DJ Library Folder:").grid(row=current_row, column=0, sticky="w", padx=10, pady=10)
         self.dj_library_var = tk.StringVar()
-        self.dj_library_var.trace('w', lambda *args: self.recalculate_new_tracks_if_loaded())
+        self.dj_library_var.trace_add('write', lambda *args: self.recalculate_new_tracks_if_loaded())
         ttk.Entry(config_frame, textvariable=self.dj_library_var, width=50).grid(row=current_row, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(config_frame, text="Browse", command=self.browse_dj_library).grid(row=current_row, column=2, padx=5, pady=10)
 
@@ -370,7 +370,7 @@ class PlaylistSyncUI:
         
         ttk.Label(filter_frame, text="Filter:").grid(row=0, column=0, sticky="w", padx=5)
         self.filter_var = tk.StringVar()
-        self.filter_var.trace('w', self.filter_playlists)
+        self.filter_var.trace_add('write', self.filter_playlists)
         ttk.Entry(filter_frame, textvariable=self.filter_var).grid(row=0, column=1, sticky="ew", padx=5)
         
         # Selection summary label

@@ -672,7 +672,7 @@ class PowerAmpSyncApp:
         self._itunes_autoload_after_id = None
         self._loaded_xml_path = None
         self._loaded_xml_mtime = None
-        self.itunes_xml_var.trace('w', lambda *args: self._schedule_autoload_playlists())
+        self.itunes_xml_var.trace_add('write', lambda *args: self._schedule_autoload_playlists())
         ttk.Entry(config_frame, textvariable=self.itunes_xml_var, width=50).grid(row=current_row, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(config_frame, text="Browse", command=self._browse_itunes_xml).grid(row=current_row, column=2, padx=5, pady=10)
 
@@ -774,7 +774,7 @@ class PowerAmpSyncApp:
 
         ttk.Label(filter_frame, text="Filter:").grid(row=0, column=0, sticky="w", padx=5)
         self.filter_var = tk.StringVar()
-        self.filter_var.trace('w', self._filter_playlists)
+        self.filter_var.trace_add('write', self._filter_playlists)
         ttk.Entry(filter_frame, textvariable=self.filter_var).grid(row=0, column=1, sticky="ew", padx=5)
 
         self.selection_summary = tk.StringVar(value="No playlists loaded")

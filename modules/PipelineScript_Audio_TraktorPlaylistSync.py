@@ -444,7 +444,7 @@ def pick_from_list(parent, title: str, items: List[str]) -> Optional[str]:
             if not needle or needle in item.lower():
                 listbox.insert(tk.END, item)
 
-    filter_var.trace('w', refresh)
+    filter_var.trace_add('write', refresh)
     refresh()
 
     def confirm(*_args):
@@ -668,7 +668,7 @@ class TraktorPlaylistSyncUI:
 
         ttk.Label(source_frame, text="collection.nml:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         self.nml_path_var = tk.StringVar()
-        self.nml_path_var.trace('w', lambda *a: self._schedule_autoload())
+        self.nml_path_var.trace_add('write', lambda *a: self._schedule_autoload())
         ttk.Entry(source_frame, textvariable=self.nml_path_var, width=55).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(source_frame, text="Browse", command=self._browse_nml).grid(row=0, column=2, padx=5, pady=10)
         ttk.Button(source_frame, text="Reload", command=lambda: self._load_nml(silent=False)).grid(row=0, column=3, padx=(0, 10), pady=10)
@@ -736,7 +736,7 @@ class TraktorPlaylistSyncUI:
         filter_frame.columnconfigure(1, weight=1)
         ttk.Label(filter_frame, text="Filter:").grid(row=0, column=0, sticky="w", padx=5)
         self.filter_var = tk.StringVar()
-        self.filter_var.trace('w', self._filter_playlists)
+        self.filter_var.trace_add('write', self._filter_playlists)
         ttk.Entry(filter_frame, textvariable=self.filter_var).grid(row=0, column=1, sticky="ew", padx=5)
         self.selection_summary = tk.StringVar(value="No playlists loaded")
         ttk.Label(filter_frame, textvariable=self.selection_summary, font=("Arial", 9), foreground="blue").grid(

@@ -1228,7 +1228,7 @@ class ProjectTrackerApp:
 
         # Search query
         self.search_query = tk.StringVar()
-        self.search_query.trace('w', self._on_search_changed)
+        self.search_query.trace_add('write', self._on_search_changed)
 
         # Category buttons storage
         self.category_buttons = {}
