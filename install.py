@@ -232,13 +232,27 @@ def step_prereq(opts) -> bool:
            "optional - used for updates" if git_path is None else git_path,
            warn=git_path is None)
 
-    # Platform
-    is_windows = sys.platform == "win32"
-    status("Windows", is_windows,
-           "not required - drive-letter mapping and the desktop shortcut "
-           "are skipped automatically, everything else works here too"
-           if not is_windows else f"{sys.platform}",
-           warn=not is_windows)
+    # Platform + its native package manager (step 3 uses this to auto-install
+    # FFmpeg/FLAC/rclone). Only checks the manager relevant to the platform
+    # actually running this - Windows isn't "required" when you're on a Mac,
+    # it's simply not the platform, so it isn't listed as if it were missing.
+    platform_names = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
+    status("Platform", True, platform_names.get(sys.platform, sys.platform))
+
+    if sys.platform == "win32":
+        winget_path = shutil.which("winget")
+        status("winget", winget_path is not None,
+               winget_path or "not found - step 3 will link to manual downloads instead",
+               warn=winget_path is None)
+    elif sys.platform == "darwin":
+        brew_path = shutil.which("brew")
+        status("Homebrew", brew_path is not None,
+               brew_path or "not found - install from https://brew.sh, or step 3 will "
+               "link to manual downloads instead",
+               warn=brew_path is None)
+    else:
+        print(f"  {dim('No auto-install package manager configured for Linux yet -')}")
+        print(f"  {dim('step 3 will link to manual downloads instead.')}")
 
     return ok
 
