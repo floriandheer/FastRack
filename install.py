@@ -602,6 +602,15 @@ def step_apps(opts) -> bool:
             print(f"  {dim('No workstation_apps configured in setup_config.json. Skipping.')}")
             return True
 
+    # Drop apps with no build for this platform at all (e.g. WizTree,
+    # WinSCP - Windows-only, no Mac/Linux equivalent exists) so they don't
+    # sit there forever as "missing" with a download link that can never
+    # resolve here.
+    hidden = len(all_apps) - len(wa.apps_for_platform(all_apps))
+    all_apps = wa.apps_for_platform(all_apps)
+    if hidden:
+        print(f"  {dim(f'{hidden} app(s) not available on this platform - hidden.')}")
+
     # Bust the installed-programs cache so we re-scan the registry
     # every time this step runs (otherwise apps installed by an earlier
     # run of this same step show up as still missing).
@@ -680,8 +689,7 @@ def _print_apps_status(wa, apps, skip_set):
                 detail = a.why or ""
                 status(a.name, True, detail)
             else:
-                method = "winget" if a.install_method == "winget" else "manual"
-                status(a.name, False, f"missing ({method}) - {a.why}", warn=True)
+                status(a.name, False, f"missing ({a.effective_method()}) - {a.why}", warn=True)
 
 
 _PICKER_BACK = object()  # sub-picker sentinel → return to top menu
@@ -738,8 +746,7 @@ def _confirm_picker_selection(apps) -> bool:
     print()
     print(f"  {ARROW} You picked {bold(str(len(apps)))} app(s):")
     for a in apps:
-        method = "winget" if a.install_method == "winget" else "manual"
-        print(f"    {BULLET}{a.name:<22} {dim(f'[{method}] {a.why}')}")
+        print(f"    {BULLET}{a.name:<22} {dim(f'[{a.effective_method()}] {a.why}')}")
     print()
     answer = input(
         "  Install these? [Y]es / [N]o (back to menu): "
@@ -787,8 +794,7 @@ def _pick_individual(missing):
     print()
     print(f"  {ARROW} Missing apps:")
     for idx, a in enumerate(missing, 1):
-        method = "winget" if a.install_method == "winget" else "manual"
-        print(f"    {cyn(str(idx))}. {a.name:<22} {dim(f'[{a.category}/{method}] {a.why}')}")
+        print(f"    {cyn(str(idx))}. {a.name:<22} {dim(f'[{a.category}/{a.effective_method()}] {a.why}')}")
     print(f"    {dim('Comma-separated numbers (e.g. 1,3,5), A for all, B / Enter to go back:')}")
     raw = input("  > ").strip().lower()
     if not raw or raw in ("b", "back"):
@@ -832,33 +838,42 @@ def _pick_by_profile(wa, all_apps, missing):
 
 def _install_set(wa, target, opts, label: str,
                  force_yes: bool = False) -> bool:
-    """Run installs for one set of apps. Winget apps via winget, manual
-    apps via 'open download URL' (CLI prints the URL and offers to open).
+    """Run installs for one set of apps. Package-manager-eligible apps
+    (winget on Windows, brew on macOS) go through that manager; everything
+    else is 'open download URL' (CLI prints the URL and offers to open).
 
     ``force_yes`` suppresses the per-set confirmation prompt — used by
     the General auto-install path so the universal apps install without
     any extra clicks even in interactive mode.
     """
     auto_yes = opts.yes or force_yes
-    winget_targets = [a for a in target if a.install_method == "winget"]
-    manual_targets = [a for a in target if a.install_method != "winget"]
+    pkg_targets = [a for a in target if a.effective_method() in ("winget", "brew")]
+    manual_targets = [a for a in target if a.effective_method() not in ("winget", "brew")]
 
-    # Winget block
-    if winget_targets:
-        if not wa.winget_available():
+    # Package-manager block (winget on Windows, brew on macOS - both apps
+    # in pkg_targets share one method since effective_method() only
+    # depends on the current platform, not the individual app).
+    if pkg_targets:
+        method = pkg_targets[0].effective_method()
+        manager_available = wa.winget_available() if method == "winget" else wa.brew_available()
+        if not manager_available:
             print()
-            print(f"  {WARN} winget not found - cannot auto-install these:")
-            for a in winget_targets:
+            print(f"  {WARN} {method} not found - cannot auto-install these:")
+            for a in pkg_targets:
                 print(f"    {BULLET}{a.name:<22} {cyn(a.url)}")
         else:
             print()
-            print(f"  {ARROW} winget will install ({label}):")
-            for a in winget_targets:
-                print(f"    {BULLET}{a.name:<22} {dim('winget install --id ' + (a.winget_id or ''))}")
+            print(f"  {ARROW} {method} will install ({label}):")
+            for a in pkg_targets:
+                if method == "winget":
+                    cmd_hint = "winget install --id " + (a.winget_id or "")
+                else:
+                    cmd_hint = "brew install " + ("--cask " if a.brew_cask else "") + (a.brew_id or "")
+                print(f"    {BULLET}{a.name:<22} {dim(cmd_hint)}")
             print()
-            if confirm(f"Install {len(winget_targets)} app(s) via winget?",
+            if confirm(f"Install {len(pkg_targets)} app(s) via {method}?",
                        auto_yes, default_yes=True):
-                for a in winget_targets:
+                for a in pkg_targets:
                     print()
                     print(f"  {ARROW} Installing {bold(a.name)} {DOTS}")
                     result = wa.install_app(a, dry_run=opts.dry_run)
@@ -881,7 +896,7 @@ def _install_set(wa, target, opts, label: str,
     # what "unattended" means.
     if manual_targets:
         print()
-        print(f"  {ARROW} Manual installs (license-gated or no winget):")
+        print(f"  {ARROW} Manual installs (license-gated or no auto-installer):")
         for a in manual_targets:
             print(f"    {BULLET}{a.name:<22} {cyn(a.url)}")
         if not opts.yes:
@@ -1012,13 +1027,18 @@ def _offer_skip(wa, app, opts):
 def step_shortcut(opts) -> bool:
     step_header(6, TOTAL_STEPS, "Desktop shortcut")
 
-    if sys.platform != "win32":
-        status("shortcut", True, "skipped - Windows only", warn=True)
+    if sys.platform == "win32":
+        target = SCRIPT_DIR / "Fastrak.lnk"
+        label = "Fastrak.lnk"
+    elif sys.platform == "darwin":
+        target = SCRIPT_DIR / "Fastrak.app"
+        label = "Fastrak.app"
+    else:
+        status("shortcut", True, "skipped - no launcher generator for this platform yet", warn=True)
         return True
 
-    target = SCRIPT_DIR / "Fastrak.lnk"
     if target.exists():
-        status("Fastrak.lnk", True, str(target))
+        status(label, True, str(target))
         if not confirm("Re-generate the shortcut anyway?", opts.yes, default_yes=False):
             return True
 
@@ -1026,7 +1046,7 @@ def step_shortcut(opts) -> bool:
         print(f"  {dim('[dry-run] would run make_shortcut.py')}")
         return True
 
-    if not confirm("Create Fastrak.lnk next to fastrak_hub.py?", opts.yes, default_yes=True):
+    if not confirm(f"Create {label} next to fastrak_hub.py?", opts.yes, default_yes=True):
         print(f"  {dim('Skipped.')}")
         return True
 
@@ -1037,7 +1057,11 @@ def step_shortcut(opts) -> bool:
         return False
 
     print()
-    print(f"  {ARROW} Right-click {bold('Fastrak.lnk')} -> {cyn('Pin to taskbar')} (or Start menu)")
+    if sys.platform == "win32":
+        print(f"  {ARROW} Right-click {bold('Fastrak.lnk')} -> {cyn('Pin to taskbar')} (or Start menu)")
+    else:
+        print(f"  {ARROW} Drag {bold('Fastrak.app')} to the Dock, or double-click it from Finder.")
+        print(f"  {dim('First launch: right-click -> Open (unsigned app, one-time Gatekeeper approval).')}")
     return True
 
 

@@ -267,14 +267,14 @@ class SettingsDialog:
             setup_section,
             text=(
                 "Install Dependencies: runs install_dependencies.py via pip in a new console.\n"
-                "Create Shortcut: regenerates Fastrak.lnk next to fastrak_hub.py.\n"
-                "Environment Setup steps (all run in a new console; Windows only):\n"
+                "Create Shortcut: regenerates Fastrak.lnk (Windows) or Fastrak.app (macOS).\n"
+                "Environment Setup steps (all run in a new console):\n"
                 "  Run All  - everything below in one pass\n"
                 "  Folders  - create Active/Archive/category dirs from setup_config.json\n"
-                "  Drives   - subst mappings + HKCU autorun + Explorer drive labels\n"
-                "  Synology - check Drive Client install + sync folder status\n"
+                "  Drives   - subst mappings + HKCU autorun + Explorer drive labels (Windows only)\n"
+                "  Synology - check Drive Client install + sync folder status (Windows only)\n"
                 "  Config   - generate/update rak_config.json from setup_config.json\n"
-                "  Startup  - deploy startup-apps launcher + scheduled task"
+                "  Startup  - deploy startup-apps launcher + scheduled task (Windows only)"
             ),
             font=font.Font(family="Segoe UI", size=9, slant="italic"),
             fg=COLORS["text_secondary"],
@@ -355,15 +355,6 @@ class SettingsDialog:
         """Launch setup_environment.py in a new console window, optionally
         scoped to a single step. ``step`` is one of "all" or any value in
         setup_environment.STEPS."""
-        if sys.platform != "win32":
-            messagebox.showwarning(
-                "Windows Only",
-                "Environment Setup requires native Windows (drive mappings, registry).\n"
-                "Run it from a Windows command prompt instead.",
-                parent=self.dialog,
-            )
-            return
-
         project_root = self._project_root()
         script_path = os.path.join(project_root, "setup_environment.py")
 
@@ -391,17 +382,19 @@ class SettingsDialog:
             return
 
         exe = self._console_python()
-        cmd = ["cmd", "/k", exe, script_path]
-        if step != "all":
-            cmd += ["--step", step]
+        extra_args = ["--step", step] if step != "all" else []
         try:
-            # Wrap with `cmd /k` so the console stays open after the script exits,
-            # even if it fails fast (otherwise the window closes before you can read it).
-            subprocess.Popen(
-                cmd,
-                cwd=project_root,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
+            if sys.platform == "win32":
+                # Wrap with `cmd /k` so the console stays open after the script
+                # exits, even if it fails fast (otherwise the window closes
+                # before you can read it).
+                subprocess.Popen(
+                    ["cmd", "/k", exe, script_path] + extra_args,
+                    cwd=project_root,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+            else:
+                subprocess.Popen([exe, script_path] + extra_args, cwd=project_root)
             logger.info("Launched setup_environment.py (step=%s) in new console", step)
         except Exception as e:
             logger.exception("Failed to launch setup_environment.py")
@@ -455,17 +448,19 @@ class SettingsDialog:
             )
 
     def _create_shortcut(self):
-        """Run make_shortcut.py to (re)generate Fastrak.lnk."""
-        if sys.platform != "win32":
+        """Run make_shortcut.py to (re)generate the desktop launcher
+        (Fastrak.lnk on Windows, Fastrak.app on macOS)."""
+        if sys.platform not in ("win32", "darwin"):
             messagebox.showwarning(
-                "Windows Only",
-                "Shortcut creation is Windows-only (uses WScript.Shell).",
+                "Not Supported",
+                "No desktop-shortcut generator for this platform yet.",
                 parent=self.dialog,
             )
             return
 
         project_root = self._project_root()
         script_path = os.path.join(project_root, "make_shortcut.py")
+        shortcut_name = "Fastrak.lnk" if sys.platform == "win32" else "Fastrak.app"
 
         if not os.path.isfile(script_path):
             messagebox.showerror(
@@ -475,11 +470,11 @@ class SettingsDialog:
             )
             return
 
-        shortcut_path = os.path.join(project_root, "Fastrak.lnk")
+        shortcut_path = os.path.join(project_root, shortcut_name)
         if os.path.exists(shortcut_path):
             if not messagebox.askyesno(
                 "Regenerate Shortcut?",
-                f"Fastrak.lnk already exists in:\n{project_root}\n\nReplace it?",
+                f"{shortcut_name} already exists in:\n{project_root}\n\nReplace it?",
                 parent=self.dialog,
             ):
                 return
@@ -511,10 +506,13 @@ class SettingsDialog:
 
         if result.returncode == 0:
             logger.info("Shortcut created: %s", shortcut_path)
+            tip = ("Right-click it and choose 'Pin to taskbar' or 'Pin to Start'."
+                   if sys.platform == "win32" else
+                   "Drag it to the Dock, or double-click from Finder (first launch "
+                   "needs right-click -> Open, since it's unsigned).")
             messagebox.showinfo(
                 "Shortcut Created",
-                f"Fastrak.lnk created at:\n{shortcut_path}\n\n"
-                "Right-click it and choose 'Pin to taskbar' or 'Pin to Start'.",
+                f"{shortcut_name} created at:\n{shortcut_path}\n\n{tip}",
                 parent=self.dialog,
             )
         else:
@@ -2524,14 +2522,10 @@ class SettingsDialog:
             )
 
     def _apps_install_missing_console(self):
-        """Hand off to install.py --step apps for the full picker UI."""
-        if sys.platform != "win32":
-            messagebox.showwarning(
-                "Windows Only",
-                "The interactive installer requires Windows.",
-                parent=self.dialog,
-            )
-            return
+        """Hand off to install.py --step apps for the full picker UI. Needs a
+        real, visible, interactive terminal (the picker reads input()) - a
+        plain background Popen on macOS/Linux would inherit no usable stdin
+        and just hang, so each platform opens its own kind of console."""
         project_root = self._project_root()
         script_path = os.path.join(project_root, "install.py")
         if not os.path.isfile(script_path):
@@ -2543,11 +2537,34 @@ class SettingsDialog:
             return
         exe = self._console_python()
         try:
-            subprocess.Popen(
-                ["cmd", "/k", exe, script_path, "--step", "apps"],
-                cwd=project_root,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
+            if sys.platform == "win32":
+                subprocess.Popen(
+                    ["cmd", "/k", exe, script_path, "--step", "apps"],
+                    cwd=project_root,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+            elif sys.platform == "darwin":
+                import shlex
+                import tempfile
+                script_body = (
+                    "#!/bin/bash\n"
+                    f"cd {shlex.quote(project_root)}\n"
+                    f"{shlex.quote(exe)} {shlex.quote(script_path)} --step apps\n"
+                    'echo\necho "Press Enter to close..."\nread\n'
+                )
+                fd, tmp_path = tempfile.mkstemp(suffix=".command")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(script_body)
+                os.chmod(tmp_path, 0o755)
+                subprocess.Popen(["open", tmp_path])
+            else:
+                messagebox.showwarning(
+                    "Not Supported",
+                    "No interactive-console launcher for this platform yet.\n"
+                    f"Run manually: {exe} {script_path} --step apps",
+                    parent=self.dialog,
+                )
+                return
             logger.info("Launched install.py --step apps in new console")
         except Exception as e:
             logger.exception("Failed to launch install.py")

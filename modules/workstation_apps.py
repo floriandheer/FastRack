@@ -34,6 +34,7 @@ STATE_PATH = _SCRIPT_DIR / "setup_apps_state.json"
 
 DEFAULT_CATEGORY = "General"
 WINGET = "winget"
+BREW = "brew"
 MANUAL = "manual"
 
 
@@ -50,8 +51,15 @@ class App:
     # under each in the picker / status table but is only ever installed
     # once (callers dedupe by name).
     categories: list[str] = field(default_factory=lambda: [DEFAULT_CATEGORY])
-    install_method: str = MANUAL  # "winget" | "manual"
+    install_method: str = MANUAL  # "winget" | "brew" | "manual" — Windows hint; see brew_id below
     winget_id: Optional[str] = None
+    # brew_id's mere presence makes an app auto-installable on macOS via
+    # Homebrew, independent of install_method (which stays the Windows-side
+    # hint - e.g. KeePassXC is "manual" on Windows for its own reasons but
+    # still has a real brew cask for Mac). brew_cask selects `--cask` (GUI
+    # apps, the common case) vs. a plain formula (CLI tools like 7-Zip).
+    brew_id: Optional[str] = None
+    brew_cask: bool = True
     exe: str = ""
     why: str = ""
     url: str = ""
@@ -60,12 +68,18 @@ class App:
     # is most Windows GUI apps. Examples:
     #   "%ProgramFiles%\\Synology\\SynologyDrive\\SynologyDrive.exe"
     detect_paths: list[str] = field(default_factory=list)
-    # Optional override for registry detection. Defaults to App.name —
-    # set this when the installer's DisplayName doesn't contain the
-    # catalog name (e.g. an "Affinity Suite" catalog entry whose
-    # installer DisplayName is "Affinity Photo 2" would set
-    # detect_name="Affinity Photo").
+    # Optional override for registry/app-bundle detection. Defaults to
+    # App.name — set this when the installer's DisplayName (Windows) or
+    # .app bundle name (macOS) doesn't contain the catalog name (e.g. an
+    # "Affinity Suite" catalog entry whose installer DisplayName is
+    # "Affinity Photo 2" would set detect_name="Affinity Photo").
     detect_name: Optional[str] = None
+    # Platforms this app actually runs on, as sys.platform values
+    # ("win32" / "darwin" / "linux"). Empty = available everywhere. Used
+    # to hide genuinely Windows-only tools with no Mac/Linux build at all
+    # (WizTree, PotPlayer, ...) from those platforms' app lists instead of
+    # nagging forever with a download link that can't ever resolve there.
+    platforms: list[str] = field(default_factory=list)
 
     @property
     def category(self) -> str:
@@ -73,6 +87,22 @@ class App:
         care about the first/owning category (status display, default
         sort order). Iterate ``categories`` for the full list."""
         return self.categories[0] if self.categories else DEFAULT_CATEGORY
+
+    def available_on(self, platform: Optional[str] = None) -> bool:
+        """True if this app is usable on `platform` (default: current)."""
+        return not self.platforms or (platform or sys.platform) in self.platforms
+
+    def effective_method(self, platform: Optional[str] = None) -> str:
+        """The install method that actually applies on `platform` — winget_id
+        only means something on win32, brew_id only on darwin. Falls back to
+        "manual" (open the download URL) everywhere else, regardless of what
+        install_method (the Windows-authored hint) says."""
+        plat = platform or sys.platform
+        if plat == "win32" and self.install_method == WINGET and self.winget_id:
+            return WINGET
+        if plat == "darwin" and self.brew_id:
+            return BREW
+        return MANUAL
 
 
 @dataclass
@@ -144,13 +174,22 @@ def load_apps(config: Optional[dict] = None) -> list[App]:
             categories=_parse_categories(entry.get("category")),
             install_method=entry.get("install_method", MANUAL),
             winget_id=entry.get("winget_id"),
+            brew_id=entry.get("brew_id"),
+            brew_cask=bool(entry.get("brew_cask", True)),
             exe=entry.get("exe", ""),
             why=entry.get("why", ""),
             url=entry.get("url", ""),
             detect_paths=list(entry.get("detect_paths", [])),
             detect_name=entry.get("detect_name"),
+            platforms=list(entry.get("platforms", [])),
         ))
     return out
+
+
+def apps_for_platform(apps: list[App], platform: Optional[str] = None) -> list[App]:
+    """Filter out apps not available on `platform` (default: current)."""
+    plat = platform or sys.platform
+    return [a for a in apps if a.available_on(plat)]
 
 
 def _parse_categories(raw) -> list[str]:
@@ -413,6 +452,30 @@ def _detect_paths_present(app: App) -> bool:
     return False
 
 
+def _mac_app_bundle_present(app: App) -> bool:
+    """True if a matching .app bundle exists in /Applications or
+    ~/Applications - the macOS equivalent of the Windows registry
+    DisplayName check. Most Mac GUI apps don't add themselves to PATH or
+    expose a single canonical launchable exe the way Windows installers
+    do, so without this every brew-cask/manual Mac app would show as
+    permanently "missing" even once actually installed."""
+    if sys.platform != "darwin":
+        return False
+    needle = (app.detect_name or app.name).lower().strip()
+    if not needle:
+        return False
+    for root in (Path("/Applications"), Path.home() / "Applications"):
+        if not root.is_dir():
+            continue
+        try:
+            for entry in root.iterdir():
+                if entry.suffix == ".app" and needle in entry.stem.lower():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def resolve_exe_path(app: App) -> Optional[str]:
     """Resolve the absolute exe path for an app, or None if unresolvable.
 
@@ -451,16 +514,19 @@ def resolve_exe_path(app: App) -> Optional[str]:
 
 
 def is_installed(app: App) -> bool:
-    """Three independent checks, fast first:
+    """Four independent checks, fast first:
       1. ``resolve_exe_path`` — covers PATH + detect_paths file/dir hits + registry-derived exe.
       2. ``detect_paths`` directory presence — catches install-marker
          directories that have no single canonical exe.
-      3. Registry DisplayName substring match — catches GUI apps with
-         no detect_paths configured.
+      3. macOS .app bundle presence in /Applications or ~/Applications.
+      4. Registry DisplayName substring match — catches GUI apps with
+         no detect_paths configured (Windows only).
     """
     if resolve_exe_path(app) is not None:
         return True
     if _detect_paths_present(app):
+        return True
+    if _mac_app_bundle_present(app):
         return True
     needle = (app.detect_name or app.name).lower().strip()
     if needle:
@@ -472,6 +538,10 @@ def is_installed(app: App) -> bool:
 
 def winget_available() -> bool:
     return sys.platform == "win32" and shutil.which(WINGET) is not None
+
+
+def brew_available() -> bool:
+    return sys.platform == "darwin" and shutil.which("brew") is not None
 
 
 def refresh_path_from_registry() -> None:
@@ -605,32 +675,48 @@ def is_skipped(app: App) -> bool:
 # ============================================================
 
 def install_app(app: App, dry_run: bool = False) -> InstallResult:
-    """Install one winget-eligible app.
+    """Install one app via whichever package manager applies on this
+    platform (App.effective_method) — winget on Windows, brew on macOS.
 
     Manual apps are intentionally NOT auto-installed here — they return
     success=False with detail='manual' so the caller can decide whether
     to print the URL (CLI) or open it in a browser (GUI).
     """
-    if app.install_method != WINGET or not app.winget_id:
-        return InstallResult(app, False, "manual")
-    if not winget_available():
-        return InstallResult(app, False, "winget unavailable")
-    if dry_run:
-        return InstallResult(app, True, "dry-run")
-    try:
-        subprocess.run(
-            [WINGET, "install", "--id", app.winget_id,
-             "--accept-source-agreements", "--accept-package-agreements",
-             "--silent"],
-            check=True,
-        )
-        # Pick up the new PATH entry winget just registered so
-        # subsequent is_installed / which calls see the freshly-
-        # installed exe in the same process.
-        refresh_path_from_registry()
-        return InstallResult(app, True, "installed")
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        return InstallResult(app, False, str(exc))
+    method = app.effective_method()
+
+    if method == WINGET:
+        if not winget_available():
+            return InstallResult(app, False, "winget unavailable")
+        if dry_run:
+            return InstallResult(app, True, "dry-run")
+        try:
+            subprocess.run(
+                [WINGET, "install", "--id", app.winget_id,
+                 "--accept-source-agreements", "--accept-package-agreements",
+                 "--silent"],
+                check=True,
+            )
+            # Pick up the new PATH entry winget just registered so
+            # subsequent is_installed / which calls see the freshly-
+            # installed exe in the same process.
+            refresh_path_from_registry()
+            return InstallResult(app, True, "installed")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            return InstallResult(app, False, str(exc))
+
+    if method == BREW:
+        if not brew_available():
+            return InstallResult(app, False, "brew unavailable")
+        if dry_run:
+            return InstallResult(app, True, "dry-run")
+        try:
+            cmd = ["brew", "install"] + (["--cask"] if app.brew_cask else []) + [app.brew_id]
+            subprocess.run(cmd, check=True)
+            return InstallResult(app, True, "installed")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            return InstallResult(app, False, str(exc))
+
+    return InstallResult(app, False, "manual")
 
 
 def install_many(apps: list[App],

@@ -1,6 +1,5 @@
 {
   "_comment": "New PC Setup Configuration - Copy to setup_config.json and edit paths to match your system",
-
   "_drive_mappings_comment": "Virtual drives created via 'subst'. 'label' is the Explorer display name - cosmetic only, written to HKCU\\...\\Explorer\\DriveIcons\\<letter>\\DefaultLabel (same key Visual Subst uses, so they stay in sync). 'registry_name' is optional and defaults to SubstDrive_<letter> for the HKCU\\...\\Run autorun entry.",
   "drive_mappings": [
     {
@@ -28,10 +27,19 @@
       "description": "Personal files"
     }
   ],
-
   "folder_structure": {
-    "bases": ["D:\\_work\\Active", "D:\\_work\\Archive"],
-    "categories": ["Visual", "RealTime", "Audio", "Physical", "Photo", "Web"],
+    "bases": [
+      "D:\\_work\\Active",
+      "D:\\_work\\Archive"
+    ],
+    "categories": [
+      "Visual",
+      "RealTime",
+      "Audio",
+      "Physical",
+      "Photo",
+      "Web"
+    ],
     "subcategories": {},
     "extra_dirs": [
       "D:\\_work\\_PIPELINE",
@@ -39,7 +47,6 @@
       "D:\\music"
     ]
   },
-
   "_synology_drive_comment": "Synology Drive Client has no CLI / API for creating sync tasks, so setup_environment.py prints a per-task copy-paste card and opens the Drive Client GUI. NO credentials live in this file: 'host' / 'username' are placeholders shown in the card (leave blank to print '<your NAS host>' / '<your username>'); the password is entered once into the GUI, which stores it in Windows Credential Manager. sync_mode: 'two_way' | 'upload_only' | 'download_only'. on_demand: true streams files on access (Files On-Demand) instead of full local sync.",
   "synology_drive": {
     "connection": {
@@ -71,8 +78,7 @@
       }
     ]
   },
-
-  "_workstation_apps_comment": "Apps you may want installed on each PC. The Pipeline does not require any of them - missing entries are non-fatal. category groups them in the picker (accepts a single string like 'Audio' or a list like ['Audio', 'Media'] for apps that belong in multiple sections; the first entry is the 'primary' one). install_method: 'winget' = auto-install via winget; 'manual' = print/open the download URL.",
+  "_workstation_apps_comment": "Apps you may want installed on each PC. The Pipeline does not require any of them - missing entries are non-fatal. category groups them in the picker (accepts a single string like 'Audio' or a list like ['Audio', 'Media'] for apps that belong in multiple sections; the first entry is the 'primary' one). install_method is the Windows-side hint: 'winget' = auto-install via winget; 'manual' = print/open the download URL. brew_id (optional) independently makes an app auto-installable on macOS via Homebrew regardless of install_method - brew_cask selects 'brew install --cask' (GUI apps, the default) vs. a plain formula (CLI tools, e.g. 7-Zip's brew_cask: false). platforms (optional list of 'win32'/'darwin'/'linux') hides an app entirely on platforms where it has no build at all, instead of listing it as permanently missing with a download link that can never resolve there.",
   "workstation_apps": [
     {
       "name": "KeePassXC",
@@ -80,7 +86,9 @@
       "install_method": "manual",
       "exe": "KeePassXC",
       "why": "Password manager (settings sync via NAS, not winget)",
-      "url": "https://keepassxc.org/download/#windows"
+      "url": "https://keepassxc.org/download/",
+      "brew_id": "keepassxc",
+      "brew_cask": true
     },
     {
       "name": "Synology Drive Client",
@@ -89,7 +97,9 @@
       "winget_id": "Synology.DriveClient",
       "exe": "SynologyDrive",
       "why": "NAS sync for Active / Archive / Pipeline",
-      "url": "https://www.synology.com/en-global/dsm/feature/drive"
+      "url": "https://www.synology.com/en-global/dsm/feature/drive",
+      "brew_id": "synology-drive",
+      "brew_cask": true
     },
     {
       "name": "WizTree",
@@ -98,7 +108,10 @@
       "winget_id": "AntibodySoftware.WizTree",
       "exe": "WizTree",
       "why": "Fast disk space analyzer",
-      "url": "https://www.diskanalyzer.com/"
+      "url": "https://www.diskanalyzer.com/",
+      "platforms": [
+        "win32"
+      ]
     },
     {
       "name": "LibreOffice",
@@ -111,7 +124,9 @@
       "detect_paths": [
         "%ProgramFiles%\\LibreOffice\\program\\soffice.exe",
         "%ProgramFiles(x86)%\\LibreOffice\\program\\soffice.exe"
-      ]
+      ],
+      "brew_id": "libreoffice",
+      "brew_cask": true
     },
     {
       "name": "VLC",
@@ -120,7 +135,9 @@
       "winget_id": "VideoLAN.VLC",
       "exe": "vlc",
       "why": "Plays anything - audio + video",
-      "url": "https://www.videolan.org/vlc/"
+      "url": "https://www.videolan.org/vlc/",
+      "brew_id": "vlc",
+      "brew_cask": true
     },
     {
       "name": "PotPlayer",
@@ -129,7 +146,10 @@
       "winget_id": "Daum.PotPlayer",
       "exe": "PotPlayerMini64",
       "why": "Lightweight video player with frame-accurate scrubbing",
-      "url": "https://potplayer.daum.net/"
+      "url": "https://potplayer.daum.net/",
+      "platforms": [
+        "win32"
+      ]
     },
     {
       "name": "7-Zip",
@@ -138,7 +158,9 @@
       "winget_id": "7zip.7zip",
       "exe": "7z",
       "why": "Archive tool - zip / 7z / rar / tar",
-      "url": "https://www.7-zip.org/"
+      "url": "https://www.7-zip.org/",
+      "brew_id": "sevenzip",
+      "brew_cask": false
     },
     {
       "name": "GitHub Desktop",
@@ -147,7 +169,9 @@
       "winget_id": "GitHub.GitHubDesktop",
       "exe": "GitHubDesktop",
       "why": "Git GUI - clone / commit / push without the CLI",
-      "url": "https://desktop.github.com/"
+      "url": "https://desktop.github.com/",
+      "brew_id": "github",
+      "brew_cask": true
     },
     {
       "name": "Firefox",
@@ -156,7 +180,9 @@
       "winget_id": "Mozilla.Firefox",
       "exe": "firefox",
       "why": "Backup browser - useful for second-account logins / testing",
-      "url": "https://www.mozilla.org/firefox/"
+      "url": "https://www.mozilla.org/firefox/",
+      "brew_id": "firefox",
+      "brew_cask": true
     },
     {
       "name": "Obsidian",
@@ -165,7 +191,9 @@
       "winget_id": "Obsidian.Obsidian",
       "exe": "Obsidian",
       "why": "Markdown notes + vaults (project journals, idea capture)",
-      "url": "https://obsidian.md/"
+      "url": "https://obsidian.md/",
+      "brew_id": "obsidian",
+      "brew_cask": true
     },
     {
       "name": "qBittorrent",
@@ -174,7 +202,9 @@
       "winget_id": "qBittorrent.qBittorrent",
       "exe": "qbittorrent",
       "why": "Torrent client - clean, ad-free",
-      "url": "https://www.qbittorrent.org/"
+      "url": "https://www.qbittorrent.org/",
+      "brew_id": "qbittorrent",
+      "brew_cask": true
     },
     {
       "name": "Advanced Renamer",
@@ -192,9 +222,10 @@
       "winget_id": "SublimeHQ.SublimeText.4",
       "exe": "subl",
       "why": "General-purpose code/text editor",
-      "url": "https://www.sublimetext.com/"
+      "url": "https://www.sublimetext.com/",
+      "brew_id": "sublime-text",
+      "brew_cask": true
     },
-
     {
       "name": "Blender",
       "category": "Visual",
@@ -202,7 +233,9 @@
       "winget_id": "BlenderFoundation.Blender",
       "exe": "blender",
       "why": "Open-source 3D / animation",
-      "url": "https://www.blender.org/download/"
+      "url": "https://www.blender.org/download/",
+      "brew_id": "blender",
+      "brew_cask": true
     },
     {
       "name": "Houdini",
@@ -235,9 +268,10 @@
       "exe": "Affinity",
       "why": "Photo / Designer / Publisher (Canva account, free since 2025)",
       "url": "https://www.affinity.studio/",
-      "detect_paths": ["%ProgramData%\\Affinity"]
+      "detect_paths": [
+        "%ProgramData%\\Affinity"
+      ]
     },
-
     {
       "name": "Resolume",
       "category": "RealTime",
@@ -270,24 +304,34 @@
       "why": "Video / lighting projection mapping",
       "url": "https://madmapper.com/madmapper/software"
     },
-
     {
       "name": "MusicBee",
-      "category": ["Audio", "Media"],
+      "category": [
+        "Audio",
+        "Media"
+      ],
       "install_method": "winget",
       "winget_id": "MusicBee.MusicBee",
       "exe": "MusicBee",
       "why": "Music library manager",
-      "url": "https://getmusicbee.com/"
+      "url": "https://getmusicbee.com/",
+      "platforms": [
+        "win32"
+      ]
     },
     {
       "name": "foobar2000",
-      "category": ["Audio", "Media"],
+      "category": [
+        "Audio",
+        "Media"
+      ],
       "install_method": "winget",
       "winget_id": "PeterPawlowski.foobar2000",
       "exe": "foobar2000",
       "why": "Lightweight audio player + tagger",
-      "url": "https://www.foobar2000.org/"
+      "url": "https://www.foobar2000.org/",
+      "brew_id": "foobar2000",
+      "brew_cask": true
     },
     {
       "name": "Ableton Live",
@@ -305,7 +349,6 @@
       "why": "DJ software - needed for beatmatching tests on a VJ rig",
       "url": "https://www.native-instruments.com/en/products/traktor/"
     },
-
     {
       "name": "Bambu Studio",
       "category": "Physical",
@@ -313,7 +356,9 @@
       "winget_id": "Bambulab.BambuStudio",
       "exe": "bambu-studio",
       "why": "Bambu Lab 3D printer slicer",
-      "url": "https://bambulab.com/en/download/studio"
+      "url": "https://bambulab.com/en/download/studio",
+      "brew_id": "bambu-studio",
+      "brew_cask": true
     },
     {
       "name": "Alibre Design",
@@ -321,9 +366,11 @@
       "install_method": "manual",
       "exe": "Alibre Design",
       "why": "Parametric CAD (license)",
-      "url": "https://www.alibre.com/"
+      "url": "https://www.alibre.com/",
+      "platforms": [
+        "win32"
+      ]
     },
-
     {
       "name": "Darktable",
       "category": "Photo",
@@ -331,9 +378,10 @@
       "winget_id": "darktable.darktable",
       "exe": "darktable",
       "why": "RAW photo developer",
-      "url": "https://www.darktable.org/install/"
+      "url": "https://www.darktable.org/install/",
+      "brew_id": "darktable",
+      "brew_cask": true
     },
-
     {
       "name": "Kodi",
       "category": "Media",
@@ -341,7 +389,9 @@
       "winget_id": "XBMCFoundation.Kodi",
       "exe": "kodi",
       "why": "Media center for movies / TV / music",
-      "url": "https://kodi.tv/download/"
+      "url": "https://kodi.tv/download/",
+      "brew_id": "kodi",
+      "brew_cask": true
     },
     {
       "name": "tinyMediaManager",
@@ -349,7 +399,9 @@
       "install_method": "manual",
       "exe": "tinyMediaManager",
       "why": "Scrape + organize movie / TV metadata for Kodi / Plex",
-      "url": "https://www.tinymediamanager.org/download/"
+      "url": "https://www.tinymediamanager.org/download/",
+      "brew_id": "tinymediamanager",
+      "brew_cask": true
     },
     {
       "name": "Calibre",
@@ -358,16 +410,20 @@
       "winget_id": "calibre.calibre",
       "exe": "calibre",
       "why": "E-book library manager + converter",
-      "url": "https://calibre-ebook.com/download"
+      "url": "https://calibre-ebook.com/download",
+      "brew_id": "calibre",
+      "brew_cask": true
     },
-
     {
       "name": "Laragon",
       "category": "Web",
       "install_method": "manual",
       "exe": "laragon",
       "why": "Local PHP / MySQL / Node stack",
-      "url": "https://laragon.org/download/"
+      "url": "https://laragon.org/download/",
+      "platforms": [
+        "win32"
+      ]
     },
     {
       "name": "WinSCP",
@@ -376,56 +432,91 @@
       "winget_id": "WinSCP.WinSCP",
       "exe": "WinSCP",
       "why": "SFTP / FTP client (used by the publish-static script)",
-      "url": "https://winscp.net/eng/download.php"
+      "url": "https://winscp.net/eng/download.php",
+      "platforms": [
+        "win32"
+      ]
     }
   ],
-
   "_workstation_profiles_comment": "Pre-baked combos for common machine roles. categories pulls in every app in those categories; extra_apps adds named apps from other categories (e.g. VJ rig wants Traktor for beatmatching even though Traktor is an Audio app).",
   "workstation_profiles": [
     {
       "name": "VJ rig",
       "description": "Live video performance + beatmatching",
-      "categories": ["General", "Visual", "RealTime"],
-      "extra_apps": ["Traktor Pro"]
+      "categories": [
+        "General",
+        "Visual",
+        "RealTime"
+      ],
+      "extra_apps": [
+        "Traktor Pro"
+      ]
     },
     {
       "name": "Audio rig",
       "description": "Music production / DJ workstation",
-      "categories": ["General", "Audio"],
+      "categories": [
+        "General",
+        "Audio"
+      ],
       "extra_apps": []
     },
     {
       "name": "3D rig",
       "description": "Modeling, rendering, 3D printing",
-      "categories": ["General", "Visual", "Physical"],
+      "categories": [
+        "General",
+        "Visual",
+        "Physical"
+      ],
       "extra_apps": []
     },
     {
       "name": "Photo rig",
       "description": "RAW developing + light editing",
-      "categories": ["General", "Photo"],
-      "extra_apps": ["Affinity"]
+      "categories": [
+        "General",
+        "Photo"
+      ],
+      "extra_apps": [
+        "Affinity"
+      ]
     },
     {
       "name": "Web rig",
       "description": "Web development workstation",
-      "categories": ["General", "Web"],
-      "extra_apps": ["Sublime Text"]
+      "categories": [
+        "General",
+        "Web"
+      ],
+      "extra_apps": [
+        "Sublime Text"
+      ]
     },
     {
       "name": "Office laptop",
       "description": "Lightweight machine, just the essentials",
-      "categories": ["General"],
+      "categories": [
+        "General"
+      ],
       "extra_apps": []
     },
     {
       "name": "Everything",
       "description": "Kitchen-sink workstation - all categories",
-      "categories": ["General", "Visual", "RealTime", "Audio", "Physical", "Photo", "Media", "Web"],
+      "categories": [
+        "General",
+        "Visual",
+        "RealTime",
+        "Audio",
+        "Physical",
+        "Photo",
+        "Media",
+        "Web"
+      ],
       "extra_apps": []
     }
   ],
-
   "pipeline_config": {
     "work_drive": "I:",
     "active_base": "D:\\_work\\Active",
