@@ -18,11 +18,14 @@ data and path remapping.
 """
 
 import os
+import re
 import sys
 import copy
+import socket
 import argparse
 import datetime
 import xml.etree.ElementTree as ET
+from collections import Counter
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 from dataclasses import dataclass, asdict, field
@@ -37,7 +40,26 @@ APP_NAME = "Traktor Playlist Sync"
 APP_VERSION = "1.0.0"
 HEADER_COLOR = "#2c3e50"
 
-APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager")
+def _appdata_dir() -> str:
+    """Platform-appropriate PipelineManager app-data folder (same
+    convention as rak_settings._get_appdata_path) - this file's config
+    holds per-machine profiles, so it has to land in the right place on
+    both Windows and macOS rather than the Windows-only path this used to
+    be, which just silently created a stray ~/AppData folder on Mac."""
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        return os.path.join(home, "AppData", "Local", "PipelineManager")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "PipelineManager")
+    windows_appdata = "/mnt/c/Users"
+    if os.path.exists(windows_appdata):
+        user_path = os.path.join(windows_appdata, os.environ.get("USER", ""))
+        if os.path.exists(user_path):
+            return os.path.join(user_path, "AppData", "Local", "PipelineManager")
+    return os.path.join(home, ".local", "share", "PipelineManager")
+
+
+APP_DATA_DIR = _appdata_dir()
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "traktor_playlist_sync_config.json")
 
 # Built-in preset that mirrors the Auto Select rule (digits 1-9 prefix).
@@ -301,6 +323,52 @@ def detect_profile_from_nml_file(nml_path: str, sample_filename: str) -> Optiona
     return detect_profile_from_sample(index, sample_filename)
 
 
+def detect_library_root(entry_index: Dict[str, ET.Element], min_coverage: float = 0.5) -> Optional[Tuple[str, str]]:
+    """Infer a machine's shared-library root straight from its loaded
+    collection - no sample file to pick. VOLUME is whichever volume holds
+    the most tracks (the shared library disk, as opposed to a stray
+    external drive). DIR is the deepest "/:folder/:.../:" prefix that
+    still covers at least `min_coverage` of that volume's tracks, rather
+    than one every single track must share - a real collection almost
+    always has a handful of outliers on the same volume (a Traktor
+    recording, one stray download) that would otherwise drag a strict
+    "all tracks" common prefix all the way back up to the volume root and
+    make it useless. Weighting by how many tracks live under each prefix
+    (not just counting distinct folders) also means a folder holding
+    thousands of tracks correctly outweighs a handful of one-off
+    subfolders when picking how deep to go."""
+    dir_counts_by_volume: Dict[str, Counter] = {}
+    totals_by_volume: Counter = Counter()
+    for entry in entry_index.values():
+        loc = entry.find("LOCATION")
+        if loc is None:
+            continue
+        volume, dir_ = loc.get("VOLUME", ""), loc.get("DIR", "")
+        if not volume or not dir_:
+            continue
+        dir_counts_by_volume.setdefault(volume, Counter())[dir_] += 1
+        totals_by_volume[volume] += 1
+    if not totals_by_volume:
+        return None
+
+    volume = totals_by_volume.most_common(1)[0][0]
+    total = totals_by_volume[volume]
+
+    prefix_counts: Counter = Counter()
+    for dir_, count in dir_counts_by_volume[volume].items():
+        prefix = ""
+        for segment in dir_.split("/:"):
+            if not segment:
+                continue
+            prefix += f"/:{segment}"
+            prefix_counts[prefix + "/:"] += count
+
+    candidates = [p for p, c in prefix_counts.items() if c / total >= min_coverage]
+    if not candidates:
+        return None
+    return volume, max(candidates, key=len)
+
+
 def _build_folder_tree(nodes: List[PlaylistNode]) -> Dict[str, Any]:
     """{"folders": {name: subtree}, "leaves": [PlaylistNode, ...]} rooted at $ROOT."""
     root: Dict[str, Any] = {"folders": {}, "leaves": []}
@@ -535,6 +603,15 @@ class ProfileEditorDialog:
         if not self.app.entry_index:
             messagebox.showinfo("Detect", "Load a collection.nml first.", parent=self.win)
             return
+        found = detect_library_root(self.app.entry_index)
+        if found:
+            self.volume_var.set(found[0])
+            self.dir_var.set(found[1])
+            return
+
+        # No common folder could be determined automatically (e.g. an
+        # oddly scattered collection) - fall back to picking one sample
+        # track known to sit directly in the shared library folder.
         filename = filedialog.askopenfilename(title="Pick a track that sits directly in the shared DJ library folder")
         if not filename:
             return
@@ -556,26 +633,34 @@ class ProfileEditorDialog:
         if not nml_path:
             return
 
-        candidates = sorted({
-            entry.find("LOCATION").get("FILE", "")
-            for entry in self.app.entry_index.values()
-            if entry.find("LOCATION") is not None and entry.find("LOCATION").get("FILE")
-        })
-        filename = pick_from_list(
-            self.win, "Pick a filename you know exists on that machine too (ideally in the shared library root)",
-            candidates,
-        )
-        if not filename:
-            return
-
         try:
-            found = detect_profile_from_nml_file(nml_path, filename)
+            tree = load_nml(nml_path)
+            collection = get_collection_element(tree.getroot())
+            index = build_entry_index(collection) if collection is not None else {}
+            found = detect_library_root(index)
         except Exception as e:
             messagebox.showerror("Detect", f"Could not read that NML file:\n{e}", parent=self.win)
             return
+
         if not found:
-            messagebox.showwarning("Detect", f"No entry named '{filename}' found in that file.", parent=self.win)
-            return
+            # Couldn't find a common folder in that file either - fall
+            # back to matching one filename shared between both machines.
+            candidates = sorted({
+                entry.find("LOCATION").get("FILE", "")
+                for entry in self.app.entry_index.values()
+                if entry.find("LOCATION") is not None and entry.find("LOCATION").get("FILE")
+            })
+            filename = pick_from_list(
+                self.win, "Pick a filename you know exists on that machine too (ideally in the shared library root)",
+                candidates,
+            )
+            if not filename:
+                return
+            found = detect_profile_from_nml_file(nml_path, filename)
+            if not found:
+                messagebox.showwarning("Detect", f"No entry named '{filename}' found in that file.", parent=self.win)
+                return
+
         self.volume_var.set(found[0])
         self.dir_var.set(found[1])
 
@@ -839,13 +924,23 @@ class TraktorPlaylistSyncUI:
     def _initialize_default_paths(self):
         settings = self.config_manager.settings
 
-        if settings.collection_nml_path and os.path.exists(settings.collection_nml_path):
-            self.nml_path_var.set(settings.collection_nml_path)
-        else:
-            for candidate in self._default_nml_candidates():
-                if os.path.exists(candidate):
-                    self.nml_path_var.set(candidate)
-                    break
+        default_candidates = self._default_nml_candidates()
+        newest_default = next((c for c in default_candidates if os.path.exists(c)), None)
+
+        saved = settings.collection_nml_path
+        if saved and os.path.exists(saved):
+            # A saved path from a previous Traktor version still exists
+            # (Traktor never deletes old version folders) but is no longer
+            # the newest install - auto-follow the upgrade. Only do this
+            # when the saved path is itself one of our own auto-detected
+            # defaults; a path the user deliberately browsed to (a custom
+            # location, a synced copy, etc.) is never silently replaced.
+            if newest_default and saved != newest_default and saved in default_candidates:
+                self.nml_path_var.set(newest_default)
+            else:
+                self.nml_path_var.set(saved)
+        elif newest_default:
+            self.nml_path_var.set(newest_default)
 
         self.output_dir_var.set(settings.export_output_dir or os.path.join(os.path.expanduser("~"), "Desktop"))
         self.selection_mode.set(settings.selection_mode)
@@ -862,13 +957,30 @@ class TraktorPlaylistSyncUI:
 
     @staticmethod
     def _default_nml_candidates() -> List[str]:
+        """Every 'Traktor <version>' folder under ~/Documents/Native
+        Instruments, newest version first. That base path is identical on
+        Windows and macOS (Traktor installs to the platform's own
+        Documents folder either way), so this needs no OS-specific
+        handling - only os.path.expanduser/join, which already do the
+        right thing on both."""
         docs = os.path.join(os.path.expanduser("~"), "Documents", "Native Instruments")
-        candidates = []
+        entries = []
         if os.path.isdir(docs):
-            for entry in sorted(os.listdir(docs), reverse=True):
+            for entry in os.listdir(docs):
                 if entry.lower().startswith("traktor"):
-                    candidates.append(os.path.join(docs, entry, "collection.nml"))
-        return candidates
+                    entries.append(entry)
+        # Numeric-aware sort (newest first) so e.g. "Traktor 10.0.0" sorts
+        # above "Traktor 9.0.0" - plain reverse string sort would put the
+        # "1" before the "9" and get that backwards. Each split part is
+        # tagged (0, str) or (1, int) rather than left as a bare mix of
+        # types, so entries with a different number of version segments
+        # still compare safely instead of raising TypeError.
+        version_key = lambda name: [
+            (1, int(part)) if part.isdigit() else (0, part)
+            for part in re.split(r"(\d+)", name)
+        ]
+        entries.sort(key=version_key, reverse=True)
+        return [os.path.join(docs, entry, "collection.nml") for entry in entries]
 
     def _save_settings(self):
         selected = self._get_selected_display_names()
@@ -942,6 +1054,7 @@ class TraktorPlaylistSyncUI:
             if self.collection_element is None:
                 raise ValueError("No <COLLECTION> element found - is this a Traktor collection.nml?")
             self.entry_index = build_entry_index(self.collection_element)
+            self._ensure_this_machine_profile()
 
             playlists_root = get_playlists_root_node(root)
             self.all_nodes = walk_playlist_nodes(playlists_root) if playlists_root is not None else []
@@ -975,6 +1088,58 @@ class TraktorPlaylistSyncUI:
     # ------------------------------------------------------------------
     # Machine profiles
     # ------------------------------------------------------------------
+
+    def _ensure_this_machine_profile(self):
+        """Auto-register and select this machine's profile from the
+        collection that was just loaded, so a machine that's never been
+        set up before needs zero manual steps - no typing a name, no
+        picking a sample track file. Never modifies an existing profile's
+        volume/dir_prefix (e.g. one synced over from a previous session)
+        - only creates a new one when nothing already matches, and always
+        makes sure "this machine" points at whichever profile actually
+        matches what's loaded, since a stale mismatch there would rewrite
+        exported paths against the wrong root."""
+        detected = detect_library_root(self.entry_index)
+        if not detected:
+            return
+        volume, dir_prefix = detected
+
+        profiles = self.config_manager.settings.machine_profiles
+        matching_name = next(
+            (name for name, raw in profiles.items()
+             if raw.get("volume") == volume and raw.get("dir_prefix") == dir_prefix),
+            None,
+        )
+        created_new = matching_name is None
+        if created_new:
+            matching_name = self._unique_profile_name(self._default_machine_name())
+            profiles[matching_name] = MachineProfile(name=matching_name, volume=volume, dir_prefix=dir_prefix).to_dict()
+            self._refresh_profile_combos()
+
+        if not (created_new or self.this_machine_var.get() != matching_name):
+            return  # Nothing changed - matching profile already selected.
+
+        self.this_machine_var.set(matching_name)
+        self.config_manager.update_settings(machine_profiles=profiles, this_machine_profile=matching_name)
+        self._on_profiles_changed()
+
+    @staticmethod
+    def _default_machine_name() -> str:
+        """This computer's hostname, as a friendly starting name - trimmed
+        of the ".local" mDNS suffix macOS hostnames usually carry."""
+        name = socket.gethostname() or ""
+        if name.lower().endswith(".local"):
+            name = name[:-len(".local")]
+        return name.strip() or ("Mac" if sys.platform == "darwin" else "PC")
+
+    def _unique_profile_name(self, base: str) -> str:
+        existing = set(self.config_manager.settings.machine_profiles.keys())
+        if base not in existing:
+            return base
+        n = 2
+        while f"{base} ({n})" in existing:
+            n += 1
+        return f"{base} ({n})"
 
     def get_this_machine_dir_default(self) -> str:
         """Best-effort starting point for a brand-new profile's dir prefix -

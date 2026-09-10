@@ -44,11 +44,11 @@ SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 # ====================================
 
 sys.path.insert(0, SCRIPTS_DIR)
-from shared_logging import get_logger, setup_logging
+from shared_logging import get_logger, setup_logging, LOG_DIR
 from rak_settings import get_rak_settings, join_native_path
 from shared_open_path import open_path
 
-from ui_theme import COLORS, CATEGORY_COLORS
+from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button
 from ui_pipeline_categories import (
     APP_NAME, APP_VERSION, LOGO_PATH,
     CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES
@@ -87,69 +87,62 @@ class ScrollableFrame(tk.Frame):
     def __init__(self, parent, bg=None):
         super().__init__(parent, bg=bg)
 
-        # Create canvas and scrollbar
+        # Plain tk.Scrollbar, not ttk: ttk's is a native NSScroller on
+        # macOS, which per that OS's own "Show scroll bars" preference
+        # stays hidden except during an active scroll gesture.
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollbar = tk.Scrollbar(
+            self, orient="vertical", command=self.canvas.yview, width=16,
+        )
         self.scrollable_frame = tk.Frame(self.canvas, bg=bg)
 
+        # Never itemconfig the embedded window's height explicitly — leave
+        # it at its natural size so it keeps growing/shrinking as content
+        # changes later (e.g. tool buttons on a category switch). Pinning
+        # it once (even just to fill a short initial view) freezes the
+        # scrollregion at that size forever, making anything added
+        # afterward unreachable by any scroll method.
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
-
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        # Bind canvas resize to frame width
-        self.canvas.bind('<Configure>', self._configure_canvas_window)
+        self.canvas.bind(
+            '<Configure>',
+            lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width)
+        )
 
         # Bind mouse wheel directly to canvas (simpler approach)
         self._bind_mouse_wheel()
 
-        # Pack widgets
-        self.canvas.pack(side="left", fill="both", expand=True)
+        # Pack the scrollbar BEFORE the canvas: pack reserves space for
+        # widgets in the order they're packed, so an expand=True widget
+        # (the canvas) packed first can claim the whole cavity before a
+        # fixed-width sibling packed after it gets a turn — measured here
+        # as the scrollbar collapsing to 1px wide when the order was
+        # reversed.
         self.scrollbar.pack(side="right", fill="y")
-
-    def _configure_canvas_window(self, event):
-        """Update the canvas window to match canvas width and minimum height."""
-        canvas_width = event.width
-        canvas_height = event.height
-        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
-
-        # Set minimum height so content fills available space when canvas is taller
-        content_height = self.scrollable_frame.winfo_reqheight()
-        if canvas_height > content_height:
-            self.canvas.itemconfig(self.canvas_window, height=canvas_height)
-        else:
-            # Reset to natural height when content is taller
-            self.canvas.itemconfig(self.canvas_window, height=content_height)
+        self.canvas.pack(side="left", fill="both", expand=True)
 
     def _bind_mouse_wheel(self):
-        """Bind mouse wheel events directly to canvas."""
-        # Windows and MacOS - bind directly to canvas
-        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
-        # Linux
-        self.canvas.bind("<Button-4>", self._on_mouse_wheel)
-        self.canvas.bind("<Button-5>", self._on_mouse_wheel)
+        """Scroll on wheel/trackpad input while the pointer is over this
+        widget. Bound globally (bind_all) only for the duration of the
+        hover, rather than on each child individually, so it keeps working
+        for content added later (e.g. tool buttons on a category switch)
+        without needing to be rebound."""
+        self.bind("<Enter>", self._activate_mouse_wheel)
+        self.bind("<Leave>", self._deactivate_mouse_wheel)
 
-        # Also bind to all children recursively
-        self._bind_to_mousewheel(self.scrollable_frame)
+    def _activate_mouse_wheel(self, event):
+        self.canvas.bind_all("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind_all("<Button-4>", self._on_mouse_wheel)
+        self.canvas.bind_all("<Button-5>", self._on_mouse_wheel)
 
-    def _bind_to_mousewheel(self, widget):
-        """Recursively bind mousewheel to widget and all its children."""
-        # Bind to the widget
-        widget.bind("<MouseWheel>", self._on_mouse_wheel, add="+")
-        widget.bind("<Button-4>", self._on_mouse_wheel, add="+")
-        widget.bind("<Button-5>", self._on_mouse_wheel, add="+")
-
-        # Bind to all children
-        for child in widget.winfo_children():
-            self._bind_to_mousewheel(child)
-
-    def rebind_mousewheel(self):
-        """Rebind mousewheel to all widgets after content has been added."""
-        # Rebind to the scrollable frame and all its children
-        self._bind_to_mousewheel(self.scrollable_frame)
+    def _deactivate_mouse_wheel(self, event):
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
 
     def _on_mouse_wheel(self, event):
         """Handle mouse wheel scrolling."""
@@ -201,11 +194,29 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             except tk.TclError:
                 pass
 
-        # Open maximized or fullscreen depending on setting
-        self.root.state('zoomed')  # Windows maximized
+        # Open maximized or fullscreen depending on setting.
+        try:
+            self.root.state('zoomed')
+        except tk.TclError:
+            # Some window managers (mainly on Linux) don't support the
+            # 'zoomed' state; size the window to the screen manually.
+            self.root.geometry(
+                f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0"
+            )
+        self.root.update()
 
-        # Set minimum size
-        self.root.minsize(1200, 800)
+        # Minimum size — clamped to the maximized window's own size so it
+        # can never force the window taller/wider than what the OS just
+        # gave us. A hardcoded 1200x800 minsize used to do exactly that on
+        # smaller MacBook displays, where the space macOS leaves under the
+        # menu bar and above the Dock is shorter than 800px: the window
+        # got forced past the bottom of the screen, hiding the tools panel
+        # and status log below the visible desktop.
+        zoomed_w, zoomed_h = self.root.winfo_width(), self.root.winfo_height()
+        if zoomed_w <= 1 or zoomed_h <= 1:
+            zoomed_w = self.root.winfo_screenwidth()
+            zoomed_h = self.root.winfo_screenheight()
+        self.root.minsize(min(1200, zoomed_w), min(800, zoomed_h))
 
         # Configure root window background
         self.root.configure(bg=COLORS["bg_primary"])
@@ -329,11 +340,14 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Create header
         self.create_header()
 
+        # Status bar before main content: same pack-order rule as
+        # ScrollableFrame above — packing the expand=True content area
+        # first let it claim the whole remaining cavity, squeezing the
+        # side=BOTTOM status bar off the window entirely.
+        self.create_status_bar()
+
         # Create main notebook
         self.create_main_notebook()
-
-        # Create status bar
-        self.create_status_bar()
 
     def load_logo(self, path, size=(80, 50)):
         """Load an image file and resize it for the logo."""
@@ -361,11 +375,17 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             return ImageTk.PhotoImage(image)
 
         except ImportError:
-            print("WARNING: PIL/Pillow library not installed. Unable to load logo image.")
-            print("Please install the required library using: pip install pillow")
+            # print() alone is invisible when launched from a double-clicked
+            # .app (no attached terminal), so this also goes to the log file
+            # the Logs button opens.
+            logger.warning(
+                "PIL/Pillow not installed for interpreter %s — logo image "
+                "disabled, falling back to text. Install with: pip install pillow",
+                sys.executable,
+            )
             return None
         except Exception as e:
-            print(f"Error loading logo image: {str(e)}")
+            logger.warning("Error loading logo image from %s: %s", path, e)
             return None
 
     def create_header(self):
@@ -433,83 +453,46 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         btn_font = font.Font(family="Segoe UI", size=10)
 
         # Refresh button
-        refresh_btn = tk.Button(
-            buttons_frame,
-            text="Refresh",
-            command=self.refresh_projects,
-            bg=COLORS["bg_hover"],
-            fg=COLORS["text_primary"],
-            font=btn_font,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=15,
-            pady=8
+        refresh_btn = make_flat_button(
+            buttons_frame, "Refresh", self.refresh_projects,
+            bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
+            hover_bg=COLORS["border"], font=btn_font,
         )
         refresh_btn.pack(side=tk.LEFT, padx=(0, 5), pady=20)
         self._add_header_hint(refresh_btn, "Refresh Projects (F5)")
 
         # Open Logs button
-        logs_btn = tk.Button(
-            buttons_frame,
-            text="Logs",
-            command=self.open_logs_folder,
-            bg=COLORS["bg_hover"],
-            fg=COLORS["text_primary"],
-            font=btn_font,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=15,
-            pady=8
+        logs_btn = make_flat_button(
+            buttons_frame, "Logs", self.open_logs_folder,
+            bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
+            hover_bg=COLORS["border"], font=btn_font,
         )
         logs_btn.pack(side=tk.LEFT, padx=5, pady=20)
         self._add_header_hint(logs_btn, "Open Logs Folder (Ctrl+L)")
 
         # Settings button
-        settings_btn = tk.Button(
-            buttons_frame,
-            text="Settings",
-            command=self.open_settings,
-            bg=COLORS["bg_hover"],
-            fg=COLORS["text_primary"],
-            font=btn_font,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=15,
-            pady=8
+        settings_btn = make_flat_button(
+            buttons_frame, "Settings", self.open_settings,
+            bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
+            hover_bg=COLORS["border"], font=btn_font,
         )
         settings_btn.pack(side=tk.LEFT, padx=5, pady=20)
         self._add_header_hint(settings_btn, "Settings (Ctrl+,)")
 
         # Help button
-        help_btn = tk.Button(
-            buttons_frame,
-            text="Help",
-            command=self.open_help,
-            bg=COLORS["bg_hover"],
-            fg=COLORS["text_primary"],
-            font=btn_font,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=15,
-            pady=8
+        help_btn = make_flat_button(
+            buttons_frame, "Help", self.open_help,
+            bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
+            hover_bg=COLORS["border"], font=btn_font,
         )
         help_btn.pack(side=tk.LEFT, padx=(0, 0), pady=20)
         self._add_header_hint(help_btn, "Keyboard Shortcuts (F1)")
 
         # Exit button (red)
-        exit_btn = tk.Button(
-            buttons_frame,
-            text="Exit",
-            command=self.root.destroy,
-            bg="#c0392b",
-            fg="white",
-            activebackground="#e74c3c",
-            activeforeground="white",
+        exit_btn = make_flat_button(
+            buttons_frame, "Exit", self.root.destroy,
+            bg="#c0392b", fg="white", hover_bg="#e74c3c", hover_fg="white",
             font=btn_font,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=15,
-            pady=8
         )
         exit_btn.pack(side=tk.LEFT, padx=(5, 0), pady=20)
 
@@ -533,10 +516,12 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 15), pady=0)
         left_panel_container.pack_propagate(False)
 
-        # Scrollable left panel (hide scrollbar for cleaner look)
+        # Scrollable left panel. The scrollbar stays visible (rather than
+        # relying on mouse-wheel/trackpad scrolling alone) so the Tools
+        # section is always reachable even when the sidebar's content is
+        # taller than the window — mouse-wheel scroll still works too.
         self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"])
         self.left_scroll.pack(fill=tk.BOTH, expand=True)
-        self.left_scroll.scrollbar.pack_forget()  # Hide scrollbar
         left_panel = self.left_scroll.get_frame()
 
         # ═══════════════════════════════════════════════════════════
@@ -682,9 +667,6 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Tools container (no separate scroll - uses left panel scroll)
         self.tools_container = tk.Frame(self.tools_section, bg=COLORS["bg_secondary"])
         self.tools_container.pack(fill=tk.BOTH, expand=True)
-
-        # Rebind mousewheel to left panel after all content is created
-        self.left_scroll.rebind_mousewheel()
 
         # ═══════════════════════════════════════════════════════════
         # RIGHT PANEL: Project Tracker (creative categories) OR
@@ -1314,9 +1296,6 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.notes_button_container.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=(5, 10))
             self._update_notes_button(primary)
 
-        # Rebind mousewheel after adding tools
-        self.left_scroll.rebind_mousewheel()
-
     def _create_tool_button(self, parent, category_key, script_key, subcat_key, script_data):
         """Create a professional tool button."""
         color = CATEGORY_COLORS.get(category_key, COLORS["accent"])
@@ -1615,9 +1594,6 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             # Configure grid weights for proper expansion
             content_frame.grid_columnconfigure(col, weight=1)
 
-        # IMPORTANT: Rebind mousewheel after all widgets are added
-        scroll_frame.rebind_mousewheel()
-
     def open_folder(self, folder_path):
         """Open a folder in the OS file browser."""
         try:
@@ -1643,7 +1619,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
     def open_logs_folder(self):
         """Open the centralized logs folder in the OS file browser."""
-        logs_folder = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager", "logs")
+        logs_folder = LOG_DIR
         try:
             # Create the folder if it doesn't exist
             os.makedirs(logs_folder, exist_ok=True)
@@ -1698,8 +1674,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             if hasattr(self, 'header_hint_label'):
                 self.header_hint_label.config(text="")
 
-        widget.bind("<Enter>", show_hint)
-        widget.bind("<Leave>", hide_hint)
+        widget.bind("<Enter>", show_hint, add="+")
+        widget.bind("<Leave>", hide_hint, add="+")
 
     def open_settings(self):
         """Open the settings dialog, or close it if it's already open.
@@ -2252,11 +2228,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                                   height=8,
                                   padx=10,
                                   pady=10)
-        self.status_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-
-        # Scrollbar
+        # Scrollbar packed before the text widget: a side=LEFT,
+        # expand=True widget packed first can crush a fixed-width
+        # side=RIGHT sibling packed after it down to ~1px instead of its
+        # requested width (same fix as ScrollableFrame above).
         scrollbar = ttk.Scrollbar(self.status_text_container, command=self.status_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.status_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         self.status_text.config(yscrollcommand=scrollbar.set)
 
         # Configure tags

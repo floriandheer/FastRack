@@ -25,6 +25,11 @@ def _get_log_dir():
             os.path.expanduser("~"),
             "AppData", "Local", "PipelineManager", "logs"
         )
+    elif sys.platform == "darwin":
+        # Native macOS location for app log files.
+        return os.path.join(
+            os.path.expanduser("~"), "Library", "Logs", "PipelineManager"
+        )
     else:
         # WSL/Linux: use Windows user profile via /mnt/c
         # Fall back to ~/.local/share if /mnt/c doesn't exist
