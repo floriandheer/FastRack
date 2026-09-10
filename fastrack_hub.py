@@ -45,7 +45,7 @@ SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from shared_logging import get_logger, setup_logging, LOG_DIR
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 from shared_open_path import open_path
 
 from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button

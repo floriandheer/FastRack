@@ -1,0 +1,3 @@
+#!/bin/bash
+cd "/Users/flori/Documents/GitHub/FastRack"
+exec "/usr/local/bin/python3" "/Users/flori/Documents/GitHub/FastRack/fastrack_hub.py"

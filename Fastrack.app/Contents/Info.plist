@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Fastrak</string>
+    <string>Fastrack</string>
     <key>CFBundleExecutable</key>
-    <string>Fastrak</string>
+    <string>Fastrack</string>
     <key>CFBundleIdentifier</key>
-    <string>com.floriandheer.fastrak</string>
+    <string>com.floriandheer.fastrack</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
