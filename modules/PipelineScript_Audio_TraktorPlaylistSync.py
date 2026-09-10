@@ -38,6 +38,7 @@ from typing import Optional, Dict, List, Any, Tuple
 from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_open_path import open_path
+from shared_scrollable_frame import ScrollableFrame
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -851,8 +852,8 @@ class TraktorPlaylistSyncUI:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.geometry("900x1050")
-        self.root.minsize(900, 750)
+        self.root.geometry("900x850")
+        self.root.minsize(900, 500)
 
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
@@ -900,8 +901,26 @@ class TraktorPlaylistSyncUI:
         )
 
     def _create_body(self):
-        main = ttk.Frame(self.root)
-        main.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        # Wrapped in a ScrollableFrame rather than gridded directly onto
+        # root: this window's natural content height (source + machine
+        # panels + notebook + results) can exceed a laptop's usable screen
+        # height, which would otherwise strand Save Settings/Export/Import
+        # and the Results tabs off-screen with no way to reach them.
+        scroll = ScrollableFrame(self.root)
+        scroll.grid(row=1, column=0, sticky="nsew")
+        self._body_scroll = scroll
+        # ScrollableFrame normally only activates its wheel binding while
+        # the pointer is directly over its own background (<Enter>/<Leave>
+        # on the outer frame) - but this window is almost entirely covered
+        # by native ttk widgets (Treeview, Notebook, etc.), which on macOS
+        # own real windows of their own, so that crossing event essentially
+        # never fires here. Replace it with a permanent binding instead
+        # (see _on_body_mouse_wheel).
+        scroll.unbind("<Enter>")
+        scroll.unbind("<Leave>")
+
+        main = ttk.Frame(scroll.get_frame())
+        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(2, weight=3)
         main.rowconfigure(3, weight=2)
@@ -912,6 +931,16 @@ class TraktorPlaylistSyncUI:
 
         notebook = ttk.Notebook(main)
         notebook.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        # ttk::Notebook ships a standard, cross-platform (not Mac-specific)
+        # Tcl binding on its "TNotebook" class - "bind TNotebook <MouseWheel>
+        # {ttk::notebook::CycleTab ...}" - that cycles tabs on any scroll
+        # over it. Neutralize that class binding outright (belt) and also
+        # add an instance-level override that forwards to the window body
+        # and stops propagation (suspenders), since instance bindings run
+        # before class ones in Tk's bindtag order.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind_class("TNotebook", seq, lambda e: "break")
+            notebook.bind(seq, self._on_notebook_mouse_wheel)
 
         export_tab = ttk.Frame(notebook)
         notebook.add(export_tab, text="Export")
@@ -922,6 +951,30 @@ class TraktorPlaylistSyncUI:
         self._create_import_tab(import_tab)
 
         self._create_results_panel(main)
+
+        self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
+
+    def _on_body_mouse_wheel(self, event):
+        """Scroll the window body on wheel/trackpad input, except when the
+        pointer is over a widget that already scrolls itself (the playlist
+        trees, the log/info text boxes) - let those handle it natively."""
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        self_scrolling_widgets = (
+            getattr(self, "playlist_tree", None), getattr(self, "import_tree", None),
+            getattr(self, "info_text", None), getattr(self, "log_text", None),
+        )
+        w = widget
+        while w is not None:
+            if w in self_scrolling_widgets:
+                return
+            w = w.master
+        self._body_scroll._on_mouse_wheel(event)
+
+    def _on_notebook_mouse_wheel(self, event):
+        self._on_body_mouse_wheel(event)
+        return "break"
 
     def _create_source_panel(self, main):
         source_frame = ttk.LabelFrame(main, text="Source: this machine's Traktor collection")
@@ -1303,7 +1356,6 @@ class TraktorPlaylistSyncUI:
             if self.collection_element is None:
                 raise ValueError("No <COLLECTION> element found - is this a Traktor collection.nml?")
             self.entry_index = build_entry_index(self.collection_element)
-            self._ensure_this_machine_profile()
 
             playlists_root = get_playlists_root_node(root)
             self.all_nodes = walk_playlist_nodes(playlists_root) if playlists_root is not None else []
@@ -1326,7 +1378,12 @@ class TraktorPlaylistSyncUI:
             self.info_text.insert(tk.END, f"Smart lists: {smart_count}\n")
 
             self._filter_playlists()
-            self._restore_selection(self.config_manager.settings.selected_playlists)
+            active_preset = self.preset_var.get()
+            saved_preset = self.config_manager.settings.playlist_presets.get(active_preset)
+            if active_preset and active_preset != DEFAULT_PRESET_NAME and saved_preset:
+                self._apply_selection(saved_preset.get("playlists", []), saved_preset.get("mode", "include"))
+            else:
+                self._auto_select()
             if self._import_nodes:
                 self._refresh_import_tree()
             self.status_var.set(f"Loaded {len(self.all_nodes)} playlists/smart lists")
@@ -1339,68 +1396,6 @@ class TraktorPlaylistSyncUI:
     # ------------------------------------------------------------------
     # This Machine profile
     # ------------------------------------------------------------------
-
-    def _ensure_this_machine_profile(self):
-        """Auto-register and select this machine's profile from the
-        collection that was just loaded, so a machine that's never been
-        set up before needs zero manual steps - no typing a name, no
-        picking a sample track file. Never modifies an existing profile's
-        volume/dir_prefix (e.g. one synced over from a previous session)
-        - only creates a new one when nothing already matches, and always
-        makes sure "this machine" points at whichever profile actually
-        matches what's loaded, since a stale mismatch there would rewrite
-        exported paths against the wrong root."""
-        detected = detect_library_root(self.entry_index)
-        if not detected:
-            return
-        volume, dir_prefix = detected
-
-        profiles = self.config_manager.settings.machine_profiles
-        matching_name = next(
-            (name for name, raw in profiles.items()
-             if raw.get("volume") == volume and raw.get("dir_prefix") == dir_prefix),
-            None,
-        )
-        created_new = matching_name is None
-        if created_new:
-            matching_name = self._unique_profile_name(self._default_machine_name())
-            profiles[matching_name] = MachineProfile(name=matching_name, volume=volume, dir_prefix=dir_prefix).to_dict()
-            self._refresh_profile_combos()
-
-        if not (created_new or self.this_machine_var.get() != matching_name):
-            return  # Nothing changed - matching profile already selected.
-
-        self.this_machine_var.set(matching_name)
-        self.config_manager.update_settings(machine_profiles=profiles, this_machine_profile=matching_name)
-        self._on_profiles_changed()
-
-    @staticmethod
-    def _default_machine_name() -> str:
-        """This computer's hostname, as a friendly starting name - trimmed
-        of the ".local" mDNS suffix macOS hostnames usually carry."""
-        name = socket.gethostname() or ""
-        if name.lower().endswith(".local"):
-            name = name[:-len(".local")]
-        return name.strip() or ("Mac" if sys.platform == "darwin" else "PC")
-
-    def _unique_profile_name(self, base: str) -> str:
-        existing = set(self.config_manager.settings.machine_profiles.keys())
-        if base not in existing:
-            return base
-        n = 2
-        while f"{base} ({n})" in existing:
-            n += 1
-        return f"{base} ({n})"
-
-    def get_this_machine_dir_default(self) -> str:
-        """Best-effort starting point for a brand-new profile's dir prefix -
-        copy an existing profile's, since the shared folder structure is
-        usually identical across machines (same username, mirrored layout)."""
-        profiles = self.config_manager.settings.machine_profiles
-        if profiles:
-            first = next(iter(profiles.values()))
-            return first.get("dir_prefix", "")
-        return ""
 
     def _update_machine_summary(self):
         if self.machine_profile.is_configured:
@@ -1471,14 +1466,12 @@ class TraktorPlaylistSyncUI:
         self._update_selection_summary()
 
     def _auto_select(self):
-        """Select playlists/smart lists whose name starts with a digit 1-9,
-        matching the same convention used by the MusicBee->Traktor sync tool."""
+        """Select every playlist/smart list - the default, so a newly
+        created playlist is included automatically without having to
+        manually re-select it."""
         self._clear_all()
         for item in self.playlist_tree.get_children():
-            name = self.playlist_tree.item(item, "text")
-            leaf = name.rsplit("/", 1)[-1]
-            if leaf and leaf[0].isdigit() and leaf[0] != '0':
-                self.playlist_tree.selection_add(item)
+            self.playlist_tree.selection_add(item)
         self._update_selection_summary()
 
     def _get_selected_display_names(self) -> List[str]:
@@ -1494,13 +1487,6 @@ class TraktorPlaylistSyncUI:
         else:
             names = [n for n in visible_names if n not in selected_names]
         return [by_name[n] for n in names if n in by_name]
-
-    def _restore_selection(self, names: List[str]):
-        wanted = set(names)
-        for item in self.playlist_tree.get_children():
-            if self.playlist_tree.item(item, "text") in wanted:
-                self.playlist_tree.selection_add(item)
-        self._update_selection_summary()
 
     def _update_selection_summary(self):
         total = len(self.playlist_tree.get_children())
@@ -1903,7 +1889,11 @@ def run_headless_export(config_manager) -> bool:
     entry_index = build_entry_index(collection_el)
     all_nodes = walk_playlist_nodes(playlists_root)
 
-    nodes = resolve_selected_nodes(all_nodes, settings.selected_playlists, settings.selection_mode)
+    active_preset = settings.playlist_presets.get(settings.active_preset) if settings.active_preset else None
+    if active_preset and settings.active_preset != DEFAULT_PRESET_NAME:
+        nodes = resolve_selected_nodes(all_nodes, active_preset.get("playlists", []), active_preset.get("mode", "include"))
+    else:
+        nodes = list(all_nodes)  # Default (Auto) = everything, including playlists created since the last save
     if not nodes:
         logger.error("Export: no playlists/smart lists selected — open the tool to choose some first.")
         return False
