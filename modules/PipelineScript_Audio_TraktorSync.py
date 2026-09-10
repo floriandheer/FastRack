@@ -375,7 +375,6 @@ class PlaylistSyncUI:
         # DJ Library path (destination)
         ttk.Label(config_frame, text="DJ Library Folder:").grid(row=current_row, column=0, sticky="w", padx=10, pady=10)
         self.dj_library_var = tk.StringVar()
-        self.dj_library_var.trace_add('write', lambda *args: self.recalculate_new_tracks_if_loaded())
         ttk.Entry(config_frame, textvariable=self.dj_library_var, width=50).grid(row=current_row, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(config_frame, text="Browse", command=self.browse_dj_library).grid(row=current_row, column=2, padx=5, pady=10)
 
@@ -1184,101 +1183,6 @@ class PlaylistSyncUI:
         if return_details:
             return new_count, new_tracks_details
         return new_count
-
-    def calculate_new_track_counts(self, library_dict):
-        """Calculate and update new track counts for all playlists"""
-        # Only calculate if there's an existing export XML file
-        export_xml = self.export_xml_var.get()
-        if not export_xml or not os.path.exists(export_xml):
-            # No existing XML - all tracks are new, so just return
-            # (keep the default new_track_count of 0 to indicate not calculated)
-            return
-
-        self.status_var.set("Step 1/3: Extracting track locations from iTunes library...")
-        self.root.update_idletasks()
-
-        # First, extract track ID to location mapping from the library
-        track_id_to_location = {}
-
-        # Find the Tracks dictionary
-        tracks_element = None
-        for i in range(len(library_dict)):
-            if library_dict[i].tag == 'key' and library_dict[i].text == 'Tracks':
-                if i + 1 < len(library_dict) and library_dict[i + 1].tag == 'dict':
-                    tracks_element = library_dict[i + 1]
-                break
-
-        if tracks_element is None:
-            return
-
-        # Extract track locations with progress
-        total_track_elements = len(tracks_element) // 2
-        for i in range(0, len(tracks_element), 2):
-            if i+1 >= len(tracks_element):
-                break
-
-            # Update progress every 100 tracks
-            if i % 200 == 0:
-                progress = (i // 2) + 1
-                self.status_var.set(f"Step 1/3: Extracting track locations ({progress}/{total_track_elements})...")
-                self.root.update_idletasks()
-
-            if tracks_element[i].tag == 'key' and tracks_element[i+1].tag == 'dict':
-                track_id = tracks_element[i].text
-                track_dict = tracks_element[i+1]
-
-                # Find the Location key
-                for j in range(0, len(track_dict), 2):
-                    if j+1 >= len(track_dict):
-                        break
-
-                    if track_dict[j].tag == 'key' and track_dict[j].text == 'Location':
-                        location = track_dict[j+1].text
-                        if location:
-                            # Decode the file:// URL
-                            try:
-                                from urllib.parse import unquote, urlparse
-                                parsed = urlparse(location)
-                                file_path = unquote(parsed.path)
-                                # Fix Windows paths
-                                if file_path.startswith('/') and ':' in file_path:
-                                    file_path = file_path[1:]
-                                if os.path.exists(file_path):
-                                    track_id_to_location[track_id] = file_path
-                            except:
-                                pass
-                        break
-
-        self.status_var.set(f"Step 2/3: Mapping playlist tracks...")
-        self.root.update_idletasks()
-
-        # Now calculate new track counts for each playlist
-        total_playlists = len(self.all_playlists)
-        for idx, playlist_name in enumerate(self.all_playlists, 1):
-            # Update progress for each playlist
-            self.status_var.set(f"Step 3/3: Checking new tracks ({idx}/{total_playlists}): {playlist_name[:30]}...")
-            self.root.update_idletasks()
-
-            playlist_info = self.playlist_data.get(playlist_name, {})
-            track_ids = playlist_info.get('track_ids', [])
-
-            # Get locations for these track IDs
-            track_locations = [track_id_to_location[tid] for tid in track_ids if tid in track_id_to_location]
-
-            # Count how many are new
-            new_count = self.count_new_tracks(track_locations)
-            self.playlist_data[playlist_name]['new_track_count'] = new_count
-
-        # Refresh the display
-        self.filter_playlists()
-        self.status_var.set(f"Loaded {len(self.all_playlists)} playlists - new track counts calculated")
-
-    def recalculate_new_tracks_if_loaded(self):
-        """Recalculate new track counts if playlists are already loaded"""
-        if hasattr(self, 'itunes_root') and self.itunes_root is not None and self.all_playlists:
-            library_dict = next((child for child in self.itunes_root if child.tag == 'dict'), None)
-            if library_dict:
-                self.calculate_new_track_counts(library_dict)
 
     def calculate_new_tracks_for_selected(self):
         """Calculate new track counts only for selected playlists (button handler)"""

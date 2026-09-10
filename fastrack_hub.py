@@ -353,54 +353,59 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
         # Header buttons (right side of header)
         buttons_frame = tk.Frame(inner_header, bg=COLORS["bg_secondary"])
-        buttons_frame.grid(row=0, column=2, sticky="e", padx=20)
+        buttons_frame.grid(row=0, column=2, sticky="e", padx=28)
 
-        # Button style
-        btn_font = font.Font(family="Segoe UI", size=10)
+        # Button style - sized generously (padx/pady below) since the 1px
+        # default in make_flat_button reads as a cramped, low-effort chip
+        # when used for a whole row of header-level actions.
+        btn_font = font.Font(family="Segoe UI", size=11)
+        btn_padding = dict(padx=16, pady=9)
 
         # Refresh button
         refresh_btn = make_flat_button(
             buttons_frame, "Refresh", self.refresh_projects,
             bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
-            hover_bg=COLORS["border"], font=btn_font,
+            hover_bg=COLORS["border"], font=btn_font, **btn_padding,
         )
-        refresh_btn.pack(side=tk.LEFT, padx=(0, 5), pady=20)
+        refresh_btn.pack(side=tk.LEFT, padx=(0, 8), pady=15)
         self._add_header_hint(refresh_btn, "Refresh Projects (F5)")
 
         # Open Logs button
         logs_btn = make_flat_button(
             buttons_frame, "Logs", self.open_logs_folder,
             bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
-            hover_bg=COLORS["border"], font=btn_font,
+            hover_bg=COLORS["border"], font=btn_font, **btn_padding,
         )
-        logs_btn.pack(side=tk.LEFT, padx=5, pady=20)
+        logs_btn.pack(side=tk.LEFT, padx=8, pady=15)
         self._add_header_hint(logs_btn, "Open Logs Folder (Ctrl+L)")
 
         # Settings button
         settings_btn = make_flat_button(
             buttons_frame, "Settings", self.open_settings,
             bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
-            hover_bg=COLORS["border"], font=btn_font,
+            hover_bg=COLORS["border"], font=btn_font, **btn_padding,
         )
-        settings_btn.pack(side=tk.LEFT, padx=5, pady=20)
+        settings_btn.pack(side=tk.LEFT, padx=8, pady=15)
         self._add_header_hint(settings_btn, "Settings (Ctrl+,)")
 
         # Help button
         help_btn = make_flat_button(
             buttons_frame, "Help", self.open_help,
             bg=COLORS["bg_hover"], fg=COLORS["text_primary"],
-            hover_bg=COLORS["border"], font=btn_font,
+            hover_bg=COLORS["border"], font=btn_font, **btn_padding,
         )
-        help_btn.pack(side=tk.LEFT, padx=(0, 0), pady=20)
+        help_btn.pack(side=tk.LEFT, padx=8, pady=15)
         self._add_header_hint(help_btn, "Keyboard Shortcuts (F1)")
 
-        # Exit button (red)
+        # Exit button (red) - set apart with a wider gap since it's the one
+        # destructive action in the row and shouldn't sit shoulder-to-shoulder
+        # with the routine ones next to it.
         exit_btn = make_flat_button(
             buttons_frame, "Exit", self.root.destroy,
             bg="#c0392b", fg="white", hover_bg="#e74c3c", hover_fg="white",
-            font=btn_font,
+            font=btn_font, **btn_padding,
         )
-        exit_btn.pack(side=tk.LEFT, padx=(5, 0), pady=20)
+        exit_btn.pack(side=tk.LEFT, padx=(20, 0), pady=15)
 
     def create_main_notebook(self):
         """Create the main content area (single unified view, no tabs needed)."""
