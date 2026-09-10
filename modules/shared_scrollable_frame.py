@@ -7,6 +7,20 @@ grow taller than the window (or the screen).
 import tkinter as tk
 
 
+def safe_bind_touchpad_scroll(binder, *args):
+    """Call a Tk bind method (bind/bind_class/bind_all/unbind_all) with the
+    <TouchpadScroll> sequence, silently no-oping if this Tk build predates
+    Tk 9's TIP 684 and doesn't know the event at all - still the case for
+    the Tk 8.6 that ships with Windows Python builds, which raises
+    "bad event type or keysym" the instant it's bound. Trackpad scroll then
+    simply falls back to whatever <MouseWheel>/<Button-4/5> handling
+    already exists."""
+    try:
+        binder(*args)
+    except tk.TclError:
+        pass
+
+
 class ScrollableFrame(tk.Frame):
     """A scrollable frame widget with smooth mouse wheel scrolling."""
 
@@ -72,14 +86,19 @@ class ScrollableFrame(tk.Frame):
         # separate <TouchpadScroll> event instead, on Windows and macOS.
         # Without this, trackpad scrolling silently does nothing anywhere
         # <MouseWheel> used to handle it, while a real mouse wheel (or
-        # dragging the scrollbar thumb directly) still works fine.
-        self.canvas.bind_all("<TouchpadScroll>", self._on_touchpad_scroll)
+        # dragging the scrollbar thumb directly) still works fine. Still
+        # guarded by safe_bind_touchpad_scroll though, since plenty of
+        # installs (e.g. Windows' own python.org builds) still ship Tk 8.6,
+        # which doesn't know this event and raises TclError on the bind
+        # itself - that Tk just keeps using <MouseWheel> for the trackpad
+        # too, so no fallback handling is needed here.
+        safe_bind_touchpad_scroll(self.canvas.bind_all, "<TouchpadScroll>", self._on_touchpad_scroll)
 
     def _deactivate_mouse_wheel(self, event):
         self.canvas.unbind_all("<MouseWheel>")
         self.canvas.unbind_all("<Button-4>")
         self.canvas.unbind_all("<Button-5>")
-        self.canvas.unbind_all("<TouchpadScroll>")
+        safe_bind_touchpad_scroll(self.canvas.unbind_all, "<TouchpadScroll>")
 
     def _scroll_if_room(self, units):
         """Scroll by `units` (positive = down) only if the content is

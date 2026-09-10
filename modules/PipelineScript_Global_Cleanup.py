@@ -16,6 +16,7 @@ import logging
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from shared_window_icon import apply_category_icon
+from shared_scrollable_frame import safe_bind_touchpad_scroll
 
 # Setup logging using shared utility
 from shared_logging import get_logger, setup_logging as setup_shared_logging
@@ -53,8 +54,9 @@ class UnifiedCleaner:
         # <MouseWheel>/<Button-4/5> for an actual wheel, so a stray scroll
         # anywhere over the notebook would otherwise flip tabs unexpectedly.
         # Neutralize it outright since there's nothing else here to scroll.
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<TouchpadScroll>"):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_class("TNotebook", seq, lambda e: "break")
+        safe_bind_touchpad_scroll(self.root.bind_class, "TNotebook", "<TouchpadScroll>", lambda e: "break")
 
         # Create tabs
         self.create_folder_cleaner_tab()

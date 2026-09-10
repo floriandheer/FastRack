@@ -32,7 +32,7 @@ import tempfile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from shared_window_icon import apply_category_icon
-from shared_scrollable_frame import ScrollableFrame
+from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -920,7 +920,7 @@ class PowerAmpSyncApp:
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
-        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_all, "<TouchpadScroll>", self._on_body_touchpad_scroll)
 
     def _suppress_notebook_wheel_cycling(self, notebook: ttk.Notebook) -> None:
         """ttk::Notebook ships a standard, cross-platform Tcl binding on its
@@ -935,8 +935,8 @@ class PowerAmpSyncApp:
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_class("TNotebook", seq, lambda e: "break")
             notebook.bind(seq, self._on_notebook_mouse_wheel)
-        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
-        notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_class, "TNotebook", "<TouchpadScroll>", lambda e: "break")
+        safe_bind_touchpad_scroll(notebook.bind, "<TouchpadScroll>", self._on_notebook_touchpad_scroll)
 
     def _pointer_over_self_scrolling_widget(self, event) -> bool:
         """True while the pointer is over a widget that already scrolls

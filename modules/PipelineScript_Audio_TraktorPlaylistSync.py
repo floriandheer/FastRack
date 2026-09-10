@@ -38,7 +38,7 @@ from typing import Optional, Dict, List, Any, Tuple
 from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_open_path import open_path
-from shared_scrollable_frame import ScrollableFrame
+from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -943,8 +943,8 @@ class TraktorPlaylistSyncUI:
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_class("TNotebook", seq, lambda e: "break")
             notebook.bind(seq, self._on_notebook_mouse_wheel)
-        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
-        notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_class, "TNotebook", "<TouchpadScroll>", lambda e: "break")
+        safe_bind_touchpad_scroll(notebook.bind, "<TouchpadScroll>", self._on_notebook_touchpad_scroll)
 
         export_tab = ttk.Frame(notebook)
         notebook.add(export_tab, text="Export")
@@ -959,7 +959,7 @@ class TraktorPlaylistSyncUI:
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
-        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_all, "<TouchpadScroll>", self._on_body_touchpad_scroll)
 
     def _pointer_over_self_scrolling_widget(self, event):
         """True while the pointer is over a widget that already scrolls

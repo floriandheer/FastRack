@@ -17,7 +17,7 @@ import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from shared_window_icon import apply_category_icon
-from shared_scrollable_frame import ScrollableFrame
+from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 import xml.etree.ElementTree as ET
 import urllib.parse
 import re
@@ -166,7 +166,7 @@ class PlaylistSyncUI:
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
-        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_all, "<TouchpadScroll>", self._on_body_touchpad_scroll)
 
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
@@ -910,8 +910,8 @@ class PlaylistSyncUI:
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_class("TNotebook", seq, lambda e: "break")
             self.results_notebook.bind(seq, self._on_notebook_mouse_wheel)
-        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
-        self.results_notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+        safe_bind_touchpad_scroll(self.root.bind_class, "TNotebook", "<TouchpadScroll>", lambda e: "break")
+        safe_bind_touchpad_scroll(self.results_notebook.bind, "<TouchpadScroll>", self._on_notebook_touchpad_scroll)
 
         self.analysis_frame = ttk.Frame(self.results_notebook)
         self.results_notebook.add(self.analysis_frame, text="Library Analysis")
