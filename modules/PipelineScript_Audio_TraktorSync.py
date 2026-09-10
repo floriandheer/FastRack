@@ -3388,70 +3388,94 @@ class PlaylistSyncUI:
             self.append_to_text_widget(self.xml_text, f"Traceback: {traceback.format_exc()}\n")
             return False
 
+def run_headless_sync(args=None) -> bool:
+    """Run a full sync with no visible window, using saved settings from
+    ConfigManager. Returns True on success, False on failure/abort."""
+    outcome = {"success": True}
+
+    def _showerror(title="", message="", *a, **kw):
+        logger.error(f"{title}: {message}")
+        outcome["success"] = False
+
+    def _showwarning(title="", message="", *a, **kw):
+        logger.warning(f"{title}: {message}")
+
+    def _showinfo(title="", message="", *a, **kw):
+        logger.info(f"{title}: {message}")
+
+    def _askquestion(title="", message="", *a, **kw):
+        logger.error(f"{title}: {message} (no one to confirm in direct-run mode — "
+                      f"aborting; open the tool via the gear icon to resolve this).")
+        return "no"
+
+    messagebox.showerror = _showerror
+    messagebox.showwarning = _showwarning
+    messagebox.showinfo = _showinfo
+    messagebox.askquestion = _askquestion
+
+    root = tk.Tk()
+    root.withdraw()
+    app = PlaylistSyncUI(root)
+
+    if args:
+        if args.itunes_xml:
+            app.itunes_xml_var.set(args.itunes_xml)
+        if args.dj_library:
+            app.dj_library_var.set(args.dj_library)
+        if args.export_xml:
+            app.export_xml_var.set(args.export_xml)
+
+    if not app.itunes_xml_var.get() or not os.path.exists(app.itunes_xml_var.get()):
+        logger.error("No iTunes XML library configured — open the tool (gear icon) to set it up first.")
+        root.destroy()
+        return False
+
+    app.load_playlists()
+
+    orig_enable_buttons = app.enable_buttons
+    def _finish():
+        orig_enable_buttons()
+        root.quit()
+    app.enable_buttons = _finish
+
+    app.start_sync()
+    if not app.syncing:
+        # start_sync() bailed out synchronously (validation error) before
+        # spawning the worker thread - nothing left to wait for.
+        root.destroy()
+        return outcome["success"]
+
+    root.mainloop()
+    root.destroy()
+    return outcome["success"]
+
+
 def main():
     # Setup logging when the app actually runs (not at import time)
     setup_shared_logging("traktor_sync")
 
-    if len(sys.argv) > 1:
-        parser = argparse.ArgumentParser(description="iTunes Playlist Sync Tool")
-        parser.add_argument("--itunes-xml", required=True, help="Path to iTunes XML library file")
-        parser.add_argument("--dj-library", required=True, help="Path to DJ Library folder")
-        parser.add_argument("--export-xml", help="Path for exported XML file")
-        parser.add_argument("--skip-existing", action="store_true")
-        parser.add_argument("--convert-flac", action="store_true")
-        parser.add_argument("--preserve-album-art", action="store_true")
-        parser.add_argument("--debug", action="store_true")
-        parser.add_argument("--auto-run", action="store_true")
-        parser.add_argument("--include-playlists", help="Comma-separated list of playlists to include")
-        parser.add_argument("--exclude-playlists", help="Comma-separated list of playlists to exclude")
-        parser.add_argument("--export-xml-only", action="store_true", help="Only export XML without copying files (preserves original file paths)")
-        
-        args = parser.parse_args()
-        
-        if not args.export_xml:
-            args.export_xml = os.path.join(args.dj_library, "DJ Library.xml")
-        
-        if not os.path.exists(args.itunes_xml):
-            print(f"Error: iTunes XML file not found at {args.itunes_xml}")
-            return 1
-        
-        if not os.path.exists(args.dj_library):
-            try:
-                os.makedirs(args.dj_library)
-                print(f"Created DJ Library folder: {args.dj_library}")
-            except Exception as e:
-                print(f"Error creating DJ Library folder: {e}")
-                return 1
-        
-        if not args.auto_run:
-            print(f"This will sync playlists from {args.itunes_xml} to {args.dj_library}")
-            if args.convert_flac:
-                print("Audio files will be converted to FLAC format with album art embedding")
-            response = input("Do you want to continue? (y/n): ").strip().lower()
-            if response != 'y':
-                print("Sync cancelled by user")
-                return 0
-        
-        # Note: Command-line interface would need updates to work with new selection logic
-        # For now, the GUI interface is the primary way to use this tool
-        print("Please use the GUI interface for the improved playlist selection features.")
-        print("Starting GUI...")
-        
-        root = tk.Tk()
-        apply_category_icon(root)
-        app = PlaylistSyncUI(root)
+    parser = argparse.ArgumentParser(description="iTunes Playlist Sync Tool")
+    parser.add_argument("--itunes-xml", help="Path to iTunes XML library file (overrides saved settings)")
+    parser.add_argument("--dj-library", help="Path to DJ Library folder (overrides saved settings)")
+    parser.add_argument("--export-xml", help="Path for exported XML file (overrides saved settings)")
+    parser.add_argument("--auto-run", action="store_true",
+                         help="Run the sync immediately with saved settings, no window")
+    args = parser.parse_args()
+
+    if args.auto_run:
+        return 0 if run_headless_sync(args) else 1
+
+    root = tk.Tk()
+    apply_category_icon(root)
+    app = PlaylistSyncUI(root)
+    if args.itunes_xml:
         app.itunes_xml_var.set(args.itunes_xml)
+    if args.dj_library:
         app.dj_library_var.set(args.dj_library)
+    if args.export_xml:
         app.export_xml_var.set(args.export_xml)
-        root.mainloop()
-        return 0
-        
-    else:
-        root = tk.Tk()
-        apply_category_icon(root)
-        app = PlaylistSyncUI(root)
-        root.mainloop()
-        return 0
+    root.mainloop()
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

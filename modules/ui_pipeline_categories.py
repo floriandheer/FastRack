@@ -60,6 +60,8 @@ def _script_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         "name": spec["name"],
         "description": spec.get("description", ""),
         "icon": spec.get("icon", ""),
+        "direct_run": spec.get("direct_run", False),
+        "mode_switch": spec.get("mode_switch", False),
     }
     if "module" in spec:
         out["path"] = os.path.join(SCRIPTS_DIR, f"{spec['module']}.py")

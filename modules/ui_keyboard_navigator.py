@@ -555,13 +555,12 @@ class KeyboardNavigatorMixin:
 
     def _clear_all_item_focus(self):
         """Clear focus highlighting from all items (reset to normal background)."""
-        # Clear tool focus - reset to normal background
+        # Clear tool focus - reset to normal (resting chip) background
         for tool in self.tool_buttons:
-            tool["frame"].configure(bg=COLORS["bg_secondary"])
-            tool["content"].configure(bg=COLORS["bg_secondary"])
-            tool["icon_label"].configure(bg=COLORS["bg_secondary"])
-            tool["name_label"].configure(bg=COLORS["bg_secondary"])
-            tool["arrow_label"].configure(bg=COLORS["bg_secondary"])
+            tool["name_chip"].configure(bg=COLORS["bg_card"])
+            tool["icon_label"].configure(bg=COLORS["bg_card"])
+            tool["name_label"].configure(bg=COLORS["bg_card"])
+            tool["arrow_label"].configure(bg=COLORS["bg_card"])
         # Clear folder/notes button focus
         if hasattr(self, '_folder_btn_frame'):
             self._folder_btn_frame.configure(bg=self._folder_bg)
@@ -588,17 +587,15 @@ class KeyboardNavigatorMixin:
             # Tools + folder + notes - darken focused item background
             for idx, tool in enumerate(self.tool_buttons):
                 if idx == self.tools_focus_index:
-                    tool["frame"].configure(bg=COLORS["bg_hover"])
-                    tool["content"].configure(bg=COLORS["bg_hover"])
+                    tool["name_chip"].configure(bg=COLORS["bg_hover"])
                     tool["icon_label"].configure(bg=COLORS["bg_hover"])
                     tool["name_label"].configure(bg=COLORS["bg_hover"])
                     tool["arrow_label"].configure(bg=COLORS["bg_hover"], fg=tool["color"])
                 else:
-                    tool["frame"].configure(bg=COLORS["bg_secondary"])
-                    tool["content"].configure(bg=COLORS["bg_secondary"])
-                    tool["icon_label"].configure(bg=COLORS["bg_secondary"])
-                    tool["name_label"].configure(bg=COLORS["bg_secondary"])
-                    tool["arrow_label"].configure(bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"])
+                    tool["name_chip"].configure(bg=COLORS["bg_card"])
+                    tool["icon_label"].configure(bg=COLORS["bg_card"])
+                    tool["name_label"].configure(bg=COLORS["bg_card"])
+                    tool["arrow_label"].configure(bg=COLORS["bg_card"], fg=COLORS["text_secondary"])
 
             # Folder button highlight
             if hasattr(self, '_folder_btn_frame'):

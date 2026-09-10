@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import copy
+import glob
 import shutil
 import socket
 import argparse
@@ -123,6 +124,7 @@ class SyncSettings:
     selection_mode: str = "include"
     playlist_presets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_preset: str = ""
+    last_mode: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -631,32 +633,72 @@ def backup_file(path: str) -> str:
     return backup_path
 
 
+def resolve_selected_nodes(all_nodes: List[PlaylistNode], selected_playlists: List[str],
+                            selection_mode: str) -> List[PlaylistNode]:
+    """Mirrors TraktorPlaylistSyncUI._get_nodes_to_export()'s selection logic,
+    but driven by saved settings instead of live Treeview state."""
+    selected_names = set(selected_playlists)
+    by_name = {n.display_name: n for n in all_nodes}
+    visible_names = [n.display_name for n in all_nodes]
+    if selection_mode == "include":
+        names = [n for n in visible_names if n in selected_names]
+    else:
+        names = [n for n in visible_names if n not in selected_names]
+    return [by_name[n] for n in names if n in by_name]
+
+
+def default_export_dir(collection_nml_path: str) -> str:
+    if collection_nml_path:
+        return os.path.join(os.path.dirname(collection_nml_path), EXPORT_SUBFOLDER)
+    return os.path.join(os.path.expanduser("~"), "Desktop", EXPORT_SUBFOLDER)
+
+
 def running_traktor_processes() -> List[str]:
     """Return the subset of TRAKTOR_PROCESS_NAMES currently running, so we
     can refuse to merge into a collection.nml Traktor still has open."""
-    if sys.platform != "win32":
-        return []
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+            )
+        except Exception as e:
+            logger.warning(f"tasklist failed: {e}")
+            return []
+
+        lower_names = {n.lower() for n in TRAKTOR_PROCESS_NAMES}
+        found = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            image = line.split('","', 1)[0].lstrip('"').lower()
+            if image in lower_names and image not in (f.lower() for f in found):
+                for canonical in TRAKTOR_PROCESS_NAMES:
+                    if canonical.lower() == image:
+                        found.append(canonical)
+                        break
+        return found
+
+    # macOS / Linux: the exact executable name varies by Traktor version/
+    # bundle, so match any running process whose command name contains
+    # "traktor" rather than a fixed list.
     try:
         result = subprocess.run(
-            ["tasklist", "/FO", "CSV", "/NH"],
+            ["ps", "-A", "-o", "comm="],
             capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
         )
     except Exception as e:
-        logger.warning(f"tasklist failed: {e}")
+        logger.warning(f"ps failed: {e}")
         return []
 
-    lower_names = {n.lower() for n in TRAKTOR_PROCESS_NAMES}
     found = []
     for line in result.stdout.splitlines():
-        if not line.strip():
-            continue
-        image = line.split('","', 1)[0].lstrip('"').lower()
-        if image in lower_names and image not in (f.lower() for f in found):
-            for canonical in TRAKTOR_PROCESS_NAMES:
-                if canonical.lower() == image:
-                    found.append(canonical)
-                    break
+        name = line.strip()
+        if name and "traktor" in name.lower():
+            basename = os.path.basename(name)
+            if basename not in found:
+                found.append(basename)
     return found
 
 
@@ -1637,6 +1679,7 @@ class TraktorPlaylistSyncUI:
         )
         open_path(output_dir)
         self._save_settings_silent()
+        self.config_manager.update_settings(last_mode="export")
 
     # ------------------------------------------------------------------
     # Import
@@ -1830,7 +1873,159 @@ class TraktorPlaylistSyncUI:
             f"{added} added, {replaced} replaced, {stats.tracks_merged} track(s).\n\n"
             f"Backup saved to:\n{backup_path}",
         )
+        self.config_manager.update_settings(last_mode="import")
         self._load_nml(silent=True)
+
+
+# ============================================================================
+# HEADLESS EXECUTION (--auto-run)
+# ============================================================================
+
+def run_headless_export(config_manager) -> bool:
+    settings = config_manager.settings
+    machine_profile = (MachineProfile.from_dict(settings.this_machine) if settings.this_machine
+                        else MachineProfile(name=socket.gethostname()))
+
+    if not settings.collection_nml_path or not os.path.exists(settings.collection_nml_path):
+        logger.error("Export: collection.nml not configured or missing — open the tool to set it up.")
+        return False
+    if not machine_profile.is_configured:
+        logger.error("Export: 'This Machine' profile isn't set up — open the tool to configure it.")
+        return False
+
+    tree = load_nml(settings.collection_nml_path)
+    root_el = tree.getroot()
+    collection_el = get_collection_element(root_el)
+    playlists_root = get_playlists_root_node(root_el)
+    if collection_el is None or playlists_root is None:
+        logger.error("Export: collection.nml is missing <COLLECTION> or <PLAYLISTS>.")
+        return False
+    entry_index = build_entry_index(collection_el)
+    all_nodes = walk_playlist_nodes(playlists_root)
+
+    nodes = resolve_selected_nodes(all_nodes, settings.selected_playlists, settings.selection_mode)
+    if not nodes:
+        logger.error("Export: no playlists/smart lists selected — open the tool to choose some first.")
+        return False
+
+    output_dir = settings.export_output_dir or default_export_dir(settings.collection_nml_path)
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in machine_profile.name) or "machine"
+    output_path = os.path.join(output_dir, f"PlaylistSync_{safe_name}_{timestamp}.nml")
+
+    try:
+        export_root, stats = build_export_root(root_el, nodes, entry_index, machine_profile)
+        write_nml(export_root, output_path)
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        return False
+
+    logger.info(f"Exported to: {output_path}")
+    logger.info(f"Playlists exported: {stats.playlists_exported}, smart lists: {stats.smartlists_exported}, "
+                f"tracks: {stats.tracks_exported}")
+    if stats.tracks_skipped_outside_library:
+        logger.warning(f"{stats.tracks_skipped_outside_library} track(s) skipped - outside "
+                       f"{machine_profile.name}'s registered library root.")
+    if stats.tracks_missing_from_collection:
+        logger.warning(f"{stats.tracks_missing_from_collection} track reference(s) had no matching "
+                       f"COLLECTION entry and were dropped.")
+
+    config_manager.update_settings(last_mode="export")
+    return True
+
+
+def run_headless_import(config_manager) -> bool:
+    settings = config_manager.settings
+    machine_profile = (MachineProfile.from_dict(settings.this_machine) if settings.this_machine
+                        else MachineProfile(name=socket.gethostname()))
+
+    if not settings.collection_nml_path or not os.path.exists(settings.collection_nml_path):
+        logger.error("Import: collection.nml not configured or missing — open the tool to set it up.")
+        return False
+    if not machine_profile.is_configured:
+        logger.error("Import: 'This Machine' profile isn't set up — open the tool to configure it.")
+        return False
+
+    output_dir = settings.export_output_dir or default_export_dir(settings.collection_nml_path)
+    candidates = sorted(glob.glob(os.path.join(output_dir, "PlaylistSync_*.nml")),
+                         key=os.path.getmtime, reverse=True)
+    if not candidates:
+        logger.error(f"Import: no exported PlaylistSync_*.nml file found in {output_dir} — "
+                     f"export one first, or open the tool to browse for a file.")
+        return False
+    import_path = candidates[0]
+
+    try:
+        import_root = load_nml(import_path).getroot()
+        src_profile = read_export_metadata(import_root)
+        if src_profile is None:
+            raise ValueError("not a Playlist Sync export file")
+        import_collection_el = get_collection_element(import_root)
+        if import_collection_el is None:
+            raise ValueError("missing <COLLECTION>")
+        import_entry_index = build_entry_index(import_collection_el)
+        import_playlists_root = get_playlists_root_node(import_root)
+        import_nodes = walk_playlist_nodes(import_playlists_root) if import_playlists_root is not None else []
+    except Exception as e:
+        logger.error(f"Import: could not read {import_path}: {e}")
+        return False
+
+    if not import_nodes:
+        logger.error(f"Import: {import_path} has no playlists/smart lists.")
+        return False
+
+    running = running_traktor_processes()
+    if running:
+        logger.error(f"Import: Traktor is running ({', '.join(running)}) — close it first; merging while "
+                     f"it's open risks your changes being overwritten.")
+        return False
+
+    logger.info(f"Importing from: {import_path} (from {src_profile.name}, "
+                f"all {len(import_nodes)} playlist(s)/smart list(s))")
+
+    try:
+        backup_path = backup_file(settings.collection_nml_path)
+    except Exception as e:
+        logger.error(f"Import: backup failed, aborting — nothing was changed: {e}")
+        return False
+
+    try:
+        fresh_root = load_nml(settings.collection_nml_path).getroot()
+        fresh_collection_el = get_collection_element(fresh_root)
+        fresh_playlists_root = get_playlists_root_node(fresh_root)
+        if fresh_collection_el is None or fresh_playlists_root is None:
+            raise ValueError("destination collection.nml is missing <COLLECTION> or <PLAYLISTS>")
+        fresh_entry_index = build_entry_index(fresh_collection_el)
+
+        stats = ImportStats()
+        for node in import_nodes:
+            merge_node_into_collection(node, import_entry_index, fresh_playlists_root, fresh_collection_el,
+                                        fresh_entry_index, src_profile, machine_profile, stats)
+        write_nml_atomic(fresh_root, settings.collection_nml_path)
+    except Exception as e:
+        logger.error(f"Import failed: {e} — collection.nml was not modified, backup at {backup_path}")
+        return False
+
+    logger.info(f"Imported into: {settings.collection_nml_path} (backup: {backup_path})")
+    logger.info(f"Playlists: {stats.playlists_added} added, {stats.playlists_replaced} replaced; "
+                f"smart lists: {stats.smartlists_added} added, {stats.smartlists_replaced} replaced; "
+                f"tracks merged: {stats.tracks_merged}")
+    if stats.tracks_skipped_outside_library:
+        logger.warning(f"{stats.tracks_skipped_outside_library} track(s) skipped - outside "
+                       f"{src_profile.name}'s registered library root.")
+    if stats.tracks_missing_from_export:
+        logger.warning(f"{stats.tracks_missing_from_export} track reference(s) missing from the export file's collection.")
+
+    config_manager.update_settings(last_mode="import")
+    return True
+
+
+def run_headless(args=None) -> bool:
+    config_manager = ConfigManager()
+    if config_manager.settings.last_mode == "import":
+        return run_headless_import(config_manager)
+    return run_headless_export(config_manager)
 
 
 # ============================================================================
@@ -1842,7 +2037,12 @@ def main():
 
     parser = argparse.ArgumentParser(description="Traktor Playlist Sync")
     parser.add_argument("--collection-nml", help="Path to Traktor collection.nml")
+    parser.add_argument("--auto-run", action="store_true",
+                         help="Run export or import (whichever was last used) immediately with saved settings, no window")
     args, _unknown = parser.parse_known_args()
+
+    if args.auto_run:
+        return 0 if run_headless() else 1
 
     root = tk.Tk()
     apply_category_icon(root)

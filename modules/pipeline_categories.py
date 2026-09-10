@@ -322,6 +322,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "module": "PipelineScript_Audio_TraktorSync",
                         "description": "Synchronize iTunes playlists to Traktor DJ library with WAV conversion",
                         "icon": "💻",
+                        "direct_run": True,
                     },
                     {
                         "key": "traktor_playlist_sync",
@@ -329,6 +330,8 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "module": "PipelineScript_Audio_TraktorPlaylistSync",
                         "description": "Export native Traktor playlists/smart lists to a USB-ready file, then import and auto-merge on another machine",
                         "icon": "🗂️",
+                        "direct_run": True,
+                        "mode_switch": True,
                     },
                     {
                         "key": "poweramp_sync",

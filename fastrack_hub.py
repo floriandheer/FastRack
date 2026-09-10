@@ -505,14 +505,70 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Setup Project Manager with integrated project tracker, tools, and operations
         self.setup_project_manager(main_content)
 
+    def _compute_sidebar_width(self):
+        """Widest possible tool row across every category and subcategory, so
+        a label is never clipped no matter which category is selected.
+        Measured by building real (never-shown) probe rows via
+        _create_tool_button itself, so this can't silently drift out of sync
+        with that method's actual layout. Clamped to a sane range so one
+        long name can't take over the window."""
+        name_font = font.Font(family="Segoe UI", size=10)
+        icon_font = font.Font(family="Segoe UI Emoji", size=14)
+
+        probe_parent = tk.Frame(self.root)
+        saved_tool_buttons, self.tool_buttons = self.tool_buttons, []
+
+        def probe_chrome(icon_text, name_text, direct_run, mode_switch=False):
+            for child in probe_parent.winfo_children():
+                child.destroy()
+            self._create_tool_button(probe_parent, "GLOBAL", "__probe__", None,
+                                      {"name": name_text, "icon": icon_text, "direct_run": direct_run,
+                                       "mode_switch": mode_switch})
+            probe_parent.update_idletasks()
+            row_width = probe_parent.winfo_children()[0].winfo_reqwidth()
+            return row_width - name_font.measure(name_text) - icon_font.measure(icon_text)
+
+        chrome_with_gear = probe_chrome("X", "M", True)
+        chrome_plain = probe_chrome("X", "M", False)
+        chrome_with_gear_and_switch = probe_chrome("X", "M", True, mode_switch=True)
+
+        widest = MIN_SIDEBAR_WIDTH = 280
+        for cat in PIPELINE_CATEGORIES.values():
+            scripts = list(cat.get("scripts", {}).values())
+            for sub in cat.get("subcategories", {}).values():
+                scripts.extend(sub.get("scripts", {}).values())
+            for script in scripts:
+                if script.get("mode_switch"):
+                    chrome = chrome_with_gear_and_switch
+                elif script.get("direct_run"):
+                    chrome = chrome_with_gear
+                else:
+                    chrome = chrome_plain
+                width = chrome + icon_font.measure(script.get("icon", "")) + name_font.measure(script.get("name", ""))
+                widest = max(widest, width)
+
+        probe_parent.destroy()
+        self.tool_buttons = saved_tool_buttons
+
+        # A row's own reqwidth (above) only covers the row itself. Between
+        # left_panel_container's edge and tools_container there's also: the
+        # ScrollableFrame's scrollbar (width=16), category_panel_outer's
+        # padx=15*2, category_panel's padx=1*2, and tools_section's
+        # padx=10*2 - none of which the probe row sees. Plus a small margin
+        # for font-metric rounding across platforms.
+        outer_chrome = 16 + 30 + 2 + 20
+        return max(MIN_SIDEBAR_WIDTH, min(440, widest + outer_chrome + 10))
+
     def setup_project_manager(self, parent_frame):
         """Setup the unified Project Manager with categories, operations, and tools."""
         # Main container with two columns
         main_container = tk.Frame(parent_frame, bg=COLORS["bg_primary"])
         main_container.pack(fill=tk.BOTH, expand=True)
 
-        # Left panel container (fixed width)
-        left_panel_container = tk.Frame(main_container, bg=COLORS["bg_card"], width=280)
+        # Left panel container - sized to fit the widest tool label across
+        # every category (capped) so names are never clipped, rather than a
+        # fixed width.
+        left_panel_container = tk.Frame(main_container, bg=COLORS["bg_card"], width=self._compute_sidebar_width())
         left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 15), pady=0)
         left_panel_container.pack_propagate(False)
 
@@ -1296,82 +1352,162 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.notes_button_container.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=(5, 10))
             self._update_notes_button(primary)
 
+    def _get_traktor_playlist_mode(self):
+        """Which mode (export/import) direct-run will replay for Sync Traktor
+        Playlists - read straight from that script's own saved settings."""
+        try:
+            import PipelineScript_Audio_TraktorPlaylistSync as traktor_playlist_sync
+            mode = traktor_playlist_sync.ConfigManager().settings.last_mode
+            return "import" if mode == "import" else "export"
+        except Exception as e:
+            logger.warning(f"Could not read Traktor Playlist Sync mode: {e}")
+            return "export"
+
+    def _set_traktor_playlist_mode(self, mode):
+        try:
+            import PipelineScript_Audio_TraktorPlaylistSync as traktor_playlist_sync
+            traktor_playlist_sync.ConfigManager().update_settings(last_mode=mode)
+        except Exception as e:
+            logger.warning(f"Could not save Traktor Playlist Sync mode: {e}")
+
+    def _create_mode_switch(self, parent):
+        """Two stacked half-height segments acting as a single switch (only
+        one selected at a time) - lets you pick which mode Sync Traktor
+        Playlists' direct-run will replay (out=export, in=import) without
+        opening the full tool. Each option keeps a consistent color
+        (out=green, in=red) whether selected or not, so the two stay
+        identifiable at a glance."""
+        switch_font = font.Font(family="Segoe UI", size=8)
+        out_color, in_color = COLORS["success"], COLORS["error"]
+
+        switch_frame = tk.Frame(
+            parent, bg=COLORS["bg_card"], cursor="hand2",
+            highlightthickness=1, highlightbackground=COLORS["border"], highlightcolor=COLORS["border"]
+        )
+        switch_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        out_label = tk.Label(switch_frame, text="out", font=switch_font)
+        out_label.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 1))
+        in_label = tk.Label(switch_frame, text="in", font=switch_font)
+        in_label.pack(fill=tk.BOTH, expand=True, padx=8, pady=(1, 4))
+
+        def refresh(mode):
+            if mode == "export":
+                out_label.configure(bg=out_color, fg=COLORS["bg_primary"])
+                in_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_primary"])
+            else:
+                out_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_primary"])
+                in_label.configure(bg=in_color, fg=COLORS["bg_primary"])
+
+        def select(mode):
+            self._set_traktor_playlist_mode(mode)
+            refresh(mode)
+
+        refresh(self._get_traktor_playlist_mode())
+        out_label.bind("<Button-1>", lambda e: select("export"))
+        in_label.bind("<Button-1>", lambda e: select("import"))
+
     def _create_tool_button(self, parent, category_key, script_key, subcat_key, script_data):
-        """Create a professional tool button."""
+        """Create a professional tool button: an optional settings-gear chip
+        (for tools that can run directly from this row) followed by a
+        name/arrow chip that fills the rest of the row."""
         color = CATEGORY_COLORS.get(category_key, COLORS["accent"])
         icon = script_data.get("icon", "")
         name = script_data.get("name", script_key)
+        has_gear = bool(script_data.get("direct_run"))
 
-        # Button frame with left color accent
+        icon_font = font.Font(family="Segoe UI Emoji", size=14)
+        name_font = font.Font(family="Segoe UI", size=10)
+
+        # Row frame with left color accent
         btn_frame = tk.Frame(parent, bg=COLORS["bg_secondary"], cursor="hand2")
         btn_frame.pack(fill=tk.X, pady=3)
 
-        # Color accent bar on left
         accent_bar = tk.Frame(btn_frame, bg=color, width=4)
         accent_bar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Content area
         content = tk.Frame(btn_frame, bg=COLORS["bg_secondary"])
         content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=10)
 
-        # Icon
-        icon_label = tk.Label(
-            content,
-            text=icon,
-            font=font.Font(family="Segoe UI Emoji", size=14),
-            fg=color,
-            bg=COLORS["bg_secondary"]
-        )
-        icon_label.pack(side=tk.LEFT)
+        gear_chip = None
+        gear_label = None
+        if has_gear:
+            gear_chip = tk.Frame(
+                content, bg=COLORS["bg_card"], cursor="hand2",
+                highlightthickness=1, highlightbackground=COLORS["border"], highlightcolor=COLORS["border"]
+            )
+            gear_chip.pack(side=tk.LEFT, fill=tk.Y)
+            gear_label = tk.Label(gear_chip, text="⚙️", font=icon_font, fg=COLORS["text_secondary"], bg=COLORS["bg_card"])
+            gear_label.pack(padx=10, pady=6, fill=tk.Y, expand=True)
 
-        # Name
-        name_label = tk.Label(
-            content,
-            text=name,
-            font=font.Font(family="Segoe UI", size=10),
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_secondary"],
-            anchor="w"
-        )
-        name_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+            spacer = tk.Frame(content, bg=COLORS["bg_secondary"], width=8)
+            spacer.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Arrow indicator
-        arrow_label = tk.Label(
-            content,
-            text=">",
-            font=font.Font(family="Segoe UI", size=10),
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_secondary"]
-        )
-        arrow_label.pack(side=tk.RIGHT)
+        if script_data.get("mode_switch"):
+            self._create_mode_switch(content)
 
-        # Hover effects
-        def on_enter(e):
-            btn_frame.configure(bg=COLORS["bg_hover"])
-            content.configure(bg=COLORS["bg_hover"])
+            spacer2 = tk.Frame(content, bg=COLORS["bg_secondary"], width=8)
+            spacer2.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Name/arrow chip - fills the remaining width of the row
+        name_chip = tk.Frame(
+            content, bg=COLORS["bg_card"], cursor="hand2",
+            highlightthickness=1, highlightbackground=COLORS["border"], highlightcolor=COLORS["border"]
+        )
+        name_chip.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        icon_label = tk.Label(name_chip, text=icon, font=icon_font, fg=color, bg=COLORS["bg_card"])
+        icon_label.pack(side=tk.LEFT, padx=(10, 0), pady=6)
+
+        name_label = tk.Label(name_chip, text=name, font=name_font, fg=COLORS["text_primary"], bg=COLORS["bg_card"], anchor="w")
+        name_label.pack(side=tk.LEFT, padx=(8, 0), pady=6, fill=tk.X, expand=True)
+
+        arrow_label = tk.Label(name_chip, text=">", font=name_font, fg=COLORS["text_secondary"], bg=COLORS["bg_card"])
+        arrow_label.pack(side=tk.RIGHT, padx=(0, 10), pady=6)
+
+        # Hover effects - each chip highlights independently, since they
+        # trigger different actions (gear opens settings, name runs directly)
+        def on_gear_enter(e):
+            gear_chip.configure(bg=COLORS["bg_hover"])
+            gear_label.configure(bg=COLORS["bg_hover"], fg=color)
+
+        def on_gear_leave(e):
+            gear_chip.configure(bg=COLORS["bg_card"])
+            gear_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_secondary"])
+
+        def on_gear_click(e):
+            self.run_script(category_key, script_key, subcat_key)
+
+        if has_gear:
+            for widget in [gear_chip, gear_label]:
+                widget.bind("<Enter>", on_gear_enter)
+                widget.bind("<Leave>", on_gear_leave)
+                widget.bind("<Button-1>", on_gear_click)
+
+        def on_name_enter(e):
+            name_chip.configure(bg=COLORS["bg_hover"])
             icon_label.configure(bg=COLORS["bg_hover"])
             name_label.configure(bg=COLORS["bg_hover"])
             arrow_label.configure(bg=COLORS["bg_hover"], fg=color)
 
-        def on_leave(e):
-            btn_frame.configure(bg=COLORS["bg_secondary"])
-            content.configure(bg=COLORS["bg_secondary"])
-            icon_label.configure(bg=COLORS["bg_secondary"])
-            name_label.configure(bg=COLORS["bg_secondary"])
-            arrow_label.configure(bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"])
+        def on_name_leave(e):
+            name_chip.configure(bg=COLORS["bg_card"])
+            icon_label.configure(bg=COLORS["bg_card"])
+            name_label.configure(bg=COLORS["bg_card"])
+            arrow_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_secondary"])
 
-        def on_click(e):
-            self.run_script(category_key, script_key, subcat_key)
+        def on_name_click(e):
+            self.run_script(category_key, script_key, subcat_key,
+                             direct_run=script_data.get("direct_run", False))
 
-        for widget in [btn_frame, content, icon_label, name_label, arrow_label]:
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-            widget.bind("<Button-1>", on_click)
+        for widget in [name_chip, icon_label, name_label, arrow_label]:
+            widget.bind("<Enter>", on_name_enter)
+            widget.bind("<Leave>", on_name_leave)
+            widget.bind("<Button-1>", on_name_click)
 
         # Store tool button reference for keyboard navigation
         self.tool_buttons.append({
-            "frame": btn_frame,
-            "content": content,
+            "name_chip": name_chip,
             "icon_label": icon_label,
             "name_label": name_label,
             "arrow_label": arrow_label,
@@ -2352,7 +2488,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # If not found, clear selection
         self._clear_category_selection()
 
-    def run_script(self, category_key, script_key, subcat_key=None):
+    def run_script(self, category_key, script_key, subcat_key=None, direct_run=False):
         """Run a script."""
         # Get script data
         category = PIPELINE_CATEGORIES.get(category_key, {})
@@ -2391,11 +2527,15 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Run the script
         self.update_status(f"Starting: {script_data['name']}", "info")
 
+        args = list(script_config.get("args", []))
+        if direct_run:
+            args.append("--auto-run")
+
         # Run script in a separate thread
         threading.Thread(
             target=lambda: ScriptRunner.run_script(
                 script_path,
-                args=script_config.get("args", []),
+                args=args,
                 env_vars=script_config.get("env_vars", {}),
                 callback=self.update_status
             ),
