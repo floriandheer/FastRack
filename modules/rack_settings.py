@@ -1,7 +1,7 @@
 """
-Rak Settings Module
+Rack Settings Module
 
-Centralized settings for FastRak Pipeline Manager.
+Centralized settings for FastRack.
 Handles paths, software defaults, and other configuration.
 """
 
@@ -113,12 +113,12 @@ def _default_software_sync() -> Dict[str, str]:
 
 
 def _load_setup_seed() -> Optional[Dict]:
-    """First-run seed for rak_config.json.
+    """First-run seed for rack_config.json.
 
-    rak_settings is the single runtime reader of pipeline config.
+    rack_settings is the single runtime reader of pipeline config.
     setup_environment used to be the only way to push values from the
-    project-root setup_config.json into rak_config.json; this function lets
-    RakSettings pull the same values itself the first time it runs on a new
+    project-root setup_config.json into rack_config.json; this function lets
+    RackSettings pull the same values itself the first time it runs on a new
     machine.
 
     Returns a dict with optional keys ``drives`` and ``software_sync`` that
@@ -155,9 +155,9 @@ def _load_setup_seed() -> Optional[Dict]:
     return overrides
 
 
-class RakSettings:
+class RackSettings:
     """
-    Manages settings for FastRak Pipeline Manager.
+    Manages settings for FastRack.
 
     Provides centralized access to paths, software defaults, and settings,
     with support for drive validation and per-category configuration.
@@ -220,7 +220,7 @@ class RakSettings:
         # UI preferences
         "ui": {
             "start_fullscreen": False,
-            # When True, the FastRak hub window stays at the bottom of
+            # When True, the FastRack hub window stays at the bottom of
             # the Windows z-order — clicking it does not bring it to
             # the foreground, other apps always appear on top.
             # Standalone module windows (Tk Toplevels from subprocess
@@ -279,7 +279,7 @@ class RakSettings:
         if config_path is None:
             app_data = _get_appdata_path()
             app_data.mkdir(parents=True, exist_ok=True)
-            self.config_path = app_data / "rak_config.json"
+            self.config_path = app_data / "rack_config.json"
         else:
             self.config_path = Path(config_path)
 
@@ -289,9 +289,9 @@ class RakSettings:
     def _load_or_create(self) -> Dict:
         """Load configuration from file or create default.
 
-        On first run (no rak_config.json yet), the project-root
+        On first run (no rack_config.json yet), the project-root
         setup_config.json is used as a one-time seed for drives and
-        software_sync paths. After this initial save, rak_config.json is
+        software_sync paths. After this initial save, rack_config.json is
         canonical and setup_config.json is no longer consulted at runtime.
         """
         import copy
@@ -405,11 +405,11 @@ class RakSettings:
         self._save()
 
     def get_always_on_bottom(self) -> bool:
-        """Whether the FastRak hub stays beneath all other windows."""
+        """Whether the FastRack hub stays beneath all other windows."""
         return self.config.get("ui", {}).get("always_on_bottom", True)
 
     def set_always_on_bottom(self, value: bool):
-        """Set whether the FastRak hub stays beneath all other windows."""
+        """Set whether the FastRack hub stays beneath all other windows."""
         if "ui" not in self.config:
             self.config["ui"] = {}
         self.config["ui"]["always_on_bottom"] = value
@@ -454,7 +454,7 @@ class RakSettings:
     # ----- Business / invoices paths --------------------------------
 
     def get_boekhouding_base_explicit(self) -> str:
-        """Raw user-set value from rak_config.json — empty if unset."""
+        """Raw user-set value from rack_config.json — empty if unset."""
         return (self.config.get("business") or {}).get("boekhouding_base", "")
 
     def get_boekhouding_base(self) -> str:
@@ -898,37 +898,37 @@ class RakSettings:
 
 
 # Singleton instance for easy access
-_instance: Optional[RakSettings] = None
+_instance: Optional[RackSettings] = None
 
 
-def get_rak_settings() -> RakSettings:
+def get_rack_settings() -> RackSettings:
     """
-    Get the singleton RakSettings instance.
+    Get the singleton RackSettings instance.
 
     This provides a convenient way for modules to access settings
     without needing to create their own instance.
 
     Returns:
-        RakSettings singleton instance
+        RackSettings singleton instance
     """
     global _instance
     if _instance is None:
-        _instance = RakSettings()
+        _instance = RackSettings()
     return _instance
 
 
 # Backwards compatibility aliases
-get_path_config = get_rak_settings
-get_config = get_rak_settings
-PathConfig = RakSettings
-PipelineConfig = RakSettings
+get_path_config = get_rack_settings
+get_config = get_rack_settings
+PathConfig = RackSettings
+PipelineConfig = RackSettings
 
 
 # Example usage and testing
 if __name__ == "__main__":
-    settings = RakSettings()
+    settings = RackSettings()
 
-    print("=== Rak Settings ===")
+    print("=== Rack Settings ===")
     print(f"Work Drive: {settings.get_work_drive()}")
     print(f"Archive Base: {settings.get_archive_base()}")
     print()

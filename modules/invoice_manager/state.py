@@ -187,7 +187,7 @@ class AppState:
         monitor.set_order_list_callback(_on_orders)
 
         # The legacy InvoiceFiler derives library_base from
-        # rak_settings.get_active_base(), which can disagree with
+        # rack_settings.get_active_base(), which can disagree with
         # global_invoice config.paths.boekhouding_base. Pin it to the
         # path the rest of the app reads so "Orders → File quarter
         # invoices…" lands in the same place as everything else.

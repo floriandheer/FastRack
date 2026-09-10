@@ -75,7 +75,7 @@ def install_styles(root: tk.Misc, *, set_theme: bool = True) -> None:
     """Register every ttk style the shell + sections rely on.
 
     Called once at app startup, after the root window exists. When
-    InvoiceManager is embedded inside another app (e.g. fastrak_hub),
+    InvoiceManager is embedded inside another app (e.g. fastrack_hub),
     pass ``set_theme=False`` so we don't override the host's chosen
     ttk theme — only the named ``InvApp.*`` styles get registered,
     which the host doesn't use.

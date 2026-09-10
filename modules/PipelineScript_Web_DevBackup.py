@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Web_DevBackup.py
@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import parse_wp_config as _shared_parse_wp_config
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 
 logger = get_logger("web_devbackup")
 
@@ -61,7 +61,7 @@ class DevBackupConfig:
     def _default_config(self) -> Dict:
         archive_root = ""
         try:
-            archive_root = get_rak_settings().get_archive_path("Web")
+            archive_root = get_rack_settings().get_archive_path("Web")
         except Exception as e:
             logger.warning(f"Could not resolve default archive path: {e}")
 
@@ -124,7 +124,7 @@ class DevBackupConfig:
         root = self.config.get("backup_root", "")
         if not root:
             try:
-                root = get_rak_settings().get_archive_path("Web")
+                root = get_rack_settings().get_archive_path("Web")
             except Exception:
                 root = ""
         return root

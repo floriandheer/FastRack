@@ -180,19 +180,19 @@ def _resolve_folder_path(project_row: Dict) -> Path:
     work-drive path for active projects.
 
     Self-contained copy of the same resolution logic used by
-    RenameManager/ArchiveManager in fastrak_project_explorer.py —
+    RenameManager/ArchiveManager in fastrack_project_explorer.py —
     duplicated here (rather than imported) so this module stays UI-free
     and importable without pulling in Tkinter, matching how ArchiveManager
     and RenameManager each already keep their own copy rather than share
     one.
     """
-    from rak_settings import get_rak_settings
+    from rack_settings import get_rack_settings
     stored_path = project_row.get("path", "")
     status = project_row.get("status", "active")
     if status != "active":
         return Path(stored_path)
     try:
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         folder = settings.convert_to_work_drive_path(stored_path)
         if not Path(folder).exists():
             folder = stored_path
@@ -394,7 +394,7 @@ def merge_project_with_order(db, project_row: Dict, order_row: Dict, order: Dict
 # Document access — Project Details / Order Details / Invoice
 # ============================================================
 #
-# Used by the Project Tracker's details panel (fastrak_project_explorer.py)
+# Used by the Project Tracker's details panel (fastrack_project_explorer.py)
 # to open a project's own documentation, for any category. Physical
 # projects linked to a WooCommerce order additionally get order details
 # and an invoice. All three live side by side in the project's _LIBRARY

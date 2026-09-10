@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Web_DevServer.py
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 
 logger = get_logger("web_devserver")
 
@@ -41,7 +41,7 @@ def _to_active_base_path(folder: str) -> str:
     (e.g. ``D:\\_work\\Active\\Web\\...``). npm/pnpm misbehave on subst drives
     when node_modules contains symlinks, so we always run from the real path."""
     try:
-        return get_rak_settings().to_active_base_path(folder)
+        return get_rack_settings().to_active_base_path(folder)
     except Exception:
         return folder
 

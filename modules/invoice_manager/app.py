@@ -50,7 +50,7 @@ class InvoiceManager:
     """Wires the shell + every section together. Owns the AppState.
 
     Can run as a standalone window OR be embedded inside another
-    Tk app's frame (fastrak_hub mounts it inside the Business panel).
+    Tk app's frame (fastrack_hub mounts it inside the Business panel).
     """
 
     def __init__(self, parent, *, embedded: bool = False,

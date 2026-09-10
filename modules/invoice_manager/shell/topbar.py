@@ -79,7 +79,7 @@ class TopBar(tk.Frame):
 
         if on_detach is not None:
             # ⧉ = "pop out into its own window" — only shown when the
-            # host (fastrak_hub) embedded us and provided a detach hook.
+            # host (fastrack_hub) embedded us and provided a detach hook.
             detach_btn = secondary_button(
                 right, "⧉", on_detach, padx=10, pady=3,
             )

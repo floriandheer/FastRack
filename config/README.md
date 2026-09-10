@@ -1,6 +1,6 @@
 # Configuration Directory
 
-This directory contains configuration files for the Pipeline Manager.
+This directory contains configuration files for FastRack.
 
 ## Usage
 

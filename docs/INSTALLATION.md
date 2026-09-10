@@ -3,8 +3,8 @@
 ## TL;DR
 
 ```bash
-git clone https://github.com/floriandheer/FastRak.git
-cd FastRak
+git clone https://github.com/floriandheer/FastRack.git
+cd FastRack
 python install.py
 ```
 
@@ -39,8 +39,8 @@ The installer walks you through six steps, asks before touching anything, and pr
 | 1 | Prerequisites | Checks Python version, pip, git, platform |
 | 2 | Python packages | `pip install -r requirements.txt` |
 | 3 | External tools | Detects FFmpeg / FLAC (metaflac) / rclone; offers `winget install` for any that are missing |
-| 4 | Environment | Creates folder structure, maps `subst` drives with registry persistence, checks Synology Drive sync status, writes `rak_config.json` |
-| 5 | Desktop shortcut | Generates `Fastrak.lnk` next to the script for taskbar pinning |
+| 4 | Environment | Creates folder structure, maps `subst` drives with registry persistence, checks Synology Drive sync status, writes `rack_config.json` |
+| 5 | Desktop shortcut | Generates `Fastrack.lnk` next to the script for taskbar pinning |
 | 6 | Doctor | Verifies the end state: deps importable, config valid, paths reachable |
 
 ### Flags
@@ -92,7 +92,7 @@ python setup_environment.py                         # idempotent, safe to re-run
 python make_shortcut.py
 ```
 
-Resolves paths relative to the repo, so it works wherever the repo is cloned. Right-click the resulting `Fastrak.lnk` and choose **Pin to taskbar**.
+Resolves paths relative to the repo, so it works wherever the repo is cloned. Right-click the resulting `Fastrack.lnk` and choose **Pin to taskbar**.
 
 ## Virtual environment (advanced)
 
@@ -152,9 +152,9 @@ Every step is safe to re-run:
 - Existing folders are skipped (`os.makedirs(exist_ok=True)`)
 - Already-mapped `subst` drives are detected and left alone
 - Registry values are only written when different from expected
-- `RakSettings` merges config with defaults
+- `RackSettings` merges config with defaults
 - Synology checks are read-only
-- `Fastrak.lnk` regenerates cleanly
+- `Fastrack.lnk` regenerates cleanly
 
 ## Troubleshooting
 

@@ -2,13 +2,13 @@
 
 ## Overview
 
-The Pipeline Manager can be customized by editing configuration values in the main script or by creating custom configuration files.
+FastRack can be customized by editing configuration values in the main script or by creating custom configuration files.
 
 ## Basic Configuration
 
 ### Customizing Base Paths
 
-Edit `fastrak_hub.py` to change the base folder paths for each category:
+Edit `fastrack_hub.py` to change the base folder paths for each category:
 
 ```python
 CREATIVE_CATEGORIES = {
@@ -59,7 +59,7 @@ CATEGORY_COLORS = {
    - Follow naming: `PipelineScript_Category_ScriptName.py`
    - Include proper docstring and description
 
-2. **Register the script** in `fastrak_hub.py`:
+2. **Register the script** in `fastrack_hub.py`:
 
 ```python
 "your_script": {

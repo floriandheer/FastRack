@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Write_QuickWrite.py
@@ -13,7 +13,7 @@ import datetime
 import subprocess
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 from workstation_apps import load_apps, resolve_exe_path
 from shared_open_path import open_path
 
@@ -29,7 +29,7 @@ BLANK_RTF = r"{\rtf1\ansi\deff0}"
 
 def main() -> int:
     setup_shared_logging("write_quick_write")
-    settings = get_rak_settings()
+    settings = get_rack_settings()
     write_dir = join_native_path(settings.get_work_drive(), "_Sandbox", "Write")
     os.makedirs(write_dir, exist_ok=True)
 

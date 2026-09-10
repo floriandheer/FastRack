@@ -75,8 +75,8 @@ class SettingsSection(Section):
 
         tk.Label(
             parent,
-            text=("Paths are managed centrally in the global FastRak settings "
-                  "(rak_config.json → business). Displayed here read-only."),
+            text=("Paths are managed centrally in the global FastRack settings "
+                  "(rack_config.json → business). Displayed here read-only."),
             fg=C["text_dim"], bg=C["card_bg"],
             font=FONTS["small"], wraplength=820, justify="left",
         ).pack(anchor="w", pady=(0, 8))
@@ -389,7 +389,7 @@ class SettingsSection(Section):
         ``PipelineScript_Bookkeeping_FolderStructure.py`` GUI.
 
         The base directory is the same one InvoiceManager reads
-        everywhere (resolve_boekhouding_base → rak_settings), so newly
+        everywhere (resolve_boekhouding_base → rack_settings), so newly
         created folders line up with the Outgoing / Incoming views.
         """
         C = PALETTE

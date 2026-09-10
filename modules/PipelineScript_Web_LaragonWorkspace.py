@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Web_LaragonWorkspace.py
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 
 logger = get_logger("laragon_workspace")
 
@@ -162,7 +162,7 @@ class JunctionManager:
     @staticmethod
     def compute_target_path(project_name: str, category: str) -> str:
         """Compute the target path on the work drive for a project."""
-        work = get_rak_settings().get_work_drive()
+        work = get_rack_settings().get_work_drive()
         if category == "personal":
             return join_native_path(work, "Web", "_Personal", project_name, "02_Development")
         else:

@@ -1,10 +1,10 @@
-# FastRak
+# FastRack
 
 A professional pipeline management system for production workflows with GUI.
 
 ## Overview
 
-FastRak is a Pipeline-Manager: a toolkit designed to streamline various production processes. It provides an intuitive interface for managing projects across multiple domains including audio production, visual design, web development, photography, and business operations.
+FastRack is a Pipeline-Manager: a toolkit designed to streamline various production processes. It provides an intuitive interface for managing projects across multiple domains including audio production, visual design, web development, photography, and business operations.
 
 ### Key Features
 
@@ -16,7 +16,7 @@ FastRak is a Pipeline-Manager: a toolkit designed to streamline various producti
 
 ## Screenshots
 
-![Pipeline Manager Interface](docs/screenshot-2026-04-27.png)
+![FastRack Interface](docs/screenshot-2026-04-27.png)
 ## Requirements
 
 ### System Requirements
@@ -73,8 +73,8 @@ Then continue with the one-command install below.
 ### One command (recommended)
 
 ```bash
-git clone https://github.com/floriandheer/FastRak.git
-cd FastRak
+git clone https://github.com/floriandheer/FastRack.git
+cd FastRack
 python install.py
 ```
 
@@ -85,7 +85,7 @@ python install.py
 3. **External tools** — FFmpeg, FLAC, rclone (offers a winget install on Windows)
 4. **Environment** — folders, `subst` drive mappings (with registry persistence, no admin needed), Synology checks, pipeline config
 5. **Workstation apps** — KeePassXC, Synology Drive, browser, media player, and role-specific picks (Visual / Audio / RealTime / ...)
-6. **Desktop shortcut** — generates `Fastrak.lnk` you can pin to the taskbar
+6. **Desktop shortcut** — generates `Fastrack.lnk` you can pin to the taskbar
 7. **Doctor** — verifies the end state is healthy
 
 Every step asks before touching anything. Safe to re-run on the same machine, and gives a clean "all green" report when done.
@@ -106,23 +106,23 @@ python install_dependencies.py             # just the Python packages
 copy setup_config.json.example setup_config.json
 # ...edit setup_config.json...
 python setup_environment.py                # folders + drives + config
-python make_shortcut.py                    # Fastrak.lnk
+python make_shortcut.py                    # Fastrack.lnk
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full walkthrough.
 
 ## Usage
 
-### Launching the Pipeline Manager
+### Launching FastRack
 
 **Method 1: Python script**
 ```bash
-python fastrak_hub.py
+python fastrack_hub.py
 ```
 
 **Method 2: Pinned Windows shortcut (recommended)**
 
-A `Fastrak.lnk` shortcut launches the hub through `pythonw.exe` (no console window) and can be pinned to the taskbar/Start menu like a native app. The running window groups under the same taskbar slot as the pinned icon thanks to the `AppUserModelID` set inside `fastrak_hub.py`.
+A `Fastrack.lnk` shortcut launches the hub through `pythonw.exe` (no console window) and can be pinned to the taskbar/Start menu like a native app. The running window groups under the same taskbar slot as the pinned icon thanks to the `AppUserModelID` set inside `fastrack_hub.py`.
 
 ### Creating the Windows Shortcut
 
@@ -134,9 +134,9 @@ Run the helper script from the repo root:
 python make_shortcut.py
 ```
 
-This produces `Fastrak.lnk` next to the script, with paths resolved relative to wherever the repo is cloned (no hardcoded drive letters). You can also trigger it from Pipeline Manager > Settings > **Create Shortcut**. Then:
+This produces `Fastrack.lnk` next to the script, with paths resolved relative to wherever the repo is cloned (no hardcoded drive letters). You can also trigger it from FastRack > Settings > **Create Shortcut**. Then:
 
-1. Right-click `Fastrak.lnk` → **Pin to taskbar** or **Pin to Start**
+1. Right-click `Fastrack.lnk` → **Pin to taskbar** or **Pin to Start**
 2. (Optional) Copy the `.lnk` to your Desktop for a desktop icon
 
 #### Option B — Manual setup
@@ -146,21 +146,21 @@ If you'd rather configure it by hand (or the helper failed):
 1. Right-click on the desktop → **New** → **Shortcut**
 2. **Location**: enter the full target with arguments, e.g.
    ```
-   "C:\Path\To\Python\pythonw.exe" "C:\Path\To\floriandheer\fastrak_hub.py"
+   "C:\Path\To\Python\pythonw.exe" "C:\Path\To\floriandheer\fastrack_hub.py"
    ```
    - Use `pythonw.exe` (not `python.exe`) so no console window appears
    - Quote both paths if they contain spaces
-3. **Name** the shortcut `Fastrak` and finish
+3. **Name** the shortcut `Fastrack` and finish
 4. Right-click the new shortcut → **Properties**
    - **Start in**: set to the repo folder (e.g. `C:\Path\To\floriandheer`)
    - **Change Icon...** → browse to `assets\Favicon_FlorianDheer.ico` in the repo
 5. Click **OK**, then right-click → **Pin to taskbar**
 
-The icon and AppUserModelID are already wired up inside `fastrak_hub.py`, so the running window will inherit the icon and merge with the pinned shortcut on the taskbar.
+The icon and AppUserModelID are already wired up inside `fastrack_hub.py`, so the running window will inherit the icon and merge with the pinned shortcut on the taskbar.
 
 ### Keyboard Shortcuts
 
-The Pipeline Manager features a comprehensive keyboard navigation system designed for efficiency. Press **F1** or click the **Help** button to view all shortcuts.
+FastRack features a comprehensive keyboard navigation system designed for efficiency. Press **F1** or click the **Help** button to view all shortcuts.
 
 **Quick Reference:**
 | Keys | Action |
@@ -181,7 +181,7 @@ For the complete shortcut reference and design philosophy, see **[SHORTCUTS.md](
 
 ### Available Pipeline Scripts
 
-The Pipeline Manager includes 14+ specialized scripts organized by category:
+FastRack includes 14+ specialized scripts organized by category:
 
 #### 🎵 Audio Production
 - **New DJ Project** - Create standardized DJ project structure
@@ -219,7 +219,7 @@ The Pipeline Manager includes 14+ specialized scripts organized by category:
 
 ### Customizing Base Paths
 
-Edit the category definitions in `fastrak_hub.py` to customize base folder paths:
+Edit the category definitions in `fastrack_hub.py` to customize base folder paths:
 
 ```python
 CREATIVE_CATEGORIES = {
@@ -235,7 +235,7 @@ CREATIVE_CATEGORIES = {
 
 1. Create your script in the `modules/` directory
 2. Follow the naming convention: `PipelineScript_Category_Name.py`
-3. Add the script reference in `fastrak_hub.py` under the appropriate category
+3. Add the script reference in `fastrack_hub.py` under the appropriate category
 
 ## Troubleshooting
 

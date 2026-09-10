@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Web_PublishStatic.py
@@ -28,7 +28,7 @@ from urllib.parse import quote
 # Setup logging using shared utility
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import is_wordpress_folder
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 
 # Get logger reference (configured in main())
 logger = get_logger("web_publish_static")
@@ -67,7 +67,7 @@ class WebPublishConfig:
 
     def _discover_sites(self) -> Dict:
         """Scan Web folder for site directories (work at root, personal under _Personal/)."""
-        work = get_rak_settings().get_work_drive()
+        work = get_rack_settings().get_work_drive()
         web_root = join_native_path(work, "Web")
         sites = {}
 
@@ -605,7 +605,7 @@ class PublishWorkflow:
 
     def _archive(self) -> bool:
         export_dir = self.site_cfg["export_dir"]
-        archive_base = get_rak_settings().get_archive_path("Web")
+        archive_base = get_rack_settings().get_archive_path("Web")
         if self.site_cfg.get("is_personal", False):
             site_archive_dir = os.path.join(archive_base, "_Personal", self.site_key)
         else:
@@ -696,7 +696,7 @@ class PublishWorkflow:
             table_prefix=parsed["table_prefix"],
         )
 
-        archive_base = get_rak_settings().get_archive_path("Web")
+        archive_base = get_rack_settings().get_archive_path("Web")
         if self.site_cfg.get("is_personal", False):
             site_archive_dir = os.path.join(archive_base, "_Personal", self.site_key)
         else:
@@ -738,7 +738,7 @@ class PublishWorkflow:
             self._complete(False, "Dev backup failed: directory missing")
             return False
 
-        archive_base = get_rak_settings().get_archive_path("Web")
+        archive_base = get_rack_settings().get_archive_path("Web")
         if self.site_cfg.get("is_personal", False):
             site_archive_dir = os.path.join(archive_base, "_Personal", self.site_key)
         else:
@@ -1222,7 +1222,7 @@ class PublishStaticUI:
         self.config.set_last_selected_site(site_key)
         cfg = self.config.get_site_config(site_key)
         self.export_label.config(text=f"Export: {cfg.get('export_dir', '-')}")
-        archive_base = get_rak_settings().get_archive_path("Web")
+        archive_base = get_rack_settings().get_archive_path("Web")
         if cfg.get("is_personal", False):
             archive_path = os.path.join(archive_base, "_Personal", site_key)
         else:

@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Fastrak - Environment Setup Script
+Fastrack - Environment Setup Script
 -----------------------------------
 Automates pipeline environment provisioning: folder creation, subst drive
 mappings with registry persistence, Synology Drive status checks, and
@@ -17,7 +17,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-# Add modules/ to path (same pattern as fastrak_hub.py)
+# Add modules/ to path (same pattern as fastrack_hub.py)
 SCRIPT_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 sys.path.insert(0, SCRIPTS_DIR)
@@ -170,8 +170,8 @@ def step_prerequisites(cfg: dict) -> bool:
 
     # Modules importable
     try:
-        from rak_settings import RakSettings  # noqa: F401
-        status_line("Modules", True, "rak_settings importable")
+        from rack_settings import RackSettings  # noqa: F401
+        status_line("Modules", True, "rack_settings importable")
     except ImportError as e:
         status_line("Modules", False, str(e))
         ok = False
@@ -207,12 +207,12 @@ def step_folders(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
     else:
         # setup_config.json.example's bases are Windows-only paths
         # (D:\_work\...). Off Windows, build the same structure under
-        # rak_settings' own platform-aware defaults instead (e.g.
+        # rack_settings' own platform-aware defaults instead (e.g.
         # ~/_work/Active) rather than trying to create a literal
         # "D:\_work\Active"-named folder.
         try:
-            from rak_settings import RakSettings
-            settings = RakSettings()
+            from rack_settings import RackSettings
+            settings = RackSettings()
             bases = [settings.get_active_base(), settings.get_archive_base()]
             print(f"  Non-Windows: using platform defaults instead of setup_config.json's paths:")
             for b in bases:
@@ -660,13 +660,13 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
 # ============================================================
 
 def step_config(cfg: dict, dry_run: bool) -> bool:
-    """Generate / update rak_config.json via RakSettings."""
+    """Generate / update rack_config.json via RackSettings."""
     banner("Step 5: Pipeline Config Generation")
 
     try:
-        from rak_settings import RakSettings
+        from rack_settings import RackSettings
     except ImportError as e:
-        print(f"  ERROR: Cannot import RakSettings: {e}")
+        print(f"  ERROR: Cannot import RackSettings: {e}")
         return False
 
     pc = cfg.get("pipeline_config", {})
@@ -674,7 +674,7 @@ def step_config(cfg: dict, dry_run: bool) -> bool:
     if sys.platform != "win32":
         # setup_config.json.example's pipeline_config values are Windows
         # drive letters / D:\ paths - meaningless (and would corrupt the
-        # config) off Windows. Skip applying them and let RakSettings' own
+        # config) off Windows. Skip applying them and let RackSettings' own
         # platform-aware defaults (~/_work/Active etc.) stand; paths can
         # still be customized anytime via Settings (Ctrl+,).
         print("  Non-Windows: skipping setup_config.json's Windows-specific")
@@ -687,8 +687,8 @@ def step_config(cfg: dict, dry_run: bool) -> bool:
             print(f"    {key} = {val}")
         return True
 
-    # Instantiate (creates rak_config.json if needed)
-    settings = RakSettings()
+    # Instantiate (creates rack_config.json if needed)
+    settings = RackSettings()
     print(f"  Config file: {settings.config_path}")
 
     # Apply overrides
@@ -730,11 +730,11 @@ def step_config(cfg: dict, dry_run: bool) -> bool:
 
 def step_startup(cfg: dict, auto_yes: bool = False, dry_run: bool = False) -> bool:
     """Deploy the startup-apps PowerShell launcher under %LOCALAPPDATA% and
-    optionally register the FastRak_StartupLauncher scheduled task. Idempotent
+    optionally register the FastRack_StartupLauncher scheduled task. Idempotent
     — re-running this step is safe.
 
     The launcher reads %LOCALAPPDATA%\\PipelineManager\\startup_apps.json,
-    which is owned by the FastRak Settings dialog's "Startup Apps" tab.
+    which is owned by the FastRack Settings dialog's "Startup Apps" tab.
     """
     banner("Step 6: Startup Apps Launcher")
 
@@ -803,13 +803,13 @@ def final_report(results: dict):
     if sys.platform == "win32":
         print(f"    {step_num}. Reboot to verify drive persistence via registry")
         step_num += 1
-    print(f"    {step_num}. Launch Pipeline Manager and verify paths in Settings (Ctrl+,)")
+    print(f"    {step_num}. Launch FastRack and verify paths in Settings (Ctrl+,)")
     step_num += 1
     if sys.platform == "win32":
-        print(f"    {step_num}. In Pipeline Manager > Settings, run 'Install Dependencies'")
+        print(f"    {step_num}. In FastRack > Settings, run 'Install Dependencies'")
         print("       and 'Create Shortcut' if not already done.")
     else:
-        print(f"    {step_num}. In Pipeline Manager > Settings, run 'Install Dependencies' if not already done.")
+        print(f"    {step_num}. In FastRack > Settings, run 'Install Dependencies' if not already done.")
 
 
 # ============================================================
@@ -818,7 +818,7 @@ def final_report(results: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fastrak - Environment Setup"
+        description="Fastrack - Environment Setup"
     )
     parser.add_argument(
         "--config", default="./setup_config.json",
@@ -844,7 +844,7 @@ def main():
 
     # Banner
     print("=" * BANNER_WIDTH)
-    print("  Fastrak - Environment Setup")
+    print("  Fastrack - Environment Setup")
     print("=" * BANNER_WIDTH)
     print(f"  Python:  {sys.version.split()[0]}")
     print(f"  Config:  {args.config}")

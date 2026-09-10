@@ -36,7 +36,7 @@ Folders without a `wp-config.php` (static sites, DokuWiki, VitePress projects, e
 
 ### Back up a single site
 
-1. Launch **Pipeline Manager → Web → WordPress Dev Backup**.
+1. Launch **FastRack → Web → WordPress Dev Backup**.
 2. Select a site in the list.
 3. Click **Backup Selected**.
 4. The tool runs `mysqldump` on the site's DB, then zips site files + SQL dump into `<backup root>\<site>\dev_<site>_YYYY-MM-DD_HHMMSS.zip`.
@@ -69,7 +69,7 @@ Use this after adding a new virtual host, installing an SSL cert, or tweaking PH
 
 ## Storage layout
 
-Default backup root: `<archive path>\Web\_DevBackups\` (the archive path comes from your RAK settings; can be overridden in the settings dialog).
+Default backup root: `<archive path>\Web\_DevBackups\` (the archive path comes from your FastRack settings; can be overridden in the settings dialog).
 
 ```
 _DevBackups\

@@ -1,5 +1,5 @@
 """
-UI Settings Dialog - Multi-tab settings window for the Pipeline Manager.
+UI Settings Dialog - Multi-tab settings window for FastRack.
 """
 
 import json
@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 
 from shared_logging import get_logger
-from rak_settings import RakSettings
+from rack_settings import RackSettings
 from ui_theme import COLORS, CATEGORY_COLORS
 
 logger = get_logger("pipeline")
@@ -20,13 +20,13 @@ logger = get_logger("pipeline")
 class SettingsDialog:
     """Settings dialog for configuring pipeline paths and preferences."""
 
-    def __init__(self, parent, settings: RakSettings):
+    def __init__(self, parent, settings: RackSettings):
         """
         Initialize the settings dialog.
 
         Args:
             parent: Parent window
-            settings: RakSettings instance
+            settings: RackSettings instance
         """
         self.parent = parent
         self.settings = settings
@@ -34,7 +34,7 @@ class SettingsDialog:
 
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Rak Settings")
+        self.dialog.title("Rack Settings")
         # Default sized for the Startup Apps tab (deps panel + monitors
         # strip + apps list + actions row + add footer stack tall).
         self.dialog.geometry("800x900")
@@ -79,7 +79,7 @@ class SettingsDialog:
 
         header_label = tk.Label(
             header_frame,
-            text="Rak Settings",
+            text="Rack Settings",
             font=font.Font(family="Segoe UI", size=16, weight="bold"),
             fg=COLORS["text_primary"],
             bg=COLORS["bg_secondary"]
@@ -267,13 +267,13 @@ class SettingsDialog:
             setup_section,
             text=(
                 "Install Dependencies: runs install_dependencies.py via pip in a new console.\n"
-                "Create Shortcut: regenerates Fastrak.lnk (Windows) or Fastrak.app (macOS).\n"
+                "Create Shortcut: regenerates Fastrack.lnk (Windows) or Fastrack.app (macOS).\n"
                 "Environment Setup steps (all run in a new console):\n"
                 "  Run All  - everything below in one pass\n"
                 "  Folders  - create Active/Archive/category dirs from setup_config.json\n"
                 "  Drives   - subst mappings + HKCU autorun + Explorer drive labels (Windows only)\n"
                 "  Synology - check Drive Client install + sync folder status (Windows only)\n"
-                "  Config   - generate/update rak_config.json from setup_config.json\n"
+                "  Config   - generate/update rack_config.json from setup_config.json\n"
                 "  Startup  - deploy startup-apps launcher + scheduled task (Windows only)"
             ),
             font=font.Font(family="Segoe UI", size=9, slant="italic"),
@@ -283,7 +283,7 @@ class SettingsDialog:
         ).pack(anchor="w", pady=(6, 0))
 
     def _project_root(self):
-        """Return the directory containing fastrak_hub.py."""
+        """Return the directory containing fastrack_hub.py."""
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def _console_python(self):
@@ -345,7 +345,7 @@ class SettingsDialog:
                     "and write Explorer drive labels",
         "synology": "check Synology Drive Client installation and report sync "
                     "folder status (no changes are made automatically)",
-        "config":   "generate or update rak_config.json from setup_config.json's "
+        "config":   "generate or update rack_config.json from setup_config.json's "
                     "pipeline_config section",
         "startup":  "deploy the startup-apps PowerShell launcher and register the "
                     "logon scheduled task",
@@ -449,7 +449,7 @@ class SettingsDialog:
 
     def _create_shortcut(self):
         """Run make_shortcut.py to (re)generate the desktop launcher
-        (Fastrak.lnk on Windows, Fastrak.app on macOS)."""
+        (Fastrack.lnk on Windows, Fastrack.app on macOS)."""
         if sys.platform not in ("win32", "darwin"):
             messagebox.showwarning(
                 "Not Supported",
@@ -460,7 +460,7 @@ class SettingsDialog:
 
         project_root = self._project_root()
         script_path = os.path.join(project_root, "make_shortcut.py")
-        shortcut_name = "Fastrak.lnk" if sys.platform == "win32" else "Fastrak.app"
+        shortcut_name = "Fastrack.lnk" if sys.platform == "win32" else "Fastrack.app"
 
         if not os.path.isfile(script_path):
             messagebox.showerror(
@@ -1070,7 +1070,7 @@ class SettingsDialog:
     # ============================================================
     #
     # Editor for setup_config.json's drive_mappings list. Edits here
-    # save to setup_config.json (NOT rak_config.json); the actual
+    # save to setup_config.json (NOT rack_config.json); the actual
     # subst / HKCU autorun / Explorer-label writes happen when you run
     # Environment Setup > Drives. This tab edits intent; the Drives
     # step applies it. The "Run Drives step now" button below is a
@@ -2241,7 +2241,7 @@ class SettingsDialog:
         if sam.is_task_installed():
             if not messagebox.askyesno(
                 "Uninstall scheduled task?",
-                "This removes the FastRak_StartupLauncher entry from Task Scheduler.\n"
+                "This removes the FastRack_StartupLauncher entry from Task Scheduler.\n"
                 "The launcher will no longer run automatically on logon.\n\n"
                 "Continue?",
                 parent=self.dialog,

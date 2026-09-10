@@ -92,7 +92,7 @@ rclone.conf
 setup_config.json
 # Per-machine state for workstation apps (skip-list, etc.)
 setup_apps_state.json
-Fastrak.lnk
+Fastrack.lnk
 
 # AI assistant
 .claude/

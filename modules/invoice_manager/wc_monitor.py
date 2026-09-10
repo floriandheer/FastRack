@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import base64
 
 from shared_logging import get_logger
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 from shared_project_db import ProjectDatabase
 
 logger = get_logger("invoice_manager.wc_monitor")
@@ -121,7 +121,7 @@ class Config:
             "monitoring": {
                 "poll_interval": 300,
                 "check_orders_since_hours": 48,
-                "base_directory": get_rak_settings().get_work_path("Physical").replace('\\', '/') + "/Order",
+                "base_directory": get_rack_settings().get_work_path("Physical").replace('\\', '/') + "/Order",
                 "processed_orders_file": str(self.data_dir / "processed_orders.json"),
             },
             "folder_structure": {
@@ -155,7 +155,7 @@ class Config:
                     # keep getting used by Tracker / log handlers.
                     mon = default_config.get("monitoring", {})
                     if not mon.get("base_directory"):
-                        mon["base_directory"] = get_rak_settings().get_work_path("Physical").replace('\\', '/') + "/Order"
+                        mon["base_directory"] = get_rack_settings().get_work_path("Physical").replace('\\', '/') + "/Order"
                     stored_tracker = mon.get("processed_orders_file") or ""
                     if (not stored_tracker
                             or "woocommerce_monitor_data" in stored_tracker.replace("/", "\\")):
@@ -883,7 +883,7 @@ class InvoiceFiler:
     def __init__(self, config: Config, wc_client: WooCommerceClient):
         self.config = config
         self.wc_client = wc_client
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         self.library_base = Path(settings.get_boekhouding_base())
 
     def _get_quarter_dir(self, date_str: str) -> Path:

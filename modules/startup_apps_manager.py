@@ -3,7 +3,7 @@ startup_apps_manager — owner of the startup-apps sidecar config + launcher.
 
 Three responsibilities:
 
-  1. Read/write ``startup_apps.json`` (sidecar to ``rak_config.json`` in
+  1. Read/write ``startup_apps.json`` (sidecar to ``rack_config.json`` in
      %LOCALAPPDATA%\\PipelineManager\\). Schema is documented in
      DEFAULT_CONFIG and APP_ENTRY_TEMPLATE below.
   2. Resolve workstation-app names + .lnk shortcuts to launchable .exe
@@ -44,12 +44,12 @@ _LAUNCHER_SRC  = _PROJECT_ROOT / "tools" / "startup" / "StartupLauncher.ps1"
 _AHK_SRC       = _PROJECT_ROOT / "tools" / "startup" / "SendF11.ahk"
 _TASK_HELPER_SRC = _PROJECT_ROOT / "tools" / "startup" / "install_task.ps1"
 
-TASK_NAME = "FastRak_StartupLauncher"
+TASK_NAME = "FastRack_StartupLauncher"
 
 
 def _appdata_dir() -> Path:
-    """Same target as rak_settings._get_appdata_path — kept local to
-    avoid importing RakSettings just to derive a path."""
+    """Same target as rack_settings._get_appdata_path — kept local to
+    avoid importing RackSettings just to derive a path."""
     if sys.platform == "win32":
         return Path.home() / "AppData" / "Local" / "PipelineManager"
     return Path.home() / ".local" / "share" / "PipelineManager"
@@ -86,7 +86,7 @@ DEFAULT_CONFIG: dict = {
         "maximize_delay_ms": 12,
         "after_maximize_delay_ms": 100,
         # 15s mirrors the legacy 1_StartupScript_AppsToDesktop.ps1 value.
-        # 5s was too short: pythonw apps (FastRak) hadn't shown their
+        # 5s was too short: pythonw apps (FastRack) hadn't shown their
         # main window before the launcher switched back to desktop 1,
         # which placed them on the wrong desktop.
         "final_init_delay_ms": 15000,
@@ -106,7 +106,7 @@ DEFAULT_CONFIG: dict = {
     # Window-title remap by shortcut basename / app label, for apps
     # whose main window appears under a name unrelated to the process.
     "window_title_remap": {
-        "1_floriandheer_pipeline_launcher": "Pipeline Manager",
+        "1_floriandheer_pipeline_launcher": "FastRack",
     },
     # Empty = launcher uses its built-in default
     # (C:\Program Files\AutoHotkey\v2\AutoHotkey.exe).
@@ -459,7 +459,7 @@ def _run_task_helper(action: str, *,
 
 
 def is_task_installed() -> bool:
-    """True if the FastRak scheduled task is registered."""
+    """True if the FastRack scheduled task is registered."""
     code, _ = _run_task_helper("query", timeout=10)
     return code == 0
 
@@ -483,7 +483,7 @@ def install_scheduled_task() -> tuple[bool, str]:
 
 
 def uninstall_scheduled_task() -> tuple[bool, str]:
-    """Remove the FastRak scheduled task. Idempotent."""
+    """Remove the FastRack scheduled task. Idempotent."""
     if sys.platform != "win32":
         return False, "Task Scheduler integration is Windows-only."
     code, msg = _run_task_helper("uninstall", timeout=15)
@@ -626,7 +626,7 @@ def install_virtualdesktop_module() -> tuple[bool, str]:
              "Install-Module -Name VirtualDesktop -Scope CurrentUser "
              "-Force -AllowClobber; "
              "Write-Host ''; Write-Host 'Done. Close this window and "
-             "click Recheck in the FastRak settings dialog.'"],
+             "click Recheck in the FastRack settings dialog.'"],
             creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
         return True, "Installer launched in a new console."

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Global_SoftwareLauncher.py
@@ -21,7 +21,7 @@ from urllib.error import URLError
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_form_keyboard import FormKeyboardMixin, FORM_COLORS
-from rak_settings import RakSettings
+from rack_settings import RackSettings
 
 logger = get_logger("software_launcher")
 
@@ -144,7 +144,7 @@ class SoftwareLauncherManager(FormKeyboardMixin):
     def __init__(self, root, embedded=False, settings=None):
         self.root = root
         self.embedded = embedded
-        self.settings = settings or RakSettings()
+        self.settings = settings or RackSettings()
         self.manifest: Dict = {}
         # tool_key -> {installed, latest, asset_url, status}
         self.tool_info: Dict[str, Dict] = {}

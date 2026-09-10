@@ -1,5 +1,5 @@
 """
-UI Config Manager - JSON configuration persistence for the Pipeline Manager.
+UI Config Manager - JSON configuration persistence for FastRack.
 """
 
 import os
@@ -12,7 +12,7 @@ logger = get_logger("pipeline")
 
 
 class ConfigManager:
-    """Manages configuration settings for the pipeline manager."""
+    """Manages configuration settings for FastRack."""
 
     def __init__(self, config_path=DEFAULT_CONFIG_PATH):
         self.config_path = config_path

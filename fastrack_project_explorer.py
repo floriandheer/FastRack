@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Project Tracker
@@ -6,7 +6,7 @@ Project Tracker
 Standalone GUI for managing active projects, clients, and archives.
 Provides overview of all projects, search/filter, archive/unarchive, and import functionality.
 
-Can be run standalone or embedded as a tab in the Pipeline Manager.
+Can be run standalone or embedded as a tab in FastRack.
 """
 
 import tkinter as tk
@@ -31,7 +31,7 @@ sys.path.insert(0, str(MODULES_DIR))
 from shared_logging import get_logger, setup_logging
 from shared_project_db import ProjectDatabase
 from shared_wordpress import is_wordpress_project
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 from shared_creator_registry import (
     CREATIVE_CATEGORIES,
     get_subtypes_for_category, get_subtype_display_name,
@@ -191,7 +191,7 @@ class ArchiveManager:
     @staticmethod
     def _get_archive_dir(project_type: str, is_personal: bool, metadata: Dict = None) -> Path:
         """Get the archive directory for a project type."""
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         archive_category = archive_category_for(project_type) or "Other"
         archive_path_str = settings.get_archive_path(archive_category)
         archive_dir = _get_platform_path(archive_path_str)
@@ -213,7 +213,7 @@ class ArchiveManager:
     @staticmethod
     def _get_active_dir(project_type: str, is_personal: bool, metadata: Dict = None) -> Path:
         """Get the active directory for a project type."""
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         archive_category = archive_category_for(project_type) or "Other"
         work_path_str = settings.get_work_path(archive_category)
         active_dir = _get_platform_path(work_path_str)
@@ -261,7 +261,7 @@ class ArchiveManager:
             metadata = project.get("metadata", {})
             is_personal = metadata.get("is_personal", False)
 
-            # Build archive path using RakSettings
+            # Build archive path using RackSettings
             archive_dir = ArchiveManager._get_archive_dir(project_type, is_personal, metadata)
             archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -427,7 +427,7 @@ class RenameManager:
         if status != "active":
             return Path(stored_path)
         try:
-            settings = get_rak_settings()
+            settings = get_rack_settings()
             folder = settings.convert_to_work_drive_path(stored_path)
             if not Path(folder).exists():
                 folder = stored_path
@@ -565,7 +565,7 @@ class ProjectImporter:
     @classmethod
     def _build_scan_directories(cls):
         """Build scan directories from settings."""
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         active_base = settings.get_active_base()
         archive_base = settings.get_archive_base()
 
@@ -639,7 +639,7 @@ class ProjectImporter:
 
         # Get path config for converting active paths to work drive
         try:
-            settings = get_rak_settings()
+            settings = get_rack_settings()
         except Exception:
             settings = None
 
@@ -1126,7 +1126,7 @@ class ProjectTrackerApp:
     Project Tracker application.
 
     Can run as standalone window or be embedded in a parent frame.
-    Use embedded=True when integrating into another application (like Pipeline Manager).
+    Use embedded=True when integrating into another application (like FastRack).
     """
 
     def __init__(self, root_or_frame, embedded=False, status_callback=None, hint_callback=None, creation_start_callback=None, creation_done_callback=None, creation_cancel_callback=None, session=None):
@@ -3656,7 +3656,7 @@ class ProjectTrackerApp:
 
             # Get the active path (work drive version)
             try:
-                settings = get_rak_settings()
+                settings = get_rack_settings()
                 active_path = settings.convert_to_work_drive_path(stored_path)
                 self._current_active_path = active_path
                 self.active_path_label.config(text=active_path)
@@ -3726,7 +3726,7 @@ class ProjectTrackerApp:
         if status != "active":
             return stored_path
         try:
-            settings = get_rak_settings()
+            settings = get_rack_settings()
             folder = settings.convert_to_work_drive_path(stored_path)
             if not Path(folder).exists():
                 folder = stored_path
@@ -4045,7 +4045,7 @@ class ProjectTrackerApp:
         # For active projects, convert to configured work drive path
         if status == "active":
             try:
-                settings = get_rak_settings()
+                settings = get_rack_settings()
                 open_path = settings.convert_to_work_drive_path(stored_path)
                 path = Path(open_path)
 
@@ -4243,7 +4243,7 @@ class ProjectTrackerApp:
             f"Archive this project?\n\n"
             f"Client: {self.selected_project.get('client_name')}\n"
             f"Project: {self.selected_project.get('project_name')}\n\n"
-            f"The folder will be moved to {get_rak_settings().get_archive_base()}"
+            f"The folder will be moved to {get_rack_settings().get_archive_base()}"
         )
 
         if not response:
@@ -4327,7 +4327,7 @@ class ProjectTrackerApp:
             # Try work drive path if source doesn't exist directly
             if not source_path.exists():
                 try:
-                    settings = get_rak_settings()
+                    settings = get_rack_settings()
                     converted = settings.convert_to_work_drive_path(str(source_path))
                     alt_path = Path(converted)
                     if not alt_path.exists():

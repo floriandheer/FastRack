@@ -1,7 +1,7 @@
 """Tk window z-order helpers.
 
 Currently ships one helper, ``install_keep_on_bottom``, used by
-``fastrak_hub`` to pin the launcher window beneath every other
+``fastrack_hub`` to pin the launcher window beneath every other
 top-level window — clicking it does not bring it to the foreground,
 yet keyboard shortcuts and widget click handlers keep working
 normally.
@@ -34,8 +34,8 @@ def install_keep_on_bottom(root: tk.Tk) -> Optional[callable]:
     Whenever the window receives focus — via click, Alt+Tab, or
     anything else that would normally bring it forward — we drop it
     straight back to the bottom with ``SetWindowPos(HWND_BOTTOM,
-    SWP_NOACTIVATE)``. Other apps stay visible on top of FastRak;
-    clicks on the parts of FastRak that ARE visible still fire
+    SWP_NOACTIVATE)``. Other apps stay visible on top of FastRack;
+    clicks on the parts of FastRack that ARE visible still fire
     button handlers, keyboard shortcuts still work.
 
     Caveat: there is an unavoidable brief flash where Windows

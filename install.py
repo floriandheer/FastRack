@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Fastrak - Friendly First-Run Installer
+Fastrack - Friendly First-Run Installer
 ---------------------------------------
 A single command that takes a brand-new machine to a working Pipeline Hub.
 
@@ -12,7 +12,7 @@ prints a clear "all green" report at the end:
   3. External tools     - FFmpeg / FLAC / rclone, with winget offers (Windows)
   4. Environment        - folders, subst drive mappings, Synology checks, config
   5. Workstation apps   - KeePassXC, Synology Drive, Visual Subst (winget)
-  6. Desktop shortcut   - Fastrak.lnk you can pin to the taskbar
+  6. Desktop shortcut   - Fastrack.lnk you can pin to the taskbar
   7. Doctor             - verifies the end state is actually healthy
 
 Re-run any time. Every step is idempotent.
@@ -42,7 +42,7 @@ from typing import Callable, Iterable
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-APP_NAME = "Fastrak"
+APP_NAME = "Fastrack"
 STEPS = ("prereq", "deps", "externals", "env", "apps", "shortcut", "doctor")
 TOTAL_STEPS = 7
 
@@ -1028,11 +1028,11 @@ def step_shortcut(opts) -> bool:
     step_header(6, TOTAL_STEPS, "Desktop shortcut")
 
     if sys.platform == "win32":
-        target = SCRIPT_DIR / "Fastrak.lnk"
-        label = "Fastrak.lnk"
+        target = SCRIPT_DIR / "Fastrack.lnk"
+        label = "Fastrack.lnk"
     elif sys.platform == "darwin":
-        target = SCRIPT_DIR / "Fastrak.app"
-        label = "Fastrak.app"
+        target = SCRIPT_DIR / "Fastrack.app"
+        label = "Fastrack.app"
     else:
         status("shortcut", True, "skipped - no launcher generator for this platform yet", warn=True)
         return True
@@ -1046,7 +1046,7 @@ def step_shortcut(opts) -> bool:
         print(f"  {dim('[dry-run] would run make_shortcut.py')}")
         return True
 
-    if not confirm(f"Create {label} next to fastrak_hub.py?", opts.yes, default_yes=True):
+    if not confirm(f"Create {label} next to fastrack_hub.py?", opts.yes, default_yes=True):
         print(f"  {dim('Skipped.')}")
         return True
 
@@ -1058,9 +1058,9 @@ def step_shortcut(opts) -> bool:
 
     print()
     if sys.platform == "win32":
-        print(f"  {ARROW} Right-click {bold('Fastrak.lnk')} -> {cyn('Pin to taskbar')} (or Start menu)")
+        print(f"  {ARROW} Right-click {bold('Fastrack.lnk')} -> {cyn('Pin to taskbar')} (or Start menu)")
     else:
-        print(f"  {ARROW} Drag {bold('Fastrak.app')} to the Dock, or double-click it from Finder.")
+        print(f"  {ARROW} Drag {bold('Fastrack.app')} to the Dock, or double-click it from Finder.")
         print(f"  {dim('First launch: right-click -> Open (unsigned app, one-time Gatekeeper approval).')}")
     return True
 
@@ -1097,32 +1097,32 @@ def step_doctor(opts) -> bool:
         if missing_py:
             all_ok = False
 
-    # fastrak_hub.py imports cleanly?
-    hub = SCRIPT_DIR / "fastrak_hub.py"
-    status("fastrak_hub.py present", hub.exists(), str(hub))
+    # fastrack_hub.py imports cleanly?
+    hub = SCRIPT_DIR / "fastrack_hub.py"
+    status("fastrack_hub.py present", hub.exists(), str(hub))
     if not hub.exists():
         all_ok = False
 
-    # rak_config.json valid paths?
+    # rack_config.json valid paths?
     try:
         modules_dir = str(SCRIPT_DIR / "modules")
         if modules_dir not in sys.path:
             sys.path.insert(0, modules_dir)
-        from rak_settings import RakSettings  # type: ignore[import-not-found]
-        settings = RakSettings()
+        from rack_settings import RackSettings  # type: ignore[import-not-found]
+        settings = RackSettings()
         results = settings.validate_all()
         bad = [(k, msg) for k, (ok, msg) in results.items() if not ok]
-        status("rak_config paths", not bad,
+        status("rack_config paths", not bad,
                "all valid" if not bad else f"{len(bad)} invalid")
         for k, msg in bad:
             print(f"     {BULLET}{k}: {dim(msg)}")
     except Exception as e:
-        status("rak_config paths", False, f"could not check: {e}", warn=True)
+        status("rack_config paths", False, f"could not check: {e}", warn=True)
 
     # Shortcut?
     if sys.platform == "win32":
-        lnk = SCRIPT_DIR / "Fastrak.lnk"
-        status("Fastrak.lnk", lnk.exists(),
+        lnk = SCRIPT_DIR / "Fastrack.lnk"
+        status("Fastrack.lnk", lnk.exists(),
                str(lnk) if lnk.exists() else "not created (optional)",
                warn=not lnk.exists())
 
@@ -1208,7 +1208,7 @@ def welcome():
     print(f"    {cyn('3.')} External tools     {dim('FFmpeg, FLAC, rclone (winget)')}")
     print(f"    {cyn('4.')} Environment        {dim('folders, drive mappings, config')}")
     print(f"    {cyn('5.')} Workstation apps   {dim('KeePassXC, Synology Drive, Visual Subst')}")
-    print(f"    {cyn('6.')} Desktop shortcut   {dim('Fastrak.lnk to pin')}")
+    print(f"    {cyn('6.')} Desktop shortcut   {dim('Fastrack.lnk to pin')}")
     print(f"    {cyn('7.')} Doctor             {dim('verify everything works')}")
     print()
     print(f"  {dim('Every step asks before touching anything. Safe to re-run.')}")
@@ -1255,10 +1255,10 @@ def final_report(results: dict, opts):
     print()
     print(bold("  How to launch:"))
     if sys.platform == "win32":
-        lnk = SCRIPT_DIR / "Fastrak.lnk"
+        lnk = SCRIPT_DIR / "Fastrack.lnk"
         if lnk.exists():
-            print(f"    {ARROW} Double-click {bold('Fastrak.lnk')}  {dim('(or pin to taskbar)')}")
-    print(f"    {ARROW} {bold('python fastrak_hub.py')}")
+            print(f"    {ARROW} Double-click {bold('Fastrack.lnk')}  {dim('(or pin to taskbar)')}")
+    print(f"    {ARROW} {bold('python fastrack_hub.py')}")
     print()
     print(bold("  Useful next steps:"))
     print(f"    {BULLET}Press {cyn('F1')} in the app to see keyboard shortcuts")

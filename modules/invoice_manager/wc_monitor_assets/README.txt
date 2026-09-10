@@ -21,7 +21,7 @@ processed_orders.json
 woocommerce_monitor.log (in %LOCALAPPDATA%\PipelineManager\logs\)
     Activity log file (auto-generated).
     Contains details of all monitor operations.
-    Located in the centralized Pipeline Manager logs folder.
+    Located in the centralized FastRack logs folder.
 
 Setup:
 ------

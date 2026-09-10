@@ -28,7 +28,7 @@ Personal sites (floriandheer, hyphen-v, alles3d) go under `I:\Web\_Personal\{sit
 
 ### First-time setup (linking projects)
 
-1. Launch **Pipeline Manager > Web > Laragon Workspace Manager**
+1. Launch **FastRack > Web > Laragon Workspace Manager**
 2. Verify the Laragon www path is correct (default: `C:\laragon\www`)
 3. The project list shows all folders with their link status
 4. Select an unlinked project and click **Link Project**

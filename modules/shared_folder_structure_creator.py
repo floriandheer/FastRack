@@ -34,7 +34,7 @@ try:
 except Exception:
     def resolve_client_folder_name(typed_value):  # type: ignore[misc]
         return typed_value
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 from shared_form_keyboard import (
     FormKeyboardMixin, FORM_COLORS,
     create_styled_entry, create_styled_text, create_styled_button,
@@ -113,7 +113,7 @@ class GenericFolderStructureCreator(FormKeyboardMixin):
             self.root.geometry("900x550")
             self.root.minsize(800, 450)
 
-        self.settings = get_rak_settings()
+        self.settings = get_rack_settings()
 
         if project_db is not None:
             self.project_db = project_db

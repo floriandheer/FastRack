@@ -47,7 +47,7 @@ _MIGRATABLE_FILENAMES = (
 
 
 def _get_user_data_dir() -> Path:
-    """Per-user PipelineManager AppData dir, matching rak_settings convention."""
+    """Per-user PipelineManager AppData dir, matching rack_settings convention."""
     if sys.platform == "win32":
         return Path.home() / "AppData" / "Local" / "PipelineManager" / "global_invoice"
     # WSL: prefer the Windows user's AppData so it stays in sync with native runs
@@ -180,12 +180,12 @@ class GlobalInvoiceConfig:
     def resolve_db_path(self) -> Path:
         """Path to the invoice registry SQLite DB.
 
-        rak_settings.business.invoice_db_path is primary; empty there
+        rack_settings.business.invoice_db_path is primary; empty there
         means "use the AppData default". ``config.json paths.db_path``
         is honoured for backwards compat only.
         """
-        from rak_settings import get_rak_settings
-        rak_value = get_rak_settings().get_invoice_db_path()
+        from rack_settings import get_rack_settings
+        rak_value = get_rack_settings().get_invoice_db_path()
         if rak_value:
             p = Path(rak_value)
             if not p.is_absolute():
@@ -202,12 +202,12 @@ class GlobalInvoiceConfig:
     def resolve_boekhouding_base(self) -> Path:
         """Authoritative bookkeeping root.
 
-        rak_settings.business.boekhouding_base is primary. If empty,
+        rack_settings.business.boekhouding_base is primary. If empty,
         the legacy ``config.json paths.boekhouding_base`` is honoured
         for backwards compat; otherwise we derive from active_base.
         """
-        from rak_settings import get_rak_settings
-        rak = get_rak_settings()
+        from rack_settings import get_rack_settings
+        rak = get_rack_settings()
         if rak.get_boekhouding_base_explicit():
             return Path(rak.get_boekhouding_base_explicit())
         legacy = (self._raw.get("paths") or {}).get("boekhouding_base")
@@ -218,13 +218,13 @@ class GlobalInvoiceConfig:
     def resolve_soffice_path(self) -> Optional[Path]:
         """LibreOffice ``soffice`` binary.
 
-        Sourced from ``rak_settings.business.soffice_path``; empty
+        Sourced from ``rack_settings.business.soffice_path``; empty
         there falls back to PATH lookup and common install locations.
         ``config.json paths.soffice_path`` is honoured as a last-resort
         legacy override.
         """
-        from rak_settings import get_rak_settings
-        rak_value = get_rak_settings().get_soffice_path()
+        from rack_settings import get_rack_settings
+        rak_value = get_rack_settings().get_soffice_path()
         legacy = (self._raw.get("paths") or {}).get("soffice_path")
         explicit = rak_value or legacy
         if explicit:

@@ -30,7 +30,7 @@ _CATEGORY_FALLBACK = {
     "Bookkeeping": "Business",
 }
 
-_HUB_AUMID = "floriandheer.fastrak"
+_HUB_AUMID = "floriandheer.fastrack"
 
 
 def _category_from_filename(path: str) -> Optional[str]:

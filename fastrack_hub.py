@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Pipeline Management System - Professional UI
 Author: Florian Dheer
 Version: 0.5.0
 Description: Main launcher for various pipeline scripts with professional UI
-Location: P:\\_Scripts\\fastrak_hub.py
+Location: P:\\_Scripts\\fastrack_hub.py
 """
 
 import os
@@ -18,7 +18,7 @@ import ctypes
 
 # Windows taskbar identity — must be set before any Tk window is created so
 # pinned shortcut and running window share the same taskbar slot.
-APP_USER_MODEL_ID = "floriandheer.fastrak"
+APP_USER_MODEL_ID = "floriandheer.fastrack"
 if sys.platform == "win32":
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
@@ -45,7 +45,7 @@ SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from shared_logging import get_logger, setup_logging
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 from shared_open_path import open_path
 
 from ui_theme import COLORS, CATEGORY_COLORS
@@ -63,7 +63,7 @@ from ui_session_state import SessionState, CHANGE_CATEGORIES, CHANGE_SCOPES
 logger = get_logger("pipeline")
 
 # Import Project Tracker for embedded use (from top-level file)
-from fastrak_project_explorer import ProjectTrackerApp
+from fastrack_project_explorer import ProjectTrackerApp
 # Invoice Manager is embedded in the right panel when the Business
 # category is selected (in place of the project tracker).
 from invoice_manager.app import InvoiceManager
@@ -188,10 +188,10 @@ class ScrollableFrame(tk.Frame):
 # ====================================
 
 class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
-    """Professional GUI for the Pipeline Manager."""
+    """Professional GUI for FastRack."""
 
     def __init__(self, root):
-        """Initialize the Pipeline Manager GUI."""
+        """Initialize the FastRack GUI."""
         self.root = root
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
 
@@ -214,7 +214,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.config_manager = ConfigManager()
 
         # Load path configuration
-        self.settings = get_rak_settings()
+        self.settings = get_rack_settings()
 
         # Apply fullscreen if configured
         if self.settings.get_start_fullscreen():
@@ -419,7 +419,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Main title
         title_font = font.Font(family="Segoe UI", size=26, weight="bold")
         title_label = tk.Label(title_container,
-                              text="FASTRAK",
+                              text="FASTRACK",
                               font=title_font,
                               fg=COLORS["text_primary"],
                               bg=COLORS["bg_secondary"])
@@ -792,7 +792,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         """Lazy-create the embedded Sandbox Browser on first Sandbox select."""
         if self.sandbox_browser is not None:
             return
-        root_path = join_native_path(get_rak_settings().get_work_drive(), "_Sandbox")
+        root_path = join_native_path(get_rack_settings().get_work_drive(), "_Sandbox")
         self.sandbox_browser = SandboxBrowserPanel(
             self.sandbox_browser_panel, root_path, status_callback=self.update_status,
         )
@@ -1622,7 +1622,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         """Open a folder in the OS file browser."""
         try:
             # Special handling for Business category - open current quarter folder
-            library_path = join_native_path(get_rak_settings().get_work_drive(), "_LIBRARY")
+            library_path = join_native_path(get_rack_settings().get_work_drive(), "_LIBRARY")
             if folder_path == library_path:
                 # Get current year and quarter
                 now = datetime.datetime.now()
@@ -1630,7 +1630,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 current_quarter = (now.month - 1) // 3 + 1
 
                 # Construct the quarterly folder path
-                boekhouding_base = get_rak_settings().get_boekhouding_base()
+                boekhouding_base = get_rack_settings().get_boekhouding_base()
                 folder_path = join_native_path(boekhouding_base, str(current_year), f"Q{current_quarter}")
 
             if os.path.exists(folder_path):
@@ -1720,7 +1720,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         if saved:
             self.update_status("Settings saved", "success")
             # Reload path config to reflect changes
-            self.settings = get_rak_settings()
+            self.settings = get_rack_settings()
             # Apply always-on-bottom change without restart
             new_on_bottom = self.settings.get_always_on_bottom()
             if new_on_bottom != prev_on_bottom:
@@ -2267,7 +2267,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.status_text.tag_configure("timestamp", foreground=COLORS["text_secondary"])
 
         # Initial message
-        self.update_status("Pipeline Manager ready", "info")
+        self.update_status("FastRack ready", "info")
 
         # Warn about any missing optional dependencies
         self._check_optional_dependencies()
@@ -2441,8 +2441,8 @@ def main():
     # Pin the hub to the bottom of the Windows z-order so it behaves
     # like a launcher pane — other apps and standalone module windows
     # always appear above, even when the user clicks on the hub.
-    # Toggleable via rak_settings (ui.always_on_bottom).
-    if get_rak_settings().get_always_on_bottom():
+    # Toggleable via rack_settings (ui.always_on_bottom).
+    if get_rack_settings().get_always_on_bottom():
         from shared_window_zorder import install_keep_on_bottom
         install_keep_on_bottom(root)
 
@@ -2454,7 +2454,7 @@ def main():
     root.bind('<F11>', lambda e: root.attributes('-fullscreen', not root.attributes('-fullscreen')))
 
     # ====================================
-    # RAK KEYBOARD NAVIGATION BINDINGS
+    # FASTRACK KEYBOARD NAVIGATION BINDINGS
     # ====================================
 
     # Number keys - Global filters (scope 1/2, status 4/5/6)

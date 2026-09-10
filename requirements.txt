@@ -1,4 +1,4 @@
-# Florian Dheer Pipeline - Python dependencies
+# FastRack - Python dependencies
 # Single source of truth. install.py and install_dependencies.py both read this.
 #
 # Install with:
@@ -17,3 +17,4 @@ pyexiv2>=2.8.0            # EXIF metadata read/write for image scripts
 setuptools<81             # invoice2data needs pkg_resources (removed in Python 3.13+ stdlib)
 pdfplumber>=0.9.0         # PDF text extraction for invoice processing
 invoice2data>=0.4.0       # Template-based invoice data extraction
+pyyaml>=6.0               # invoice2data template loading (incoming_scanner.py)

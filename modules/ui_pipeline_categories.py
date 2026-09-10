@@ -2,7 +2,7 @@
 UI Pipeline Categories — adapter that produces the legacy menu shape from the
 unified pipeline_categories.CATEGORIES tree.
 
-The menu format consumed by fastrak_hub / ui_keyboard_navigator is:
+The menu format consumed by fastrack_hub / ui_keyboard_navigator is:
 
     {
         "AUDIO": {
@@ -24,7 +24,7 @@ in pipeline_categories.py, not here.
 import os
 from typing import Dict, Any
 
-from rak_settings import get_rak_settings, join_native_path
+from rack_settings import get_rack_settings, join_native_path
 from pipeline_categories import CATEGORIES, creative_categories
 
 # Base script directory (relative to the main pipeline file)
@@ -32,7 +32,7 @@ SCRIPT_FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 
 # Application constants
-APP_NAME = "Pipeline Manager"
+APP_NAME = "FastRack"
 APP_VERSION = "0.5.0"
 APP_ICON = None
 LOGO_PATH = os.path.join(SCRIPT_FILE_DIR, "assets", "Logo_FlorianDheer_LogoWhite.png")
@@ -46,12 +46,12 @@ def _resolve_folder_path(category_name: str, work_path_key) -> str:
     Sandbox uses the _Sandbox drive root (same root the Sandbox Browser panel
     shows), Global has no folder, others use settings.get_work_path(work_path_key)."""
     if category_name == "Business":
-        return join_native_path(get_rak_settings().get_work_drive(), "_LIBRARY")
+        return join_native_path(get_rack_settings().get_work_drive(), "_LIBRARY")
     if category_name == "Sandbox":
-        return join_native_path(get_rak_settings().get_work_drive(), "_Sandbox")
+        return join_native_path(get_rack_settings().get_work_drive(), "_Sandbox")
     if work_path_key is None:
         return ""
-    return get_rak_settings().get_work_path(work_path_key)
+    return get_rack_settings().get_work_path(work_path_key)
 
 
 def _script_entry(spec: Dict[str, Any]) -> Dict[str, Any]:

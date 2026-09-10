@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Florian Dheer Pipeline Manager will be documented in this file.
+All notable changes to FastRack will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -22,9 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `requirements.txt` when present.
 
 ### Changed
+- Renamed the project from FastRak to **FastRack** throughout code, docs,
+  and file names — `fastrak_hub.py` → `fastrack_hub.py`,
+  `fastrak_project_explorer.py` → `fastrack_project_explorer.py`,
+  `modules/rak_settings.py` → `modules/rack_settings.py`
+  (`RakSettings` → `RackSettings`, `rak_config.json` → `rack_config.json`).
+  Generic/outdated product titles ("Florian Dheer Pipeline", "Pipeline
+  Manager") were unified under the single **FastRack** name, including the
+  in-app `APP_NAME`, window title, and taskbar `AppUserModelID`
+  (`floriandheer.fastrak` → `floriandheer.fastrack`). Existing pinned
+  shortcuts should be regenerated via `python make_shortcut.py`.
 - README, `docs/QUICK_START.md`, and `docs/INSTALLATION.md` restructured
   around `python install.py` as the single entry point. Removed the
-  stale `fastrak_launcher.vbs` reference (the file never existed).
+  stale `fastrack_launcher.vbs` reference (the file never existed).
 - Folder structure creators consolidated into a single manifest-driven
   `GenericFolderStructureCreator`. Adding a new project subtype is now a
   one-entry change in `pipeline_categories.CATEGORIES`. Outliers (Photo,
@@ -45,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `modules/PipelineScript_*_FolderStructure*.py`.
 - `modules/folder_structure_manifest.py` (data moved into `pipeline_categories.py`).
 - Inline `CATEGORY_COLORS`, `PROJECT_TYPES`, `ARCHIVE_CATEGORIES` definitions
-  in `fastrak_project_explorer.py` and the duplicate `CATEGORY_COLORS` in
+  in `fastrack_project_explorer.py` and the duplicate `CATEGORY_COLORS` in
   `ui_theme.py`. All now derive from `pipeline_categories.CATEGORIES`.
 
 ## [0.5.0] - 2025-01-27

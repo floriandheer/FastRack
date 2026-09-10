@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generate a desktop launcher for fastrak_hub.py next to this script: a
+Generate a desktop launcher for fastrack_hub.py next to this script: a
 Windows .lnk shortcut, or a minimal macOS .app bundle.
 
 Resolves all paths relative to the script's own location, so it works on any
@@ -16,15 +16,30 @@ import subprocess
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TARGET_SCRIPT = os.path.join(SCRIPT_DIR, "fastrak_hub.py")
+TARGET_SCRIPT = os.path.join(SCRIPT_DIR, "fastrack_hub.py")
 ICON_PATH = os.path.join(SCRIPT_DIR, "assets", "Favicon_FlorianDheer.ico")
-SHORTCUT_PATH = os.path.join(SCRIPT_DIR, "Fastrak.lnk")
-APP_BUNDLE_PATH = os.path.join(SCRIPT_DIR, "Fastrak.app")
-APP_USER_MODEL_ID = "floriandheer.fastrak"
+SHORTCUT_PATH = os.path.join(SCRIPT_DIR, "Fastrack.lnk")
+APP_BUNDLE_PATH = os.path.join(SCRIPT_DIR, "Fastrack.app")
+APP_USER_MODEL_ID = "floriandheer.fastrack"
 
 
 def find_pythonw():
-    """Locate pythonw.exe in the active interpreter's folder, then on PATH."""
+    """Locate the windowed Python launcher to use as the shortcut's target.
+
+    Prefers the ``pyw`` Python Launcher for Windows (py.exe's windowed
+    sibling): it resolves the registered default interpreter the same way
+    `py`/`pyw` always do, independent of whatever `python.exe` happens to
+    be first on PATH or was used to run this script. That matters on
+    machines with multiple Pythons on PATH (e.g. a bundled interpreter
+    from another app shadowing the real one) - trusting sys.executable or
+    a bare PATH search for "pythonw.exe" can silently pick the wrong one.
+
+    Falls back to the active interpreter's own folder, then a plain PATH
+    search, for machines without the launcher installed.
+    """
+    on_path = shutil.which("pyw")
+    if on_path:
+        return on_path
     candidate = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     if os.path.exists(candidate):
         return candidate
@@ -50,7 +65,7 @@ def build_shortcut(pythonw_exe: str) -> None:
         f'$s.Arguments = \'"{TARGET_SCRIPT}"\';'
         f'$s.WorkingDirectory = "{SCRIPT_DIR}";'
         f'{icon_line}'
-        f'$s.Description = "Fastrak Pipeline Hub";'
+        f'$s.Description = "Fastrack Pipeline Hub";'
         f'$s.WindowStyle = 1;'
         f'$s.Save();'
     )
@@ -67,14 +82,14 @@ def build_shortcut(pythonw_exe: str) -> None:
         f'[System.IO.File]::WriteAllBytes("{SHORTCUT_PATH}", $bytes);'
         f'$shell = New-Object -ComObject Shell.Application;'
         f'$folder = $shell.Namespace("{SCRIPT_DIR}");'
-        f'$item = $folder.ParseName("Fastrak.lnk");'
+        f'$item = $folder.ParseName("Fastrack.lnk");'
     )
     # The IPropertyStore stamping requires a helper; skip silently if not available.
-    # (Pinning still works without it; AppUserModelID is set inside fastrak_hub.py.)
+    # (Pinning still works without it; AppUserModelID is set inside fastrack_hub.py.)
 
 
 def build_mac_app() -> None:
-    """Build a minimal .app bundle that launches fastrak_hub.py.
+    """Build a minimal .app bundle that launches fastrack_hub.py.
 
     No visible Terminal window - matches the Windows .lnk's "just opens
     the GUI" experience, and can be dragged to the Dock or opened from
@@ -90,7 +105,7 @@ def build_mac_app() -> None:
     # sys.executable — the interpreter actually running this script — not a
     # fresh `which python3` lookup, so the launcher uses the exact
     # environment the user already installed requirements.txt into.
-    launcher_path = os.path.join(macos_dir, "Fastrak")
+    launcher_path = os.path.join(macos_dir, "Fastrack")
     with open(launcher_path, "w", encoding="utf-8") as f:
         f.write(
             "#!/bin/bash\n"
@@ -108,11 +123,11 @@ def build_mac_app() -> None:
             '<plist version="1.0">\n'
             '<dict>\n'
             '    <key>CFBundleName</key>\n'
-            '    <string>Fastrak</string>\n'
+            '    <string>Fastrack</string>\n'
             '    <key>CFBundleExecutable</key>\n'
-            '    <string>Fastrak</string>\n'
+            '    <string>Fastrack</string>\n'
             '    <key>CFBundleIdentifier</key>\n'
-            '    <string>com.floriandheer.fastrak</string>\n'
+            '    <string>com.floriandheer.fastrack</string>\n'
             '    <key>CFBundlePackageType</key>\n'
             '    <string>APPL</string>\n'
             '    <key>CFBundleShortVersionString</key>\n'
@@ -139,7 +154,7 @@ def main() -> int:
         elif sys.platform == "darwin":
             build_mac_app()
             print(f"Created: {APP_BUNDLE_PATH}")
-            print("Drag Fastrak.app to the Dock, or double-click it from Finder.")
+            print("Drag Fastrack.app to the Dock, or double-click it from Finder.")
             print("First launch: right-click -> Open (it's unsigned, so Gatekeeper")
             print("needs one-time approval - after that, double-click works normally).")
         else:

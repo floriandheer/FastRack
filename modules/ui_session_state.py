@@ -1,9 +1,9 @@
 """
 Shared session state for category selection and scope filter.
 
-Before this module, the hub (`fastrak_hub.py`) held `selected_categories` +
+Before this module, the hub (`fastrack_hub.py`) held `selected_categories` +
 `current_scopes` and the embedded project tracker
-(`fastrak_project_explorer.py`) held its own `selected_categories` +
+(`fastrack_project_explorer.py`) held its own `selected_categories` +
 `filter_scopes`. Either side could drift from the other. `SessionState`
 centralises the truth; both sides subscribe via `add_listener` and receive a
 notification whenever categories or scopes change.

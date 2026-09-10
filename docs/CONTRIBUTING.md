@@ -35,7 +35,7 @@ While this is a personal pipeline management system, improvements and suggestion
 ### Example Code
 
 ```python
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Module description here.
@@ -87,7 +87,7 @@ modules/PipelineScript_Category_YourScript.py
 Use this template for consistency:
 
 ```python
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Pipeline Script: [Category] - [Script Name]
@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
 ### 3. Register the Script
 
-Add your script to `fastrak_hub.py`:
+Add your script to `fastrack_hub.py`:
 
 ```python
 "your_script": {

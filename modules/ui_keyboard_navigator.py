@@ -1,5 +1,5 @@
 """
-UI Keyboard Navigator - Keyboard navigation system for the Pipeline Manager.
+UI Keyboard Navigator - Keyboard navigation system for FastRack.
 
 Provides WASD panel navigation, arrow key item navigation, and keyboard shortcuts
 as a mixin class that can be added to the main GUI.
@@ -35,7 +35,7 @@ class KeyboardNavigatorMixin:
         - self.tracker_panel: tk.Frame
         - self._folder_category, self._folder_path, self._notes_category: str
         - self.current_scopes: set[str]
-        - self.settings: RakSettings
+        - self.settings: RackSettings
         - self.project_tracker: ProjectTrackerApp
         - self._select_category(key): method
         - self._set_scope(scope): method

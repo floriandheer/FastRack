@@ -3,7 +3,7 @@ Sandbox Browser Panel
 Author: Florian Dheer
 Description: Embedded, lazy-loaded file/folder tree for the Sandbox
 category's loose files, with simple free-form tagging. Fills the same
-right-hand panel slot fastrak_hub.py otherwise gives to ProjectTrackerApp
+right-hand panel slot fastrack_hub.py otherwise gives to ProjectTrackerApp
 (creative categories) or InvoiceManager (Business).
 """
 

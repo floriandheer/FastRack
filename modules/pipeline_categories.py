@@ -23,7 +23,7 @@ to know about a category and its subtypes:
                              project-context tool further. Empty/missing means
                              "any project under this category".
       applies_when         — optional predicate name (see PROJECT_ACTION_PREDICATES
-                             in fastrak_project_explorer). Evaluated against the
+                             in fastrack_project_explorer). Evaluated against the
                              resolved project folder; the action is hidden when
                              it returns False. Use for distinctions the project
                              schema doesn't capture (e.g. wordpress vs static).
@@ -327,7 +327,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "key": "traktor_playlist_sync",
                         "name": "Sync Traktor Playlists",
                         "module": "PipelineScript_Audio_TraktorPlaylistSync",
-                        "description": "Export native Traktor playlists/smart lists to a portable NML for Import Collection on another machine",
+                        "description": "Export native Traktor playlists/smart lists to a USB-ready file, then import and auto-merge on another machine",
                         "icon": "🗂️",
                     },
                     {

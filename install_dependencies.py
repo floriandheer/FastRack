@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Florian Dheer Pipeline - Python Dependency Installer
+FastRack - Python Dependency Installer
 ----------------------------------------------------
 Installs the Python packages required by the desktop pipeline. Reads from
 requirements.txt if available; otherwise falls back to a built-in list.
@@ -74,6 +74,7 @@ DESKTOP_PACKAGES = [
     {"name": "setuptools", "pip_name": "setuptools<81", "description": "Required by invoice2data (pkg_resources)"},
     {"name": "pdfplumber", "pip_name": "pdfplumber>=0.9.0", "description": "PDF text extraction for invoice processing"},
     {"name": "invoice2data", "pip_name": "invoice2data>=0.4.0", "description": "Template-based invoice data extraction"},
+    {"name": "pyyaml", "pip_name": "pyyaml>=6.0", "description": "invoice2data template loading (incoming_scanner.py)"},
 ]
 
 WEB_PACKAGES: list = []
@@ -150,7 +151,7 @@ def banner(title: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Install Florian Dheer Pipeline Python dependencies",
+        description="Install FastRack Python dependencies",
     )
     parser.add_argument("--web-only", action="store_true", help="Install only web-interface deps")
     parser.add_argument("--desktop-only", action="store_true", help="Install only desktop-app deps")
@@ -162,7 +163,7 @@ def main():
     )
     args = parser.parse_args()
 
-    banner("Florian Dheer Pipeline - Python Dependencies")
+    banner("FastRack - Python Dependencies")
     print(f"  Python:    {sys.version.split()[0]}  ({sys.executable})")
     print(f"  Platform:  {sys.platform}")
 
@@ -256,7 +257,7 @@ def _print_next_steps(args):
     banner("Next Steps")
     if not args.web_only:
         print(f"  {ARROW} Launch the hub:")
-        print(f"     python fastrak_hub.py")
+        print(f"     python fastrack_hub.py")
         print()
     if not args.desktop_only and WEB_PACKAGES:
         print(f"  {ARROW} Start the web interface:")

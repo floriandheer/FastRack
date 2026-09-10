@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with the Pipeline Manager in 5 minutes.
+Get up and running with FastRack in 5 minutes.
 
 ## 1. Run the installer (3 minutes)
 
@@ -15,19 +15,19 @@ Press Enter to begin and follow the prompts. The installer covers:
 - Python packages
 - External tools (FFmpeg, FLAC, rclone) via winget
 - Folders + drive mappings (`subst I:`, `subst P:`, …)
-- Pipeline config (`rak_config.json`)
-- A pinnable `Fastrak.lnk` shortcut
+- Pipeline config (`rack_config.json`)
+- A pinnable `Fastrack.lnk` shortcut
 - A final "doctor" pass that confirms everything is healthy
 
 Safe to re-run any time. Press `Ctrl+C` at any prompt to bail.
 
 ## 2. Launch the application (10 seconds)
 
-**Windows:** double-click `Fastrak.lnk` (or right-click → Pin to taskbar).
+**Windows:** double-click `Fastrack.lnk` (or right-click → Pin to taskbar).
 
 **Any platform:**
 ```bash
-python fastrak_hub.py
+python fastrack_hub.py
 ```
 
 ## 3. Use your first script (1 minute)
@@ -93,4 +93,4 @@ All scripts have descriptions. Hover or click to see what they do before running
 
 ---
 
-**That's it. You're ready to use the Pipeline Manager.**
+**That's it. You're ready to use FastRack.**

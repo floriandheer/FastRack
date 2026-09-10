@@ -15,7 +15,7 @@ from typing import List, Dict, Optional
 import shutil
 
 from shared_logging import get_logger
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 
 logger = get_logger(__name__)
 
@@ -187,7 +187,7 @@ class ProjectDatabase:
         path = path.replace('/', '\\')
 
         # Handle mapped drive letters (e.g. I:\ -> D:\_work\Active\)
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         work_drive = settings.get_work_drive().upper()
         active_base = settings.get_active_base()
         if path.upper().startswith(work_drive + '\\'):
@@ -209,7 +209,7 @@ class ProjectDatabase:
         if not path:
             return path
 
-        settings = get_rak_settings()
+        settings = get_rack_settings()
         if drive is None:
             drive = settings.get_work_drive().rstrip(':')
 

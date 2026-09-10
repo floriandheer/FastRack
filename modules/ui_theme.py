@@ -1,5 +1,5 @@
 """
-UI Theme - Color constants and theme configuration for the Pipeline Manager.
+UI Theme - Color constants and theme configuration for FastRack.
 
 CATEGORY_COLORS is derived from pipeline_categories.CATEGORIES so the colors
 stay in lockstep with the rest of the codebase. Both TitleCase ("Audio") and

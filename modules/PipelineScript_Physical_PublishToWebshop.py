@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Publish Photos to Webshop
@@ -28,7 +28,7 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from shared_logging import get_logger, setup_logging
-from rak_settings import get_rak_settings
+from rack_settings import get_rack_settings
 from shared_open_path import open_path
 
 MODULE_NAME = "publish_to_webshop"
@@ -60,7 +60,7 @@ def _product_name_from_folder(project_folder: Path) -> str:
 
 
 def _resolve_destination(product_name: str) -> Path:
-    web_root = _platform_path(get_rak_settings().get_work_path("Web"))
+    web_root = _platform_path(get_rack_settings().get_work_path("Web"))
     return web_root / "_Personal" / "alles3d" / "products" / product_name / "photos"
 
 

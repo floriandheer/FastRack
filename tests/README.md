@@ -1,6 +1,6 @@
 # Tests Directory
 
-This directory contains test files for the Pipeline Manager.
+This directory contains test files for FastRack.
 
 ## Running Tests
 

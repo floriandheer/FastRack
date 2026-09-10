@@ -1,27 +1,31 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 PipelineScript_Audio_TraktorPlaylistSync.py
-Description: Export selected Traktor playlists/smart lists from this machine's
-             collection.nml into a portable NML fragment, with track locations
-             remapped to another machine's library layout, ready to bring over
-             and merge in via Traktor's own Preferences > File Management >
-             Import Collection.
+Description: Move Traktor playlists/smart lists between this pipeline's own
+             machines. Export writes selected playlists - with this machine's
+             own raw Traktor paths, unmodified - to a folder next to
+             collection.nml and opens it, ready to drop onto a USB stick.
+             Import reads such a file on the destination machine, rewrites
+             the paths to this machine's own library layout, and merges the
+             playlists directly into this machine's live collection.nml.
 
-Unlike PipelineScript_Audio_TraktorSync.py (which builds a Traktor DJ library
-FROM a MusicBee/iTunes export), this tool works the other direction: it reads
-crates/smart lists that already exist natively inside Traktor and packages
-them for the *other* computer, assuming the actual audio files already live
-in a shared/synced location reachable from both machines (NAS, cloud folder,
-etc.) - so no file copying or format conversion happens here, only playlist
-data and path remapping.
+Both machines only ever need to know their own library root ("This Machine"
+profile, below) - the source machine's root travels embedded in the exported
+file itself, so no destination-specific setup is ever required. No audio
+files are copied - this assumes the actual files already live in a
+shared/synced location reachable from both machines (NAS, cloud folder,
+etc.), same as before.
 """
 
 import os
 import sys
 import copy
+import shutil
+import socket
 import argparse
 import datetime
+import subprocess
 import xml.etree.ElementTree as ET
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
@@ -30,11 +34,12 @@ from typing import Optional, Dict, List, Any, Tuple
 
 from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
+from shared_open_path import open_path
 
 logger = get_logger("traktor_playlist_sync")
 
 APP_NAME = "Traktor Playlist Sync"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 HEADER_COLOR = "#2c3e50"
 
 APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager")
@@ -43,6 +48,15 @@ CONFIG_FILE = os.path.join(APP_DATA_DIR, "traktor_playlist_sync_config.json")
 # Built-in preset that mirrors the Auto Select rule (digits 1-9 prefix).
 DEFAULT_PRESET_NAME = "Default (Auto)"
 
+# Subfolder next to collection.nml where exports are dropped.
+EXPORT_SUBFOLDER = "PlaylistSync"
+
+# Custom element embedded in exported files recording the source machine's
+# library root, so Import never has to guess it.
+PIPELINEMETA_TAG = "PIPELINEMETA"
+
+TRAKTOR_PROCESS_NAMES = ("Traktor.exe",)
+
 
 # ============================================================================
 # NML DATA MODEL
@@ -50,10 +64,10 @@ DEFAULT_PRESET_NAME = "Default (Auto)"
 
 @dataclass
 class MachineProfile:
-    """One machine's view of the shared DJ library, in Traktor's own path tokens.
+    """This machine's view of the shared DJ library, in Traktor's own path tokens.
 
     `volume` and `dir_prefix` are copied verbatim from a real LOCATION element
-    (VOLUME + DIR) in that machine's collection.nml - never hand-derived from
+    (VOLUME + DIR) in this machine's collection.nml - never hand-derived from
     an OS path - because Traktor's VOLUME/DIR encoding differs by platform
     (Windows drive letter vs. Mac volume name) in ways that aren't worth
     reverse-engineering when we can just read an example straight from Traktor.
@@ -82,9 +96,7 @@ class MachineProfile:
 class SyncSettings:
     """Sync configuration settings."""
     collection_nml_path: str = ""
-    machine_profiles: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    this_machine_profile: str = ""
-    export_target_profile: str = ""
+    this_machine: Dict[str, str] = field(default_factory=dict)
     export_output_dir: str = ""
     selected_playlists: List[str] = field(default_factory=list)
     selection_mode: str = "include"
@@ -165,6 +177,17 @@ class ExportStats:
     tracks_exported: int = 0
     tracks_skipped_outside_library: int = 0
     tracks_missing_from_collection: int = 0
+
+
+@dataclass
+class ImportStats:
+    playlists_added: int = 0
+    playlists_replaced: int = 0
+    smartlists_added: int = 0
+    smartlists_replaced: int = 0
+    tracks_merged: int = 0
+    tracks_skipped_outside_library: int = 0
+    tracks_missing_from_export: int = 0
 
 
 def load_nml(path: str) -> ET.ElementTree:
@@ -279,7 +302,7 @@ def rewrite_entry_location(entry: ET.Element, src: MachineProfile, dst: MachineP
 def detect_profile_from_sample(entry_index: Dict[str, ET.Element], sample_filename: str) -> Optional[Tuple[str, str]]:
     """Find a COLLECTION entry whose FILE matches `sample_filename` (basename
     match) and return its (VOLUME, DIR) - i.e. the library root as Traktor
-    encodes it on that machine, provided the sample track sits directly at
+    encodes it on this machine, provided the sample track sits directly at
     the top of the shared library folder rather than in a subfolder."""
     target = os.path.basename(sample_filename)
     for entry in entry_index.values():
@@ -289,16 +312,28 @@ def detect_profile_from_sample(entry_index: Dict[str, ET.Element], sample_filena
     return None
 
 
-def detect_profile_from_nml_file(nml_path: str, sample_filename: str) -> Optional[Tuple[str, str]]:
-    """Same as detect_profile_from_sample, but against a standalone NML file
-    (e.g. a copy of the other machine's collection.nml carried over once)."""
-    tree = load_nml(nml_path)
-    root = tree.getroot()
-    collection = get_collection_element(root)
-    if collection is None:
+# ----------------------------------------------------------------------
+# Export: build a standalone fragment, this machine's own raw paths
+# ----------------------------------------------------------------------
+
+def write_export_metadata(nml_root: ET.Element, src: MachineProfile) -> None:
+    ET.SubElement(nml_root, PIPELINEMETA_TAG, {
+        "SRC_NAME": src.name,
+        "SRC_VOLUME": src.volume,
+        "SRC_DIR_PREFIX": src.dir_prefix,
+        "EXPORTED_AT": datetime.datetime.now().isoformat(timespec="seconds"),
+    })
+
+
+def read_export_metadata(nml_root: ET.Element) -> Optional[MachineProfile]:
+    meta = nml_root.find(PIPELINEMETA_TAG)
+    if meta is None:
         return None
-    index = build_entry_index(collection)
-    return detect_profile_from_sample(index, sample_filename)
+    return MachineProfile(
+        name=meta.get("SRC_NAME", ""),
+        volume=meta.get("SRC_VOLUME", ""),
+        dir_prefix=meta.get("SRC_DIR_PREFIX", ""),
+    )
 
 
 def _build_folder_tree(nodes: List[PlaylistNode]) -> Dict[str, Any]:
@@ -313,9 +348,8 @@ def _build_folder_tree(nodes: List[PlaylistNode]) -> Dict[str, Any]:
 
 
 def _emit_playlist_leaf(node: PlaylistNode, entry_index: Dict[str, ET.Element],
-                         needed_entries: Dict[str, str], src: MachineProfile,
-                         dst: MachineProfile, stats: ExportStats) -> ET.Element:
-    """Deep-copy one playlist/smart-list NODE with paths rewritten for dst."""
+                         needed_entries: set, src: MachineProfile, stats: ExportStats) -> ET.Element:
+    """Deep-copy one playlist/smart-list NODE, keeping this machine's own raw paths."""
     new_node = copy.deepcopy(node.element)
 
     if node.kind == "SMARTLIST":
@@ -330,21 +364,19 @@ def _emit_playlist_leaf(node: PlaylistNode, entry_index: Dict[str, ET.Element],
     if playlist_el is not None:
         for entry_el in list(playlist_el.findall("ENTRY")):
             pk = entry_el.find("PRIMARYKEY")
-            original_key = pk.get("KEY") if pk is not None else None
-            if not original_key:
+            key = pk.get("KEY") if pk is not None else None
+            if not key:
                 playlist_el.remove(entry_el)
                 continue
-            if original_key not in entry_index:
+            if key not in entry_index:
                 playlist_el.remove(entry_el)
                 stats.tracks_missing_from_collection += 1
                 continue
-            new_key = rewrite_key_string(original_key, src, dst)
-            if new_key is None:
+            if not src.root_key or not key.startswith(src.root_key):
                 playlist_el.remove(entry_el)
                 stats.tracks_skipped_outside_library += 1
                 continue
-            pk.set("KEY", new_key)
-            needed_entries[original_key] = new_key
+            needed_entries.add(key)
             surviving += 1
         playlist_el.set("ENTRIES", str(surviving))
 
@@ -354,32 +386,32 @@ def _emit_playlist_leaf(node: PlaylistNode, entry_index: Dict[str, ET.Element],
 
 
 def _emit_folder(name: str, tree: Dict[str, Any], entry_index: Dict[str, ET.Element],
-                  needed_entries: Dict[str, str], src: MachineProfile,
-                  dst: MachineProfile, stats: ExportStats) -> ET.Element:
+                  needed_entries: set, src: MachineProfile, stats: ExportStats) -> ET.Element:
     folder_el = ET.Element("NODE", {"TYPE": "FOLDER", "NAME": name})
     subnodes_el = ET.SubElement(folder_el, "SUBNODES")
     count = 0
     for sub_name, sub_tree in tree["folders"].items():
-        subnodes_el.append(_emit_folder(sub_name, sub_tree, entry_index, needed_entries, src, dst, stats))
+        subnodes_el.append(_emit_folder(sub_name, sub_tree, entry_index, needed_entries, src, stats))
         count += 1
     for leaf in tree["leaves"]:
-        subnodes_el.append(_emit_playlist_leaf(leaf, entry_index, needed_entries, src, dst, stats))
+        subnodes_el.append(_emit_playlist_leaf(leaf, entry_index, needed_entries, src, stats))
         count += 1
     subnodes_el.set("COUNT", str(count))
     return folder_el
 
 
 def build_export_root(source_root: ET.Element, selected_nodes: List[PlaylistNode],
-                       entry_index: Dict[str, ET.Element], src: MachineProfile,
-                       dst: MachineProfile) -> Tuple[ET.Element, ExportStats]:
+                       entry_index: Dict[str, ET.Element], src: MachineProfile) -> Tuple[ET.Element, ExportStats]:
     """Build a standalone <NML> element containing only the selected
     playlists/smart lists and the COLLECTION entries they reference, with
-    every LOCATION and PRIMARYKEY remapped from src's library root to dst's."""
+    this machine's own raw LOCATION/PRIMARYKEY paths left untouched. The
+    source machine's library root travels along embedded as PIPELINEMETA,
+    so the destination machine can rewrite paths itself at import time."""
     stats = ExportStats()
-    needed_entries: Dict[str, str] = {}  # original_key -> new_key (insertion-ordered)
+    needed_entries: set = set()
 
     tree = _build_folder_tree(selected_nodes)
-    root_folder_el = _emit_folder("$ROOT", tree, entry_index, needed_entries, src, dst, stats)
+    root_folder_el = _emit_folder("$ROOT", tree, entry_index, needed_entries, src, stats)
 
     new_root = ET.Element("NML", {"VERSION": source_root.get("VERSION", "19")})
 
@@ -390,15 +422,15 @@ def build_export_root(source_root: ET.Element, selected_nodes: List[PlaylistNode
         ET.SubElement(new_root, "HEAD", {"COMPANY": "www.native-instruments.com", "PROGRAM": "Traktor"})
 
     collection_el = ET.Element("COLLECTION", {"ENTRIES": str(len(needed_entries))})
-    for original_key in needed_entries:
-        entry_copy = copy.deepcopy(entry_index[original_key])
-        rewrite_entry_location(entry_copy, src, dst)
-        collection_el.append(entry_copy)
+    for key in needed_entries:
+        collection_el.append(copy.deepcopy(entry_index[key]))
     new_root.append(collection_el)
 
     playlists_el = ET.Element("PLAYLISTS")
     playlists_el.append(root_folder_el)
     new_root.append(playlists_el)
+
+    write_export_metadata(new_root, src)
 
     return new_root, stats
 
@@ -409,59 +441,156 @@ def write_nml(root_element: ET.Element, output_path: str) -> None:
         f.write(ET.tostring(root_element, encoding="utf-8"))
 
 
-# ============================================================================
-# SMALL REUSABLE DIALOG: filter + pick one string from a list
-# ============================================================================
+def write_nml_atomic(root_element: ET.Element, output_path: str) -> None:
+    """Write via a temp file + os.replace so a live collection.nml is never
+    left half-written if something goes wrong mid-write."""
+    tmp_path = f"{output_path}.tmp-{os.getpid()}"
+    with open(tmp_path, "wb") as f:
+        f.write(b'<?xml version="1.0" encoding="UTF-8" standalone="no" ?>\n')
+        f.write(ET.tostring(root_element, encoding="utf-8"))
+    os.replace(tmp_path, output_path)
 
-def pick_from_list(parent, title: str, items: List[str]) -> Optional[str]:
-    """Modal filterable picker. Returns the chosen string, or None if cancelled."""
-    result: Dict[str, Optional[str]] = {"value": None}
 
-    win = tk.Toplevel(parent)
-    win.title(title)
-    win.geometry("420x420")
-    win.transient(parent)
-    win.grab_set()
+# ----------------------------------------------------------------------
+# Import: rewrite paths from the embedded src root to this machine's own,
+# merge directly into this machine's live PLAYLISTS tree + COLLECTION
+# ----------------------------------------------------------------------
 
-    ttk.Label(win, text="Filter:").pack(anchor="w", padx=10, pady=(10, 0))
-    filter_var = tk.StringVar()
-    ttk.Entry(win, textvariable=filter_var).pack(fill=tk.X, padx=10, pady=(0, 5))
+def _find_child_folder(subnodes_el: ET.Element, name: str) -> Optional[ET.Element]:
+    for node in subnodes_el.findall("NODE"):
+        if node.get("TYPE") == "FOLDER" and node.get("NAME") == name:
+            return node
+    return None
 
-    list_frame = ttk.Frame(win)
-    list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-    listbox = tk.Listbox(list_frame, activestyle="dotbox")
-    scroll = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
-    listbox.config(yscrollcommand=scroll.set)
-    listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-    sorted_items = sorted(items, key=str.lower)
+def _find_child_leaf(subnodes_el: ET.Element, name: str) -> Optional[ET.Element]:
+    for node in subnodes_el.findall("NODE"):
+        if node.get("TYPE") in ("PLAYLIST", "SMARTLIST") and node.get("NAME") == name:
+            return node
+    return None
 
-    def refresh(*_args):
-        listbox.delete(0, tk.END)
-        needle = filter_var.get().lower()
-        for item in sorted_items:
-            if not needle or needle in item.lower():
-                listbox.insert(tk.END, item)
 
-    filter_var.trace_add('write', refresh)
-    refresh()
+def _ensure_folder_path(dst_root_folder: ET.Element, path: Tuple[str, ...]) -> ET.Element:
+    """Walk/create the FOLDER chain under dst_root_folder (a $ROOT NODE),
+    returning the leaf folder's NODE element."""
+    current = dst_root_folder
+    for part in path:
+        subnodes = current.find("SUBNODES")
+        if subnodes is None:
+            subnodes = ET.SubElement(current, "SUBNODES", {"COUNT": "0"})
+        child = _find_child_folder(subnodes, part)
+        if child is None:
+            child = ET.Element("NODE", {"TYPE": "FOLDER", "NAME": part})
+            ET.SubElement(child, "SUBNODES", {"COUNT": "0"})
+            subnodes.append(child)
+            subnodes.set("COUNT", str(len(subnodes.findall("NODE"))))
+        current = child
+    return current
 
-    def confirm(*_args):
-        selection = listbox.curselection()
-        if selection:
-            result["value"] = listbox.get(selection[0])
-        win.destroy()
 
-    listbox.bind("<Double-Button-1>", confirm)
+def _merge_playlist_entries(new_node: ET.Element, export_entry_index: Dict[str, ET.Element],
+                             dst_collection_el: ET.Element, dst_entry_index: Dict[str, ET.Element],
+                             src: MachineProfile, dst: MachineProfile, stats: ImportStats) -> int:
+    """Rewrite + merge the COLLECTION entries a (deep-copied) PLAYLIST leaf's
+    tracks reference, mutating PRIMARYKEY KEYs in place. Returns surviving
+    track count. No-op for SMARTLIST (caller only calls this for PLAYLIST)."""
+    playlist_el = new_node.find("PLAYLIST")
+    if playlist_el is None:
+        return 0
+    surviving = 0
+    for entry_el in list(playlist_el.findall("ENTRY")):
+        pk = entry_el.find("PRIMARYKEY")
+        key = pk.get("KEY") if pk is not None else None
+        if not key or key not in export_entry_index:
+            playlist_el.remove(entry_el)
+            stats.tracks_missing_from_export += 1
+            continue
+        new_key = rewrite_key_string(key, src, dst)
+        if new_key is None:
+            playlist_el.remove(entry_el)
+            stats.tracks_skipped_outside_library += 1
+            continue
+        if new_key not in dst_entry_index:
+            entry_copy = copy.deepcopy(export_entry_index[key])
+            rewrite_entry_location(entry_copy, src, dst)
+            dst_collection_el.append(entry_copy)
+            dst_collection_el.set("ENTRIES", str(len(dst_collection_el.findall("ENTRY"))))
+            dst_entry_index[new_key] = entry_copy
+        pk.set("KEY", new_key)
+        surviving += 1
+    playlist_el.set("ENTRIES", str(surviving))
+    stats.tracks_merged += surviving
+    return surviving
 
-    btn_frame = ttk.Frame(win)
-    btn_frame.pack(fill=tk.X, padx=10, pady=10)
-    ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side=tk.RIGHT, padx=(5, 0))
-    ttk.Button(btn_frame, text="Select", command=confirm).pack(side=tk.RIGHT)
 
-    win.wait_window()
-    return result["value"]
+def merge_node_into_collection(node: PlaylistNode, export_entry_index: Dict[str, ET.Element],
+                                dst_root_folder: ET.Element, dst_collection_el: ET.Element,
+                                dst_entry_index: Dict[str, ET.Element], src: MachineProfile,
+                                dst: MachineProfile, stats: ImportStats) -> None:
+    """Merge one playlist/smart-list node into the destination's live
+    PLAYLISTS tree and COLLECTION, replacing any existing node of the same
+    name at the same folder path."""
+    new_node = copy.deepcopy(node.element)
+
+    if node.kind == "PLAYLIST":
+        _merge_playlist_entries(new_node, export_entry_index, dst_collection_el, dst_entry_index, src, dst, stats)
+
+    folder = _ensure_folder_path(dst_root_folder, node.path)
+    subnodes = folder.find("SUBNODES")
+    if subnodes is None:
+        subnodes = ET.SubElement(folder, "SUBNODES", {"COUNT": "0"})
+
+    existing = _find_child_leaf(subnodes, node.name)
+    if existing is not None:
+        subnodes.remove(existing)
+        subnodes.append(new_node)
+        if node.kind == "PLAYLIST":
+            stats.playlists_replaced += 1
+        else:
+            stats.smartlists_replaced += 1
+    else:
+        subnodes.append(new_node)
+        if node.kind == "PLAYLIST":
+            stats.playlists_added += 1
+        else:
+            stats.smartlists_added += 1
+    subnodes.set("COUNT", str(len(subnodes.findall("NODE"))))
+
+
+def backup_file(path: str) -> str:
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    backup_path = f"{path}.bak-{timestamp}"
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+def running_traktor_processes() -> List[str]:
+    """Return the subset of TRAKTOR_PROCESS_NAMES currently running, so we
+    can refuse to merge into a collection.nml Traktor still has open."""
+    if sys.platform != "win32":
+        return []
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+    except Exception as e:
+        logger.warning(f"tasklist failed: {e}")
+        return []
+
+    lower_names = {n.lower() for n in TRAKTOR_PROCESS_NAMES}
+    found = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        image = line.split('","', 1)[0].lstrip('"').lower()
+        if image in lower_names and image not in (f.lower() for f in found):
+            for canonical in TRAKTOR_PROCESS_NAMES:
+                if canonical.lower() == image:
+                    found.append(canonical)
+                    break
+    return found
 
 
 # ============================================================================
@@ -469,20 +598,16 @@ def pick_from_list(parent, title: str, items: List[str]) -> Optional[str]:
 # ============================================================================
 
 class ProfileEditorDialog:
-    """Create/edit one MachineProfile. Detection helpers avoid the user ever
-    having to hand-type Traktor's internal "/:" path token syntax."""
+    """Create/edit the local "This Machine" library-root profile. The detect
+    button avoids ever having to hand-type Traktor's internal "/:" path
+    syntax."""
 
-    def __init__(self, parent, app: 'TraktorPlaylistSyncUI', profile: Optional[MachineProfile] = None,
-                 existing_names: Optional[List[str]] = None):
+    def __init__(self, parent, app: 'TraktorPlaylistSyncUI', profile: Optional[MachineProfile] = None):
         self.app = app
         self.result: Optional[MachineProfile] = None
-        self._existing_names = set(existing_names or [])
-        original_name = profile.name if profile else None
-        if original_name in self._existing_names:
-            self._existing_names.discard(original_name)
 
         self.win = tk.Toplevel(parent)
-        self.win.title("Machine Profile")
+        self.win.title("This Machine")
         self.win.geometry("520x260")
         self.win.transient(parent)
         self.win.grab_set()
@@ -492,7 +617,7 @@ class ProfileEditorDialog:
         form.columnconfigure(1, weight=1)
 
         ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="w", pady=5)
-        self.name_var = tk.StringVar(value=profile.name if profile else "")
+        self.name_var = tk.StringVar(value=profile.name if profile and profile.name else socket.gethostname())
         ttk.Entry(form, textvariable=self.name_var).grid(row=0, column=1, columnspan=2, sticky="ew", pady=5)
 
         ttk.Label(form, text="Volume:").grid(row=1, column=0, sticky="w", pady=5)
@@ -500,8 +625,7 @@ class ProfileEditorDialog:
         ttk.Entry(form, textvariable=self.volume_var).grid(row=1, column=1, columnspan=2, sticky="ew", pady=5)
 
         ttk.Label(form, text="Dir prefix:").grid(row=2, column=0, sticky="w", pady=5)
-        default_dir = profile.dir_prefix if profile else self.app.get_this_machine_dir_default()
-        self.dir_var = tk.StringVar(value=default_dir)
+        self.dir_var = tk.StringVar(value=profile.dir_prefix if profile else "")
         ttk.Entry(form, textvariable=self.dir_var).grid(row=2, column=1, columnspan=2, sticky="ew", pady=5)
 
         ttk.Label(
@@ -510,19 +634,10 @@ class ProfileEditorDialog:
             foreground="gray", font=("Arial", 8), wraplength=470, justify="left",
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
-        detect_frame = ttk.LabelFrame(form, text="Detect from a track file (no need to type the syntax by hand)")
-        detect_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=5)
-        detect_frame.columnconfigure(0, weight=1)
-        detect_frame.columnconfigure(1, weight=1)
-
         ttk.Button(
-            detect_frame, text="From this machine's loaded collection...",
+            form, text="Detect from this machine's loaded collection...",
             command=self._detect_from_local,
-        ).grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        ttk.Button(
-            detect_frame, text="From another collection.nml file...",
-            command=self._detect_from_reference,
-        ).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        ).grid(row=4, column=0, columnspan=3, sticky="ew", pady=5)
 
         btn_frame = ttk.Frame(self.win)
         btn_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
@@ -548,54 +663,20 @@ class ProfileEditorDialog:
         self.volume_var.set(found[0])
         self.dir_var.set(found[1])
 
-    def _detect_from_reference(self):
-        nml_path = filedialog.askopenfilename(
-            title="Select the other machine's collection.nml (a copy is fine)",
-            filetypes=[("Traktor Collection", "*.nml"), ("All Files", "*.*")],
-        )
-        if not nml_path:
-            return
-
-        candidates = sorted({
-            entry.find("LOCATION").get("FILE", "")
-            for entry in self.app.entry_index.values()
-            if entry.find("LOCATION") is not None and entry.find("LOCATION").get("FILE")
-        })
-        filename = pick_from_list(
-            self.win, "Pick a filename you know exists on that machine too (ideally in the shared library root)",
-            candidates,
-        )
-        if not filename:
-            return
-
-        try:
-            found = detect_profile_from_nml_file(nml_path, filename)
-        except Exception as e:
-            messagebox.showerror("Detect", f"Could not read that NML file:\n{e}", parent=self.win)
-            return
-        if not found:
-            messagebox.showwarning("Detect", f"No entry named '{filename}' found in that file.", parent=self.win)
-            return
-        self.volume_var.set(found[0])
-        self.dir_var.set(found[1])
-
     def _save(self):
         name = self.name_var.get().strip()
         volume = self.volume_var.get().strip()
         dir_prefix = self.dir_var.get().strip()
 
         if not name:
-            messagebox.showerror("Machine Profile", "Name is required.", parent=self.win)
-            return
-        if name in self._existing_names:
-            messagebox.showerror("Machine Profile", f"A profile named '{name}' already exists.", parent=self.win)
+            messagebox.showerror("This Machine", "Name is required.", parent=self.win)
             return
         if not volume or not dir_prefix:
-            messagebox.showerror("Machine Profile", "Volume and Dir prefix are both required.", parent=self.win)
+            messagebox.showerror("This Machine", "Volume and Dir prefix are both required.", parent=self.win)
             return
         if not dir_prefix.startswith("/:") or not dir_prefix.endswith("/:"):
             if not messagebox.askyesno(
-                "Machine Profile",
+                "This Machine",
                 "Dir prefix doesn't look like Traktor's \"/:folder/:\" syntax - save anyway?",
                 parent=self.win,
             ):
@@ -621,7 +702,7 @@ class TraktorPlaylistSyncUI:
 
         self.config_manager = ConfigManager()
 
-        # NML state
+        # NML state (this machine's own collection.nml - export source AND import target)
         self.nml_tree: Optional[ET.ElementTree] = None
         self.collection_element: Optional[ET.Element] = None
         self.entry_index: Dict[str, ET.Element] = {}
@@ -630,9 +711,16 @@ class TraktorPlaylistSyncUI:
         self._loaded_nml_mtime: Optional[float] = None
         self._nml_autoload_after_id = None
 
+        # This Machine profile
+        self.machine_profile = MachineProfile(name=socket.gethostname())
+
+        # Import state (a fragment file produced by Export on another machine)
+        self._import_entry_index: Dict[str, ET.Element] = {}
+        self._import_nodes: List[PlaylistNode] = []
+        self._import_src_profile: Optional[MachineProfile] = None
+
         self._create_header()
-        self._create_config_panel()
-        self._create_results_panel()
+        self._create_body()
 
         self.status_var = tk.StringVar(value="Ready")
         self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -654,14 +742,31 @@ class TraktorPlaylistSyncUI:
             relx=0.5, rely=0.5, anchor=tk.CENTER
         )
 
-    def _create_config_panel(self):
+    def _create_body(self):
         main = ttk.Frame(self.root)
         main.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(2, weight=1)
+        main.rowconfigure(2, weight=3)
+        main.rowconfigure(3, weight=2)
         self._main = main
 
-        # --- Source ---
+        self._create_source_panel(main)
+        self._create_machine_panel(main)
+
+        notebook = ttk.Notebook(main)
+        notebook.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+
+        export_tab = ttk.Frame(notebook)
+        notebook.add(export_tab, text="Export")
+        self._create_export_tab(export_tab)
+
+        import_tab = ttk.Frame(notebook)
+        notebook.add(import_tab, text="Import")
+        self._create_import_tab(import_tab)
+
+        self._create_results_panel(main)
+
+    def _create_source_panel(self, main):
         source_frame = ttk.LabelFrame(main, text="Source: this machine's Traktor collection")
         source_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         source_frame.columnconfigure(1, weight=1)
@@ -678,36 +783,26 @@ class TraktorPlaylistSyncUI:
             row=1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 10)
         )
 
-        # --- Machine profiles ---
-        profiles_frame = ttk.LabelFrame(main, text="Machine Profiles (shared DJ library root, per machine)")
-        profiles_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-        profiles_frame.columnconfigure(1, weight=1)
+    def _create_machine_panel(self, main):
+        frame = ttk.LabelFrame(main, text="This Machine (shared DJ library root)")
+        frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        frame.columnconfigure(0, weight=1)
 
-        ttk.Label(profiles_frame, text="This machine:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        self.this_machine_var = tk.StringVar()
-        self.this_machine_combo = ttk.Combobox(profiles_frame, textvariable=self.this_machine_var, state="readonly")
-        self.this_machine_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=8)
-        self.this_machine_combo.bind("<<ComboboxSelected>>", lambda e: self._on_profiles_changed())
+        self.machine_summary_var = tk.StringVar()
+        ttk.Label(frame, textvariable=self.machine_summary_var, foreground="gray").grid(
+            row=0, column=0, sticky="w", padx=10, pady=8
+        )
+        ttk.Button(frame, text="Set up / Edit...", command=self._setup_machine_profile).grid(
+            row=0, column=1, padx=10, pady=8
+        )
 
-        ttk.Label(profiles_frame, text="Export for:").grid(row=1, column=0, sticky="w", padx=10, pady=8)
-        self.target_machine_var = tk.StringVar()
-        self.target_machine_combo = ttk.Combobox(profiles_frame, textvariable=self.target_machine_var, state="readonly")
-        self.target_machine_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=8)
-        self.target_machine_combo.bind("<<ComboboxSelected>>", lambda e: self._on_profiles_changed())
-
-        profile_btns = ttk.Frame(profiles_frame)
-        profile_btns.grid(row=0, column=2, rowspan=2, sticky="ns", padx=10)
-        ttk.Button(profile_btns, text="New...", command=self._new_profile, width=10).pack(pady=2)
-        ttk.Button(profile_btns, text="Edit...", command=self._edit_profile, width=10).pack(pady=2)
-        ttk.Button(profile_btns, text="Delete", command=self._delete_profile, width=10).pack(pady=2)
-
-        self.profiles_summary_var = tk.StringVar(value="No profiles configured yet.")
-        ttk.Label(profiles_frame, textvariable=self.profiles_summary_var, foreground="gray", font=("Arial", 8),
-                  wraplength=650, justify="left").grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 8))
+    def _create_export_tab(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(2, weight=1)
 
         # --- Output ---
-        output_frame = ttk.LabelFrame(main, text="Output")
-        output_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        output_frame = ttk.LabelFrame(tab, text="Output")
+        output_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         output_frame.columnconfigure(1, weight=1)
 
         ttk.Label(output_frame, text="Save folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
@@ -716,11 +811,11 @@ class TraktorPlaylistSyncUI:
         ttk.Button(output_frame, text="Browse", command=self._browse_output_dir).grid(row=0, column=2, padx=5, pady=10)
 
         # --- Playlist selection ---
-        playlist_frame = ttk.LabelFrame(main, text="Playlist / Smart List Selection")
-        playlist_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=5)
+        playlist_frame = ttk.LabelFrame(tab, text="Playlist / Smart List Selection")
+        playlist_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         playlist_frame.columnconfigure(0, weight=1)
         playlist_frame.rowconfigure(2, weight=1)
-        main.rowconfigure(3, weight=1)
+        tab.rowconfigure(1, weight=1)
 
         mode_frame = ttk.Frame(playlist_frame)
         mode_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
@@ -786,24 +881,93 @@ class TraktorPlaylistSyncUI:
         ttk.Button(btn_frame, text="Auto Select", command=self._auto_select).grid(row=0, column=2, padx=5)
 
         # --- Actions ---
-        action_frame = ttk.Frame(main)
-        action_frame.grid(row=4, column=0, sticky="ew", pady=10)
+        action_frame = ttk.Frame(tab)
+        action_frame.grid(row=2, column=0, sticky="ew", pady=10)
         action_frame.columnconfigure(1, weight=1)
 
         ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).grid(row=0, column=0, padx=10)
 
         right_btns = ttk.Frame(action_frame)
         right_btns.grid(row=0, column=1, sticky="e", padx=10)
-        self.export_btn = tk.Button(right_btns, text="Export NML", command=self._export, width=15,
+        self.export_btn = tk.Button(right_btns, text="Export", command=self._export, width=15,
                                      bg="green", fg="white", font=('', 9, 'bold'))
         self.export_btn.pack(side=tk.LEFT)
 
-    def _create_results_panel(self):
-        results_frame = ttk.LabelFrame(self._main, text="Results")
-        results_frame.grid(row=5, column=0, sticky="nsew", padx=5, pady=5)
+    def _create_import_tab(self, tab):
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        # --- File picker ---
+        file_frame = ttk.LabelFrame(tab, text="Exported file (from another machine, e.g. copied off a USB stick)")
+        file_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        file_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(file_frame, text="File:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.import_path_var = tk.StringVar()
+        ttk.Entry(file_frame, textvariable=self.import_path_var, width=55).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
+        ttk.Button(file_frame, text="Browse", command=self._browse_import_file).grid(row=0, column=2, padx=5, pady=10)
+
+        self.import_info_var = tk.StringVar(value="No file loaded")
+        ttk.Label(file_frame, textvariable=self.import_info_var, foreground="gray", wraplength=820, justify="left").grid(
+            row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+        )
+
+        # --- Preview / selection ---
+        preview_frame = ttk.LabelFrame(tab, text="Playlists / Smart Lists to Merge")
+        preview_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(1, weight=1)
+
+        summary_frame = ttk.Frame(preview_frame)
+        summary_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        summary_frame.columnconfigure(0, weight=1)
+        self.import_selection_summary = tk.StringVar(value="No file loaded")
+        ttk.Label(summary_frame, textvariable=self.import_selection_summary, font=("Arial", 9), foreground="blue").grid(
+            row=0, column=0, sticky="w", padx=5
+        )
+
+        import_list_frame = ttk.Frame(preview_frame)
+        import_list_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        import_list_frame.columnconfigure(0, weight=1)
+        import_list_frame.rowconfigure(0, weight=1)
+
+        self.import_tree = ttk.Treeview(
+            import_list_frame, columns=("type", "tracks", "action"), show="tree headings", height=10
+        )
+        self.import_tree.grid(row=0, column=0, sticky="nsew")
+        self.import_tree.heading("#0", text="Playlist")
+        self.import_tree.heading("type", text="Type")
+        self.import_tree.heading("tracks", text="Tracks")
+        self.import_tree.heading("action", text="Action")
+        self.import_tree.column("#0", width=320)
+        self.import_tree.column("type", width=90, anchor="center")
+        self.import_tree.column("tracks", width=70, anchor="center")
+        self.import_tree.column("action", width=130, anchor="center")
+        self.import_tree.bind('<<TreeviewSelect>>', lambda e: self._update_import_summary())
+
+        import_scroll = ttk.Scrollbar(import_list_frame, orient="vertical", command=self.import_tree.yview)
+        import_scroll.grid(row=0, column=1, sticky="ns")
+        self.import_tree.config(yscrollcommand=import_scroll.set)
+
+        import_btn_frame = ttk.Frame(preview_frame)
+        import_btn_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        ttk.Button(import_btn_frame, text="Select All", command=self._select_all_import).grid(row=0, column=0, padx=5)
+        ttk.Button(import_btn_frame, text="Clear All", command=self._clear_all_import).grid(row=0, column=1, padx=5)
+
+        # --- Actions ---
+        action_frame = ttk.Frame(tab)
+        action_frame.grid(row=2, column=0, sticky="ew", pady=10)
+        action_frame.columnconfigure(0, weight=1)
+
+        self.import_btn = tk.Button(action_frame, text="Import into Traktor", command=self._do_import, width=20,
+                                     bg="#c0392b", fg="white", font=('', 9, 'bold'))
+        self.import_btn.pack(side=tk.RIGHT, padx=10)
+
+    def _create_results_panel(self, main):
+        results_frame = ttk.LabelFrame(main, text="Results")
+        results_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=5)
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
-        self._main.rowconfigure(5, weight=1)
 
         notebook = ttk.Notebook(results_frame)
         notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
@@ -819,7 +983,7 @@ class TraktorPlaylistSyncUI:
         self.info_text.config(yscrollcommand=info_scroll.set)
 
         log_tab = ttk.Frame(notebook)
-        notebook.add(log_tab, text="Export Log")
+        notebook.add(log_tab, text="Log")
         log_tab.columnconfigure(0, weight=1)
         log_tab.rowconfigure(0, weight=1)
         self.log_text = tk.Text(log_tab, wrap=tk.WORD, height=6, font=("Consolas", 9))
@@ -836,6 +1000,12 @@ class TraktorPlaylistSyncUI:
     # Settings load/save
     # ------------------------------------------------------------------
 
+    def _default_export_dir(self) -> str:
+        nml_path = self.nml_path_var.get() if hasattr(self, "nml_path_var") else ""
+        if nml_path:
+            return os.path.join(os.path.dirname(nml_path), EXPORT_SUBFOLDER)
+        return os.path.join(os.path.expanduser("~"), "Desktop", EXPORT_SUBFOLDER)
+
     def _initialize_default_paths(self):
         settings = self.config_manager.settings
 
@@ -847,15 +1017,14 @@ class TraktorPlaylistSyncUI:
                     self.nml_path_var.set(candidate)
                     break
 
-        self.output_dir_var.set(settings.export_output_dir or os.path.join(os.path.expanduser("~"), "Desktop"))
+        self.output_dir_var.set(settings.export_output_dir or self._default_export_dir())
         self.selection_mode.set(settings.selection_mode)
 
-        self._refresh_profile_combos()
-        if settings.this_machine_profile:
-            self.this_machine_var.set(settings.this_machine_profile)
-        if settings.export_target_profile:
-            self.target_machine_var.set(settings.export_target_profile)
-        self._update_profiles_summary()
+        if settings.this_machine:
+            self.machine_profile = MachineProfile.from_dict(settings.this_machine)
+        else:
+            self.machine_profile = MachineProfile(name=socket.gethostname())
+        self._update_machine_summary()
 
         if self.nml_path_var.get():
             self._load_nml(silent=True)
@@ -874,9 +1043,7 @@ class TraktorPlaylistSyncUI:
         selected = self._get_selected_display_names()
         self.config_manager.update_settings(
             collection_nml_path=self.nml_path_var.get(),
-            machine_profiles=self.config_manager.settings.machine_profiles,
-            this_machine_profile=self.this_machine_var.get(),
-            export_target_profile=self.target_machine_var.get(),
+            this_machine=self.machine_profile.to_dict(),
             export_output_dir=self.output_dir_var.get(),
             selected_playlists=selected,
             selection_mode=self.selection_mode.get(),
@@ -885,6 +1052,16 @@ class TraktorPlaylistSyncUI:
         )
         self.status_var.set("Settings saved")
         messagebox.showinfo("Settings Saved", "Configuration saved successfully!")
+
+    def _save_settings_silent(self):
+        selected = self._get_selected_display_names()
+        self.config_manager.update_settings(
+            collection_nml_path=self.nml_path_var.get(),
+            this_machine=self.machine_profile.to_dict(),
+            export_output_dir=self.output_dir_var.get(),
+            selected_playlists=selected,
+            selection_mode=self.selection_mode.get(),
+        )
 
     # ------------------------------------------------------------------
     # NML loading
@@ -965,6 +1142,8 @@ class TraktorPlaylistSyncUI:
 
             self._filter_playlists()
             self._restore_selection(self.config_manager.settings.selected_playlists)
+            if self._import_nodes:
+                self._refresh_import_tree()
             self.status_var.set(f"Loaded {len(self.all_nodes)} playlists/smart lists")
         except Exception as e:
             logger.error(f"Failed to load NML: {e}")
@@ -973,105 +1152,40 @@ class TraktorPlaylistSyncUI:
                 messagebox.showerror("Error", f"Could not load collection.nml:\n{e}")
 
     # ------------------------------------------------------------------
-    # Machine profiles
+    # This Machine profile
     # ------------------------------------------------------------------
 
-    def get_this_machine_dir_default(self) -> str:
-        """Best-effort starting point for a brand-new profile's dir prefix -
-        copy an existing profile's, since the shared folder structure is
-        usually identical across machines (same username, mirrored layout)."""
-        profiles = self.config_manager.settings.machine_profiles
-        if profiles:
-            first = next(iter(profiles.values()))
-            return first.get("dir_prefix", "")
-        return ""
+    def _update_machine_summary(self):
+        if self.machine_profile.is_configured:
+            self.machine_summary_var.set(
+                f"{self.machine_profile.name}: {self.machine_profile.volume} + {self.machine_profile.dir_prefix}"
+            )
+        else:
+            self.machine_summary_var.set("Not set up yet - click 'Set up / Edit...'")
 
-    def _refresh_profile_combos(self):
-        names = sorted(self.config_manager.settings.machine_profiles.keys())
-        self.this_machine_combo["values"] = names
-        self.target_machine_combo["values"] = names
-
-    def _get_profile(self, name: str) -> Optional[MachineProfile]:
-        raw = self.config_manager.settings.machine_profiles.get(name)
-        return MachineProfile.from_dict(raw) if raw else None
-
-    def _new_profile(self):
-        existing = list(self.config_manager.settings.machine_profiles.keys())
-        dialog = ProfileEditorDialog(self.root, self, existing_names=existing)
+    def _setup_machine_profile(self):
+        dialog = ProfileEditorDialog(self.root, self, profile=self.machine_profile)
         if dialog.result:
-            self.config_manager.settings.machine_profiles[dialog.result.name] = dialog.result.to_dict()
-            self.config_manager.save_settings()
-            self._refresh_profile_combos()
-            if not self.this_machine_var.get():
-                self.this_machine_var.set(dialog.result.name)
-            elif not self.target_machine_var.get():
-                self.target_machine_var.set(dialog.result.name)
-            self._on_profiles_changed()
-
-    def _edit_profile(self):
-        name = self.this_machine_var.get() or self.target_machine_var.get()
-        if not name:
-            messagebox.showinfo("Edit Profile", "Select a profile first (This machine / Export for).")
-            return
-        current = self._get_profile(name)
-        existing = [n for n in self.config_manager.settings.machine_profiles.keys() if n != name]
-        dialog = ProfileEditorDialog(self.root, self, profile=current, existing_names=existing)
-        if dialog.result:
-            profiles = self.config_manager.settings.machine_profiles
-            if name != dialog.result.name:
-                profiles.pop(name, None)
-            profiles[dialog.result.name] = dialog.result.to_dict()
-            self.config_manager.save_settings()
-            self._refresh_profile_combos()
-            if self.this_machine_var.get() == name:
-                self.this_machine_var.set(dialog.result.name)
-            if self.target_machine_var.get() == name:
-                self.target_machine_var.set(dialog.result.name)
-            self._on_profiles_changed()
-
-    def _delete_profile(self):
-        name = self.this_machine_var.get() or self.target_machine_var.get()
-        if not name:
-            messagebox.showinfo("Delete Profile", "Select a profile first.")
-            return
-        if not messagebox.askyesno("Delete Profile", f"Delete machine profile '{name}'?"):
-            return
-        self.config_manager.settings.machine_profiles.pop(name, None)
-        self.config_manager.save_settings()
-        if self.this_machine_var.get() == name:
-            self.this_machine_var.set("")
-        if self.target_machine_var.get() == name:
-            self.target_machine_var.set("")
-        self._refresh_profile_combos()
-        self._on_profiles_changed()
-
-    def _update_profiles_summary(self):
-        this_p = self._get_profile(self.this_machine_var.get())
-        dst_p = self._get_profile(self.target_machine_var.get())
-        parts = []
-        if this_p:
-            parts.append(f"This machine ({this_p.name}): {this_p.volume} + {this_p.dir_prefix}")
-        if dst_p:
-            parts.append(f"Export for ({dst_p.name}): {dst_p.volume} + {dst_p.dir_prefix}")
-        self.profiles_summary_var.set(" | ".join(parts) if parts else "No profiles configured yet.")
-
-    def _on_profiles_changed(self):
-        self._update_profiles_summary()
-        self._filter_playlists()
+            self.machine_profile = dialog.result
+            self.config_manager.update_settings(this_machine=self.machine_profile.to_dict())
+            self._update_machine_summary()
+            self._filter_playlists()
+            if self._import_nodes:
+                self._refresh_import_tree()
 
     # ------------------------------------------------------------------
-    # Playlist tree / selection
+    # Playlist tree / selection (Export tab)
     # ------------------------------------------------------------------
 
-    def _in_library_display(self, node: PlaylistNode, this_profile: Optional[MachineProfile]) -> str:
+    def _in_library_display(self, node: PlaylistNode) -> str:
         if node.kind == "SMARTLIST":
             return "n/a (dynamic)"
-        if not this_profile or not this_profile.is_configured:
+        if not self.machine_profile.is_configured:
             return "-"
         keys = playlist_track_keys(node)
         if not keys:
             return "0/0"
-        in_lib = sum(1 for k in keys if k.startswith(this_profile.root_key))
+        in_lib = sum(1 for k in keys if k.startswith(self.machine_profile.root_key))
         return f"{in_lib}/{len(keys)}"
 
     def _filter_playlists(self, *_args):
@@ -1083,8 +1197,6 @@ class TraktorPlaylistSyncUI:
         for item in self.playlist_tree.get_children():
             self.playlist_tree.delete(item)
 
-        this_profile = self._get_profile(self.this_machine_var.get())
-
         for node in self.all_nodes:
             name = node.display_name
             if filter_text and filter_text not in name.lower():
@@ -1092,7 +1204,7 @@ class TraktorPlaylistSyncUI:
             kind_label = "Playlist" if node.kind == "PLAYLIST" else "Smart List"
             count = playlist_track_count(node)
             count_display = "dynamic" if count is None else str(count)
-            in_lib_display = self._in_library_display(node, this_profile)
+            in_lib_display = self._in_library_display(node)
 
             item_id = self.playlist_tree.insert(
                 "", "end", text=name, values=(kind_label, count_display, in_lib_display)
@@ -1264,43 +1376,27 @@ class TraktorPlaylistSyncUI:
         if self.nml_tree is None:
             messagebox.showerror("Export", "Load a collection.nml first.")
             return
-
-        src_name = self.this_machine_var.get()
-        dst_name = self.target_machine_var.get()
-        src_profile = self._get_profile(src_name)
-        dst_profile = self._get_profile(dst_name)
-
-        if not src_profile or not src_profile.is_configured:
-            messagebox.showerror("Export", "Set up a 'This machine' profile first (New... button).")
+        if not self.machine_profile.is_configured:
+            messagebox.showerror("Export", "Set up 'This Machine' first (button above).")
             return
-        if not dst_profile or not dst_profile.is_configured:
-            messagebox.showerror("Export", "Set up an 'Export for' profile first (New... button).")
-            return
-        if src_name == dst_name:
-            if not messagebox.askyesno(
-                "Export", "Source and destination profiles are the same - paths won't be remapped. Continue anyway?"
-            ):
-                return
 
         nodes = self._get_nodes_to_export()
         if not nodes:
             messagebox.showwarning("Export", "No playlists/smart lists selected.")
             return
 
-        output_dir = self.output_dir_var.get()
-        if not output_dir:
-            messagebox.showerror("Export", "Choose an output folder first.")
-            return
+        output_dir = self.output_dir_var.get() or self._default_export_dir()
         os.makedirs(output_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
-        output_path = os.path.join(output_dir, f"TraktorSync_to_{dst_name}_{timestamp}.nml")
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.machine_profile.name) or "machine"
+        output_path = os.path.join(output_dir, f"PlaylistSync_{safe_name}_{timestamp}.nml")
 
         self.status_var.set("Exporting...")
         self.root.update_idletasks()
 
         try:
             source_root = self.nml_tree.getroot()
-            export_root, stats = build_export_root(source_root, nodes, self.entry_index, src_profile, dst_profile)
+            export_root, stats = build_export_root(source_root, nodes, self.entry_index, self.machine_profile)
             write_nml(export_root, output_path)
         except Exception as e:
             logger.error(f"Export failed: {e}")
@@ -1317,7 +1413,7 @@ class TraktorPlaylistSyncUI:
         if stats.tracks_skipped_outside_library:
             self._log(
                 f"WARNING: {stats.tracks_skipped_outside_library} track(s) skipped - "
-                f"not under {src_profile.name}'s registered library root, so they can't be relocated on {dst_profile.name}."
+                f"not under {self.machine_profile.name}'s registered library root, so they can't be relocated."
             )
         if stats.tracks_missing_from_collection:
             self._log(
@@ -1331,20 +1427,204 @@ class TraktorPlaylistSyncUI:
             f"Saved to:\n{output_path}\n\n"
             f"{stats.playlists_exported} playlist(s), {stats.smartlists_exported} smart list(s), "
             f"{stats.tracks_exported} track(s).\n\n"
-            f"On the other machine: Traktor Preferences > File Management > Import Collection, then pick this file.",
+            f"Opening the folder so you can copy it to a USB stick.",
         )
+        open_path(output_dir)
         self._save_settings_silent()
 
-    def _save_settings_silent(self):
-        selected = self._get_selected_display_names()
-        self.config_manager.update_settings(
-            collection_nml_path=self.nml_path_var.get(),
-            this_machine_profile=self.this_machine_var.get(),
-            export_target_profile=self.target_machine_var.get(),
-            export_output_dir=self.output_dir_var.get(),
-            selected_playlists=selected,
-            selection_mode=self.selection_mode.get(),
+    # ------------------------------------------------------------------
+    # Import
+    # ------------------------------------------------------------------
+
+    def _browse_import_file(self):
+        initial_dir = self._default_export_dir()
+        filename = filedialog.askopenfilename(
+            title="Select an exported Traktor Playlist Sync file",
+            initialdir=initial_dir if os.path.isdir(initial_dir) else None,
+            filetypes=[("Traktor Playlist Sync", "*.nml"), ("All Files", "*.*")],
         )
+        if filename:
+            self.import_path_var.set(filename)
+            self._load_import_file(filename)
+
+    def _load_import_file(self, path: str):
+        try:
+            tree = load_nml(path)
+            root = tree.getroot()
+            src_profile = read_export_metadata(root)
+            if src_profile is None:
+                raise ValueError(
+                    "This file has no Playlist Sync source info - it wasn't produced by this tool's Export."
+                )
+            collection_el = get_collection_element(root)
+            if collection_el is None:
+                raise ValueError("No <COLLECTION> element found - is this a valid export file?")
+            entry_index = build_entry_index(collection_el)
+            playlists_root = get_playlists_root_node(root)
+            nodes = walk_playlist_nodes(playlists_root) if playlists_root is not None else []
+        except Exception as e:
+            logger.error(f"Failed to load import file: {e}")
+            messagebox.showerror("Import", f"Could not read that file:\n{e}")
+            self.import_info_var.set("Failed to load file")
+            return
+
+        self._import_entry_index = entry_index
+        self._import_nodes = nodes
+        self._import_src_profile = src_profile
+
+        meta = root.find(PIPELINEMETA_TAG)
+        exported_at = meta.get("EXPORTED_AT", "?") if meta is not None else "?"
+        playlist_count = sum(1 for n in nodes if n.kind == "PLAYLIST")
+        smart_count = sum(1 for n in nodes if n.kind == "SMARTLIST")
+        self.import_info_var.set(
+            f"From: {src_profile.name} ({src_profile.volume}{src_profile.dir_prefix}) - "
+            f"exported {exported_at} - {playlist_count} playlist(s), {smart_count} smart list(s)"
+        )
+        self._refresh_import_tree()
+        self.status_var.set(f"Loaded import file: {os.path.basename(path)}")
+
+    def _refresh_import_tree(self):
+        for item in self.import_tree.get_children():
+            self.import_tree.delete(item)
+
+        existing_names = {n.display_name for n in self.all_nodes}
+        for node in self._import_nodes:
+            kind_label = "Playlist" if node.kind == "PLAYLIST" else "Smart List"
+            count = playlist_track_count(node)
+            count_display = "dynamic" if count is None else str(count)
+            action = "Replace" if node.display_name in existing_names else "New"
+            item_id = self.import_tree.insert(
+                "", "end", text=node.display_name, values=(kind_label, count_display, action)
+            )
+            self.import_tree.selection_add(item_id)
+
+        self._update_import_summary()
+
+    def _select_all_import(self):
+        self.import_tree.selection_set(self.import_tree.get_children())
+        self._update_import_summary()
+
+    def _clear_all_import(self):
+        self.import_tree.selection_remove(self.import_tree.selection())
+        self._update_import_summary()
+
+    def _update_import_summary(self):
+        total = len(self.import_tree.get_children())
+        selected = len(self.import_tree.selection())
+        if total == 0:
+            self.import_selection_summary.set("No file loaded")
+        else:
+            self.import_selection_summary.set(f"Will import {selected}/{total}")
+        self.import_btn.config(state=tk.NORMAL if selected > 0 else tk.DISABLED)
+
+    def _get_import_nodes_to_merge(self) -> List[PlaylistNode]:
+        selected_names = {self.import_tree.item(i, "text") for i in self.import_tree.selection()}
+        return [n for n in self._import_nodes if n.display_name in selected_names]
+
+    def _do_import(self):
+        if not self._import_nodes:
+            messagebox.showerror("Import", "Load an exported file first.")
+            return
+        if not self.machine_profile.is_configured:
+            messagebox.showerror("Import", "Set up 'This Machine' first (button above).")
+            return
+        if self.nml_tree is None or not self._loaded_nml_path:
+            messagebox.showerror("Import", "Load this machine's collection.nml first (Source field above).")
+            return
+
+        nodes = self._get_import_nodes_to_merge()
+        if not nodes:
+            messagebox.showwarning("Import", "No playlists/smart lists selected to import.")
+            return
+
+        running = running_traktor_processes()
+        if running:
+            messagebox.showerror(
+                "Traktor is running",
+                f"Close Traktor first ({', '.join(running)} is running) - merging into collection.nml while "
+                f"Traktor has it open risks your changes being overwritten when Traktor exits.",
+            )
+            return
+
+        existing_names = {n.display_name for n in self.all_nodes}
+        replace_count = sum(1 for n in nodes if n.display_name in existing_names)
+        if not messagebox.askyesno(
+            "Import",
+            f"This will merge {len(nodes)} playlist(s)/smart list(s) directly into:\n{self._loaded_nml_path}\n\n"
+            f"{replace_count} will replace an existing playlist of the same name; "
+            f"{len(nodes) - replace_count} are new.\n\n"
+            f"A backup of your current collection.nml will be made first. Continue?",
+        ):
+            return
+
+        self.status_var.set("Merging into collection.nml...")
+        self.root.update_idletasks()
+
+        try:
+            backup_path = backup_file(self._loaded_nml_path)
+        except Exception as e:
+            logger.error(f"Backup failed: {e}")
+            messagebox.showerror("Import", f"Could not create a backup - aborting, nothing was changed:\n{e}")
+            self.status_var.set("Import aborted")
+            return
+
+        try:
+            # Merge against a fresh copy read straight from disk, independent of
+            # self.nml_tree, so a failed merge never leaves the live in-memory
+            # state (used by the Export tab) partially mutated.
+            fresh_tree = load_nml(self._loaded_nml_path)
+            fresh_root = fresh_tree.getroot()
+            fresh_collection_el = get_collection_element(fresh_root)
+            fresh_playlists_root = get_playlists_root_node(fresh_root)
+            if fresh_collection_el is None or fresh_playlists_root is None:
+                raise ValueError("Destination collection.nml is missing <COLLECTION> or <PLAYLISTS> - unexpected shape.")
+            fresh_entry_index = build_entry_index(fresh_collection_el)
+
+            stats = ImportStats()
+            for node in nodes:
+                merge_node_into_collection(
+                    node, self._import_entry_index, fresh_playlists_root, fresh_collection_el,
+                    fresh_entry_index, self._import_src_profile, self.machine_profile, stats,
+                )
+
+            write_nml_atomic(fresh_root, self._loaded_nml_path)
+        except Exception as e:
+            logger.error(f"Import failed: {e}")
+            import traceback
+            self._log(f"ERROR: {e}\n{traceback.format_exc()}")
+            messagebox.showerror(
+                "Import",
+                f"Import failed:\n{e}\n\nYour collection.nml was not modified - nothing was written except "
+                f"the backup at:\n{backup_path}",
+            )
+            self.status_var.set("Import failed")
+            return
+
+        self._log(f"Imported into: {self._loaded_nml_path}")
+        self._log(f"Backup saved to: {backup_path}")
+        self._log(f"Playlists: {stats.playlists_added} added, {stats.playlists_replaced} replaced")
+        self._log(f"Smart lists: {stats.smartlists_added} added, {stats.smartlists_replaced} replaced")
+        self._log(f"Tracks merged: {stats.tracks_merged}")
+        if stats.tracks_skipped_outside_library:
+            self._log(
+                f"WARNING: {stats.tracks_skipped_outside_library} track(s) skipped - outside "
+                f"{self._import_src_profile.name}'s registered library root."
+            )
+        if stats.tracks_missing_from_export:
+            self._log(
+                f"WARNING: {stats.tracks_missing_from_export} track reference(s) missing from the export file's collection."
+            )
+
+        added = stats.playlists_added + stats.smartlists_added
+        replaced = stats.playlists_replaced + stats.smartlists_replaced
+        self.status_var.set(f"Imported {len(nodes)} playlist(s)/smart list(s)")
+        messagebox.showinfo(
+            "Import Complete",
+            f"Merged into:\n{self._loaded_nml_path}\n\n"
+            f"{added} added, {replaced} replaced, {stats.tracks_merged} track(s).\n\n"
+            f"Backup saved to:\n{backup_path}",
+        )
+        self._load_nml(silent=True)
 
 
 # ============================================================================

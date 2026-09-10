@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 shared_wordpress.py
@@ -11,7 +11,7 @@ considered a WordPress install iff it contains a parseable wp-config.php
 Callers:
   - PipelineScript_Web_DevBackup     (Laragon www scan)
   - PipelineScript_Web_PublishStatic (site discovery)
-  - fastrak_project_explorer         (Actions section button filtering)
+  - fastrack_project_explorer         (Actions section button filtering)
 """
 
 import json
