@@ -41,6 +41,7 @@ from pipeline_categories import (
     category_color, project_type_info, archive_category as archive_category_for,
 )
 from ui_pipeline_categories import PIPELINE_CATEGORIES
+from ui_theme import make_flat_button
 from ui_project_deck import ProjectDeckWindow
 from invoice_manager.wc_monitor import sanitize_filename
 from invoice_manager.order_project_linker import (
@@ -1359,29 +1360,16 @@ class ProjectTrackerApp:
         tk.Frame(left_frame, bg="#0d1117", height=20).pack()
 
         # Bottom buttons
-        import_btn = tk.Button(
-            left_frame,
-            text="📥 Import",
-            command=self._import_projects,
-            bg="#238636",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=8
+        import_btn = make_flat_button(
+            left_frame, "📥 Import", self._import_projects,
+            bg="#238636", fg="white", font=("Arial", 9, "bold"), pady=8,
         )
         import_btn.pack(fill=tk.X, padx=10, pady=5)
 
-        refresh_btn = tk.Button(
-            left_frame,
-            text="🔄 Refresh",
-            command=self.refresh_project_list,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            pady=6
+        refresh_btn = make_flat_button(
+            left_frame, "🔄 Refresh", self.refresh_project_list,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            pady=6,
         )
         refresh_btn.pack(fill=tk.X, padx=10, pady=5)
 
@@ -2005,96 +1993,48 @@ class ProjectTrackerApp:
         button_frame = tk.Frame(details_left, bg="#1c2128")
         button_frame.pack(fill=tk.X, padx=10, pady=(10, 10))
 
-        self.open_btn = tk.Button(
-            button_frame,
-            text="📂 Open Folder",
-            command=self._open_folder,
-            bg="#238636",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6
+        self.open_btn = make_flat_button(
+            button_frame, "📂 Open Folder", self._open_folder,
+            bg="#238636", fg="white", hover_bg="#2ea043", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.open_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.rename_btn = tk.Button(
-            button_frame,
-            text="✏️ Rename",
-            command=self._rename_project,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6
+        self.rename_btn = make_flat_button(
+            button_frame, "✏️ Rename", self._rename_project,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.rename_btn.pack(side=tk.LEFT, padx=5)
 
-        self.archive_btn = tk.Button(
-            button_frame,
-            text="📦 Archive",
-            command=self._archive_project,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6
+        self.archive_btn = make_flat_button(
+            button_frame, "📦 Archive", self._archive_project,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.archive_btn.pack(side=tk.LEFT, padx=5)
 
-        self.unarchive_btn = tk.Button(
-            button_frame,
-            text="📤 Un-Archive",
-            command=self._unarchive_project,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6
+        self.unarchive_btn = make_flat_button(
+            button_frame, "📤 Un-Archive", self._unarchive_project,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.unarchive_btn.pack(side=tk.LEFT, padx=5)
 
-        self.promote_btn = tk.Button(
-            button_frame,
-            text="🚀 Promote to Active",
-            command=self._promote_project,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6
+        self.promote_btn = make_flat_button(
+            button_frame, "🚀 Promote to Active", self._promote_project,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.promote_btn.pack(side=tk.LEFT, padx=5)
 
         # Append a timestamped, project-tagged entry to the category-level
         # notes/<category>_notes.txt scratchpad. Per-project notes still live
         # in the project DB; this button is for the running category log.
-        self.log_note_btn = tk.Button(
-            button_frame,
-            text="📝 Log to Notes",
-            command=self._log_to_category_notes,
-            bg="#1c2128",
-            fg="white",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            padx=15,
-            pady=6,
+        self.log_note_btn = make_flat_button(
+            button_frame, "📝 Log to Notes", self._log_to_category_notes,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, padx=15, pady=6,
         )
         self.log_note_btn.pack(side=tk.LEFT, padx=5)
 
@@ -2118,54 +2058,24 @@ class ProjectTrackerApp:
         documents_container = tk.Frame(documents_frame, bg="#1c2128")
         documents_container.pack(fill=tk.X, pady=(0, 10))
 
-        self.project_details_btn = tk.Button(
-            documents_container,
-            text="📄 Project Details",
-            command=self._open_project_details,
-            bg="#1c2128",
-            fg="white",
-            disabledforeground="#8b949e",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            anchor="w",
-            padx=15,
-            pady=6
+        self.project_details_btn = make_flat_button(
+            documents_container, "📄 Project Details", self._open_project_details,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, anchor="w", padx=15, pady=6,
         )
         self.project_details_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
-        self.order_details_btn = tk.Button(
-            documents_container,
-            text="🧾 Order Details",
-            command=self._open_order_details,
-            bg="#1c2128",
-            fg="white",
-            disabledforeground="#8b949e",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            anchor="w",
-            padx=15,
-            pady=6
+        self.order_details_btn = make_flat_button(
+            documents_container, "🧾 Order Details", self._open_order_details,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, anchor="w", padx=15, pady=6,
         )
         self.order_details_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
-        self.invoice_btn = tk.Button(
-            documents_container,
-            text="💳 Invoice",
-            command=self._open_invoice,
-            bg="#1c2128",
-            fg="white",
-            disabledforeground="#8b949e",
-            font=("Arial", 9),
-            relief=tk.FLAT,
-            cursor="hand2",
-            state=tk.DISABLED,
-            anchor="w",
-            padx=15,
-            pady=6
+        self.invoice_btn = make_flat_button(
+            documents_container, "💳 Invoice", self._open_invoice,
+            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
+            state=tk.DISABLED, anchor="w", padx=15, pady=6,
         )
         self.invoice_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
 
@@ -2320,17 +2230,9 @@ class ProjectTrackerApp:
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
-        back_btn = tk.Button(
-            header,
-            text="< Back",
-            font=("Arial", 10),
-            bg=header_color,
-            fg="white",
-            activebackground=header_color,
-            activeforeground="#cccccc",
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._close_creation_panel
+        back_btn = make_flat_button(
+            header, "< Back", self._close_creation_panel,
+            bg=header_color, fg="white", hover_fg="#cccccc", font=("Arial", 10),
         )
         back_btn.pack(side=tk.LEFT, padx=10, pady=10)
 
@@ -2356,19 +2258,11 @@ class ProjectTrackerApp:
         subtypes = get_subtypes_for_category(category)
         for idx, subtype in enumerate(subtypes):
             display_name = get_subtype_display_name(subtype)
-            btn = tk.Button(
-                buttons_frame,
-                text=display_name,
-                font=("Arial", 12),
-                bg="#238636",
-                fg="white",
-                activebackground="#2ea043",
-                activeforeground="white",
-                relief=tk.FLAT,
-                cursor="hand2",
-                padx=20,
-                pady=10,
-                command=lambda s=subtype: self._open_creation_form(category, s)
+            btn = make_flat_button(
+                buttons_frame, display_name,
+                lambda s=subtype: self._open_creation_form(category, s),
+                bg="#238636", fg="white", hover_bg="#2ea043", font=("Arial", 12),
+                padx=20, pady=10,
             )
             btn.pack(side=tk.LEFT, padx=10)
             self.subtype_buttons.append({"button": btn, "subtype": subtype})
@@ -2437,17 +2331,9 @@ class ProjectTrackerApp:
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
-        back_btn = tk.Button(
-            header,
-            text="< Back",
-            font=("Arial", 10),
-            bg=header_color,
-            fg="white",
-            activebackground=header_color,
-            activeforeground="#cccccc",
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._close_creation_panel
+        back_btn = make_flat_button(
+            header, "< Back", self._close_creation_panel,
+            bg=header_color, fg="white", hover_fg="#cccccc", font=("Arial", 10),
         )
         back_btn.pack(side=tk.LEFT, padx=10, pady=10)
 
@@ -3810,35 +3696,20 @@ class ProjectTrackerApp:
         for category_key, script_key, subcat_key, script_data in actions:
             color = category_color(category_key.capitalize()) or "#238636"
             label = f"{script_data.get('icon', '')} {script_data.get('name', script_key)}".strip()
-            btn = tk.Button(
-                self.actions_container,
-                text=label,
-                command=lambda sd=script_data: self._run_project_action(sd),
-                bg=color,
-                fg="white",
-                font=("Arial", 9),
-                relief=tk.FLAT,
-                cursor="hand2",
-                padx=15,
-                pady=6,
-                anchor="w",
+            btn = make_flat_button(
+                self.actions_container, label,
+                lambda sd=script_data: self._run_project_action(sd),
+                bg=color, fg="white", font=("Arial", 9),
+                padx=15, pady=6, anchor="w",
             )
             btn.pack(side=tk.TOP, fill=tk.X, pady=2)
             self._action_buttons.append(btn)
 
         if show_website_btn:
-            website_btn = tk.Button(
-                self.actions_container,
-                text="🌐 Visit Website",
-                command=self._open_website,
-                bg="#ea580c",
-                fg="white",
-                font=("Arial", 9),
-                relief=tk.FLAT,
-                cursor="hand2",
-                padx=15,
-                pady=6,
-                anchor="w",
+            website_btn = make_flat_button(
+                self.actions_container, "🌐 Visit Website", self._open_website,
+                bg="#ea580c", fg="white", font=("Arial", 9),
+                padx=15, pady=6, anchor="w",
             )
             website_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
             self._action_buttons.append(website_btn)
