@@ -482,7 +482,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # relying on mouse-wheel/trackpad scrolling alone) so the Tools
         # section is always reachable even when the sidebar's content is
         # taller than the window — mouse-wheel scroll still works too.
-        self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"])
+        self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"], show_scrollbar=False)
         self.left_scroll.pack(fill=tk.BOTH, expand=True)
         left_panel = self.left_scroll.get_frame()
 

@@ -17,6 +17,7 @@ import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from shared_window_icon import apply_category_icon
+from shared_scrollable_frame import ScrollableFrame
 import xml.etree.ElementTree as ET
 import urllib.parse
 import re
@@ -120,22 +121,40 @@ class PlaylistSyncUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Traktor Sync")
-        self.root.geometry("900x1100")
-        self.root.minsize(900, 800)
-        
+        self.root.geometry("900x850")
+        self.root.minsize(900, 500)
+
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
-        
+
         header_frame = tk.Frame(self.root, bg="#2c3e50", height=60)
         header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         header_frame.grid_propagate(False)
-        
-        title_label = tk.Label(header_frame, text="Traktor Sync", 
+
+        title_label = tk.Label(header_frame, text="Traktor Sync",
                              font=("Arial", 16, "bold"), fg="white", bg="#2c3e50")
         title_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-        
-        main_frame = ttk.Frame(self.root)
-        main_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+
+        # Wrapped in a ScrollableFrame rather than gridded directly onto
+        # root: this window's natural content height (config panel + the
+        # analysis/sync/XML results tabs) can exceed a laptop's usable
+        # screen height, which would otherwise strand the sync buttons and
+        # results off-screen with no way to reach them.
+        scroll = ScrollableFrame(self.root)
+        scroll.grid(row=1, column=0, sticky="nsew")
+        self._body_scroll = scroll
+        # ScrollableFrame normally only activates its wheel binding while
+        # the pointer is directly over its own background (<Enter>/<Leave>
+        # on the outer frame) - but this window is almost entirely covered
+        # by native ttk widgets (Treeview, Notebook, etc.), which own real
+        # windows of their own, so that crossing event essentially never
+        # fires here. Replace it with a permanent binding instead (see
+        # _on_body_mouse_wheel).
+        scroll.unbind("<Enter>")
+        scroll.unbind("<Leave>")
+
+        main_frame = ttk.Frame(scroll.get_frame())
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(2, weight=1)
 
@@ -143,6 +162,11 @@ class PlaylistSyncUI:
 
         self.create_config_panel(main_frame)
         self.create_results_panel(main_frame)
+
+        self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
+        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
 
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
@@ -158,7 +182,42 @@ class PlaylistSyncUI:
 
         # Reload playlists when the iTunes XML changes on disk (e.g. iTunes rewrote it).
         self.root.bind("<FocusIn>", self._on_window_focus, add="+")
-        
+
+    def _pointer_over_self_scrolling_widget(self, event):
+        """True while the pointer is over a widget that already scrolls
+        itself (the playlist tree, the analysis/sync/XML result text boxes)
+        - those should handle wheel/trackpad input natively rather than
+        scrolling the window body."""
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        self_scrolling_widgets = (
+            getattr(self, "playlist_tree", None),
+            getattr(self, "analysis_text", None),
+            getattr(self, "sync_text", None),
+            getattr(self, "xml_text", None),
+        )
+        w = widget
+        while w is not None:
+            if w in self_scrolling_widgets:
+                return True
+            w = w.master
+        return False
+
+    def _on_body_mouse_wheel(self, event):
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_mouse_wheel(event)
+
+    def _on_body_touchpad_scroll(self, event):
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_touchpad_scroll(event)
+
+    def _on_notebook_mouse_wheel(self, event):
+        self._on_body_mouse_wheel(event)
+        return "break"
+
+    def _on_notebook_touchpad_scroll(self, event):
+        self._on_body_touchpad_scroll(event)
+        return "break"
+
     def initialize_default_paths(self):
         """Initialize paths from saved settings or use defaults."""
         settings = self.config_manager.settings
@@ -839,7 +898,21 @@ class PlaylistSyncUI:
         
         self.results_notebook = ttk.Notebook(results_frame)
         self.results_notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        
+        # ttk::Notebook ships a standard, cross-platform Tcl binding on its
+        # "TNotebook" class that cycles tabs on any scroll over it - on Tk 9
+        # that's driven by <TouchpadScroll> for a trackpad (see
+        # shared_scrollable_frame's comment on TIP 684; <MouseWheel> is
+        # mouse-only there now) and by <MouseWheel>/<Button-4/5> for an
+        # actual wheel. Neutralize both class bindings outright (belt) and
+        # add instance-level overrides that forward to the window body and
+        # stop propagation (suspenders), since instance bindings run before
+        # class ones in Tk's bindtag order.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind_class("TNotebook", seq, lambda e: "break")
+            self.results_notebook.bind(seq, self._on_notebook_mouse_wheel)
+        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
+        self.results_notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+
         self.analysis_frame = ttk.Frame(self.results_notebook)
         self.results_notebook.add(self.analysis_frame, text="Library Analysis")
         self.analysis_frame.columnconfigure(0, weight=1)

@@ -932,15 +932,19 @@ class TraktorPlaylistSyncUI:
         notebook = ttk.Notebook(main)
         notebook.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         # ttk::Notebook ships a standard, cross-platform (not Mac-specific)
-        # Tcl binding on its "TNotebook" class - "bind TNotebook <MouseWheel>
-        # {ttk::notebook::CycleTab ...}" - that cycles tabs on any scroll
-        # over it. Neutralize that class binding outright (belt) and also
-        # add an instance-level override that forwards to the window body
-        # and stops propagation (suspenders), since instance bindings run
-        # before class ones in Tk's bindtag order.
+        # Tcl binding on its "TNotebook" class that cycles tabs on any
+        # scroll over it - on Tk 9 that's driven by <TouchpadScroll> for a
+        # trackpad (see the ScrollableFrame comment on TIP 684; <MouseWheel>
+        # is mouse-only there now) and by <MouseWheel>/<Button-4/5> for an
+        # actual wheel. Neutralize both class bindings outright (belt) and
+        # add instance-level overrides that forward to the window body and
+        # stop propagation (suspenders), since instance bindings run before
+        # class ones in Tk's bindtag order.
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_class("TNotebook", seq, lambda e: "break")
             notebook.bind(seq, self._on_notebook_mouse_wheel)
+        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
+        notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
 
         export_tab = ttk.Frame(notebook)
         notebook.add(export_tab, text="Export")
@@ -955,11 +959,13 @@ class TraktorPlaylistSyncUI:
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
+        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
 
-    def _on_body_mouse_wheel(self, event):
-        """Scroll the window body on wheel/trackpad input, except when the
-        pointer is over a widget that already scrolls itself (the playlist
-        trees, the log/info text boxes) - let those handle it natively."""
+    def _pointer_over_self_scrolling_widget(self, event):
+        """True while the pointer is over a widget that already scrolls
+        itself (the playlist trees, the log/info text boxes) - those should
+        handle wheel/trackpad input natively rather than scrolling the
+        window body."""
         widget = self.root.winfo_containing(event.x_root, event.y_root)
         self_scrolling_widgets = (
             getattr(self, "playlist_tree", None), getattr(self, "import_tree", None),
@@ -968,12 +974,24 @@ class TraktorPlaylistSyncUI:
         w = widget
         while w is not None:
             if w in self_scrolling_widgets:
-                return
+                return True
             w = w.master
-        self._body_scroll._on_mouse_wheel(event)
+        return False
+
+    def _on_body_mouse_wheel(self, event):
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_mouse_wheel(event)
+
+    def _on_body_touchpad_scroll(self, event):
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_touchpad_scroll(event)
 
     def _on_notebook_mouse_wheel(self, event):
         self._on_body_mouse_wheel(event)
+        return "break"
+
+    def _on_notebook_touchpad_scroll(self, event):
+        self._on_body_touchpad_scroll(event)
         return "break"
 
     def _create_source_panel(self, main):

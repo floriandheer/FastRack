@@ -47,7 +47,15 @@ class UnifiedCleaner:
         # Create the notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        
+        # ttk::Notebook ships a standard, cross-platform Tcl binding on its
+        # "TNotebook" class that cycles tabs on any scroll over it - on Tk 9
+        # that's driven by <TouchpadScroll> for a trackpad and by
+        # <MouseWheel>/<Button-4/5> for an actual wheel, so a stray scroll
+        # anywhere over the notebook would otherwise flip tabs unexpectedly.
+        # Neutralize it outright since there's nothing else here to scroll.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<TouchpadScroll>"):
+            self.root.bind_class("TNotebook", seq, lambda e: "break")
+
         # Create tabs
         self.create_folder_cleaner_tab()
         self.create_file_cleaner_tab()

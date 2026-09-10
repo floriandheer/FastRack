@@ -10,16 +10,18 @@ import tkinter as tk
 class ScrollableFrame(tk.Frame):
     """A scrollable frame widget with smooth mouse wheel scrolling."""
 
-    def __init__(self, parent, bg=None):
+    def __init__(self, parent, bg=None, show_scrollbar=True):
         super().__init__(parent, bg=bg)
 
         # Plain tk.Scrollbar, not ttk: ttk's is a native NSScroller on
         # macOS, which per that OS's own "Show scroll bars" preference
         # stays hidden except during an active scroll gesture.
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
-        self.scrollbar = tk.Scrollbar(
-            self, orient="vertical", command=self.canvas.yview, width=16,
-        )
+        self.scrollbar = None
+        if show_scrollbar:
+            self.scrollbar = tk.Scrollbar(
+                self, orient="vertical", command=self.canvas.yview, width=16,
+            )
         self.scrollable_frame = tk.Frame(self.canvas, bg=bg)
 
         # Never itemconfig the embedded window's height explicitly — leave
@@ -33,7 +35,8 @@ class ScrollableFrame(tk.Frame):
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        if self.scrollbar is not None:
+            self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.bind(
             '<Configure>',
             lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width)
@@ -48,7 +51,8 @@ class ScrollableFrame(tk.Frame):
         # fixed-width sibling packed after it gets a turn — measured here
         # as the scrollbar collapsing to 1px wide when the order was
         # reversed.
-        self.scrollbar.pack(side="right", fill="y")
+        if self.scrollbar is not None:
+            self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
 
     def _bind_mouse_wheel(self):
@@ -63,39 +67,58 @@ class ScrollableFrame(tk.Frame):
         self.canvas.bind_all("<MouseWheel>", self._on_mouse_wheel)
         self.canvas.bind_all("<Button-4>", self._on_mouse_wheel)
         self.canvas.bind_all("<Button-5>", self._on_mouse_wheel)
+        # Tk 9's TIP 684: a two-finger trackpad scroll no longer generates
+        # <MouseWheel> at all (that's now mouse-wheel-only) - it generates a
+        # separate <TouchpadScroll> event instead, on Windows and macOS.
+        # Without this, trackpad scrolling silently does nothing anywhere
+        # <MouseWheel> used to handle it, while a real mouse wheel (or
+        # dragging the scrollbar thumb directly) still works fine.
+        self.canvas.bind_all("<TouchpadScroll>", self._on_touchpad_scroll)
 
     def _deactivate_mouse_wheel(self, event):
         self.canvas.unbind_all("<MouseWheel>")
         self.canvas.unbind_all("<Button-4>")
         self.canvas.unbind_all("<Button-5>")
+        self.canvas.unbind_all("<TouchpadScroll>")
 
-    def _on_mouse_wheel(self, event):
-        """Handle mouse wheel scrolling."""
-        # Check if there's actually content to scroll
+    def _scroll_if_room(self, units):
+        """Scroll by `units` (positive = down) only if the content is
+        actually taller than the visible view."""
         try:
             bbox = self.canvas.bbox("all")
             if bbox is None:
                 return "break"
-
-            # Get the current view
             view_height = self.canvas.winfo_height()
             content_height = bbox[3] - bbox[1]
-
-            # Only scroll if content is larger than view
             if content_height <= view_height:
                 return "break"
-
-            # Determine scroll direction and amount
-            if event.num == 4 or event.delta > 0:
-                # Scroll up
-                self.canvas.yview_scroll(-1, "units")
-            elif event.num == 5 or event.delta < 0:
-                # Scroll down
-                self.canvas.yview_scroll(1, "units")
-
-            return "break"  # Prevent event from propagating
-        except:
+            self.canvas.yview_scroll(units, "units")
             return "break"
+        except tk.TclError:
+            return "break"
+
+    def _on_mouse_wheel(self, event):
+        """Handle a real mouse wheel (Tk 9's <MouseWheel> is mouse-only;
+        trackpads use <TouchpadScroll> - see _on_touchpad_scroll)."""
+        if event.num == 4 or event.delta > 0:
+            return self._scroll_if_room(-1)
+        elif event.num == 5 or event.delta < 0:
+            return self._scroll_if_room(1)
+        return "break"
+
+    def _on_touchpad_scroll(self, event):
+        """Handle a two-finger trackpad scroll (Tk 9's <TouchpadScroll>,
+        TIP 684). %D packs signed X/Y deltas into one int; unpack with the
+        Tcl helper Tk ships for exactly this rather than hand-rolling the
+        bit-shifting ourselves."""
+        try:
+            _dx, dy = self.canvas.tk.call('tk::PreciseScrollDeltas', event.delta)
+            dy = int(dy)
+        except tk.TclError:
+            return "break"
+        if dy == 0:
+            return "break"
+        return self._scroll_if_room(-1 if dy > 0 else 1)
 
     def get_frame(self):
         """Get the scrollable frame."""

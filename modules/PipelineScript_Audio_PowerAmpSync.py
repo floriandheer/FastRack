@@ -32,6 +32,7 @@ import tempfile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from shared_window_icon import apply_category_icon
+from shared_scrollable_frame import ScrollableFrame
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -179,8 +180,8 @@ class PowerAmpSyncApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.geometry("900x1100")
-        self.root.minsize(900, 800)
+        self.root.geometry("900x850")
+        self.root.minsize(900, 500)
 
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
@@ -545,9 +546,26 @@ class PowerAmpSyncApp:
         tk.Label(header, text=APP_NAME, font=("Arial", 16, "bold"),
                  fg="white", bg=HEADER_COLOR).place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-        # Main content
-        main = ttk.Frame(self.root)
-        main.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        # Main content — wrapped in a ScrollableFrame rather than gridded
+        # directly onto root: this window's natural content height (the
+        # settings/mode tabs plus library/sync results tabs) can exceed a
+        # laptop's usable screen height, which would otherwise strand
+        # controls and results off-screen with no way to reach them.
+        scroll = ScrollableFrame(self.root)
+        scroll.grid(row=1, column=0, sticky="nsew")
+        self._body_scroll = scroll
+        # ScrollableFrame normally only activates its wheel binding while
+        # the pointer is directly over its own background (<Enter>/<Leave>
+        # on the outer frame) - but this window is almost entirely covered
+        # by native ttk widgets (Treeview, Notebook, etc.), which own real
+        # windows of their own, so that crossing event essentially never
+        # fires here. Replace it with a permanent binding instead (see
+        # _on_body_mouse_wheel).
+        scroll.unbind("<Enter>")
+        scroll.unbind("<Leave>")
+
+        main = ttk.Frame(scroll.get_frame())
+        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(2, weight=1)  # Results panel grows
 
@@ -620,6 +638,7 @@ class PowerAmpSyncApp:
 
         self.content_notebook = ttk.Notebook(main, style="PowerAmp.TNotebook")
         self.content_notebook.grid(row=1, column=0, sticky="nsew")
+        self._suppress_notebook_wheel_cycling(self.content_notebook)
 
         playlists_tab = ttk.Frame(self.content_notebook)
         self.content_notebook.add(playlists_tab, text="\U0001F3B5 Playlist Selection")
@@ -866,6 +885,7 @@ class PowerAmpSyncApp:
         # Notebook with tabs
         self.results_notebook = ttk.Notebook(results_frame)
         self.results_notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self._suppress_notebook_wheel_cycling(self.results_notebook)
 
         # Library tab
         lib_tab = ttk.Frame(self.results_notebook)
@@ -896,6 +916,61 @@ class PowerAmpSyncApp:
         self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1,
                                    relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.grid(row=2, column=0, sticky="ew")
+
+        self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
+        self.root.bind_all("<Button-5>", self._on_body_mouse_wheel)
+        self.root.bind_all("<TouchpadScroll>", self._on_body_touchpad_scroll)
+
+    def _suppress_notebook_wheel_cycling(self, notebook: ttk.Notebook) -> None:
+        """ttk::Notebook ships a standard, cross-platform Tcl binding on its
+        "TNotebook" class that cycles tabs on any scroll over it - on Tk 9
+        that's driven by <TouchpadScroll> for a trackpad (see
+        shared_scrollable_frame's comment on TIP 684; <MouseWheel> is
+        mouse-only there now) and by <MouseWheel>/<Button-4/5> for an actual
+        wheel. Neutralize both class bindings outright (belt) and add
+        instance-level overrides that forward to the window body and stop
+        propagation (suspenders), since instance bindings run before class
+        ones in Tk's bindtag order."""
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind_class("TNotebook", seq, lambda e: "break")
+            notebook.bind(seq, self._on_notebook_mouse_wheel)
+        self.root.bind_class("TNotebook", "<TouchpadScroll>", lambda e: "break")
+        notebook.bind("<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+
+    def _pointer_over_self_scrolling_widget(self, event) -> bool:
+        """True while the pointer is over a widget that already scrolls
+        itself (the playlist tree, the library/sync result text boxes) -
+        those should handle wheel/trackpad input natively rather than
+        scrolling the window body."""
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        self_scrolling_widgets = (
+            getattr(self, "playlist_tree", None),
+            getattr(self, "analysis_text", None),
+            getattr(self, "sync_text", None),
+        )
+        w = widget
+        while w is not None:
+            if w in self_scrolling_widgets:
+                return True
+            w = w.master
+        return False
+
+    def _on_body_mouse_wheel(self, event) -> None:
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_mouse_wheel(event)
+
+    def _on_body_touchpad_scroll(self, event) -> None:
+        if not self._pointer_over_self_scrolling_widget(event):
+            self._body_scroll._on_touchpad_scroll(event)
+
+    def _on_notebook_mouse_wheel(self, event):
+        self._on_body_mouse_wheel(event)
+        return "break"
+
+    def _on_notebook_touchpad_scroll(self, event):
+        self._on_body_touchpad_scroll(event)
+        return "break"
 
     def _create_extras_tab(self, parent: ttk.Frame) -> None:
         """Create the Audiobooks & Podcasts tab (plain file copy, no Opus conversion)."""
