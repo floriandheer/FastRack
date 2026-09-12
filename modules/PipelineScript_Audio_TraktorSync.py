@@ -34,8 +34,19 @@ from shared_logging import get_logger, setup_logging as setup_shared_logging
 logger = get_logger("traktor_sync")
 VALID_EXTENSIONS = {'.mp3', '.flac', '.wav', '.aiff', '.m4a', '.ogg', '.opus'}
 
+def _appdata_dir() -> str:
+    """Platform-appropriate PipelineManager app-data folder (same convention
+    as rak_settings._get_appdata_path / the Traktor Playlist Sync tool)."""
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        return os.path.join(home, "AppData", "Local", "PipelineManager")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "PipelineManager")
+    return os.path.join(home, ".local", "share", "PipelineManager")
+
+
 # Configuration paths
-APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager")
+APP_DATA_DIR = _appdata_dir()
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "traktor_sync_config.json")
 
 # Built-in preset that mirrors the Auto Select rule (digits 1-9 prefix).
@@ -63,6 +74,10 @@ class SyncSettings:
     selection_mode: str = "include"
     playlist_presets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_preset: str = ""
+    last_mode: str = ""
+    import_source_dir: str = ""
+    import_skip_existing: bool = True
+    import_overwrite_all: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -117,6 +132,57 @@ class ConfigManager:
         self.save_settings()
 
 
+# ============================================================================
+# IMPORT SOURCE DETECTION - pure function, no Tk dependency
+# ============================================================================
+
+def detect_import_source(source_dir: str) -> "tuple[Optional[str], Optional[str]]":
+    """Given a folder (e.g. a USB stick, or a shared/synced folder written by
+    this same tool's Export on another machine), locate the DJ Library
+    folder and its DJ Library.xml inside it.
+
+    Returns (dj_library_dir, xml_path) - either may be None if not found.
+    """
+    if not source_dir or not os.path.isdir(source_dir):
+        return None, None
+
+    try:
+        entries = os.listdir(source_dir)
+    except OSError:
+        entries = []
+
+    dj_library_dir = None
+    for entry in entries:
+        full = os.path.join(source_dir, entry)
+        if os.path.isdir(full) and entry.strip().lower() == "dj library":
+            dj_library_dir = full
+            break
+
+    if dj_library_dir is None:
+        # No "DJ Library" subfolder - maybe the picked folder *is* the DJ
+        # Library folder itself (audio files sit directly inside it).
+        try:
+            if any(
+                os.path.splitext(f)[1].lower() in VALID_EXTENSIONS
+                for f in entries if os.path.isfile(os.path.join(source_dir, f))
+            ):
+                dj_library_dir = source_dir
+        except OSError:
+            pass
+
+    xml_candidates = [os.path.join(source_dir, e) for e in entries if e.lower().endswith(".xml")]
+    xml_path = None
+    exact = [p for p in xml_candidates if os.path.basename(p).lower() == "dj library.xml"]
+    if exact:
+        xml_path = exact[0]
+    elif len(xml_candidates) == 1:
+        xml_path = xml_candidates[0]
+    elif xml_candidates:
+        xml_path = max(xml_candidates, key=os.path.getmtime)
+
+    return dj_library_dir, xml_path
+
+
 class PlaylistSyncUI:
     def __init__(self, root):
         self.root = root
@@ -156,12 +222,32 @@ class PlaylistSyncUI:
         main_frame = ttk.Frame(scroll.get_frame())
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(2, weight=1)
+        main_frame.rowconfigure(0, weight=1)
 
         self.config_manager = ConfigManager()
 
-        self.create_config_panel(main_frame)
-        self.create_results_panel(main_frame)
+        notebook = ttk.Notebook(main_frame)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        self._main_notebook = notebook
+        # See create_results_panel()'s comment on self.results_notebook for
+        # why the TNotebook class bindings need neutralizing on Tk 9 - that
+        # call already does it globally (bind_class), but each Notebook
+        # instance still needs its own forwarding binding.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            notebook.bind(seq, self._on_notebook_mouse_wheel)
+        safe_bind_touchpad_scroll(notebook.bind, "<TouchpadScroll>", self._on_notebook_touchpad_scroll)
+        notebook.bind("<<NotebookTabChanged>>", lambda e: self._update_import_destination_info())
+
+        export_tab = ttk.Frame(notebook)
+        notebook.add(export_tab, text="Export")
+        export_tab.columnconfigure(0, weight=1)
+        export_tab.rowconfigure(2, weight=1)
+        self.create_config_panel(export_tab)
+        self.create_results_panel(export_tab)
+
+        import_tab = ttk.Frame(notebook)
+        notebook.add(import_tab, text="Import")
+        self.create_import_tab(import_tab)
 
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
@@ -175,6 +261,9 @@ class PlaylistSyncUI:
         self.status_bar.grid(row=2, column=0, sticky="ew")
 
         self.syncing = False
+        self.importing = False
+        self._import_detected_dj_library_dir = None
+        self._import_detected_xml_path = None
         self.initialize_default_paths()
         self.all_playlists = []  # Will be populated when analyzing XML
         self.playlist_data = {}  # Store playlist metadata
@@ -185,15 +274,16 @@ class PlaylistSyncUI:
 
     def _pointer_over_self_scrolling_widget(self, event):
         """True while the pointer is over a widget that already scrolls
-        itself (the playlist tree, the analysis/sync/XML result text boxes)
-        - those should handle wheel/trackpad input natively rather than
-        scrolling the window body."""
+        itself (the playlist tree, the analysis/sync/XML/import result text
+        boxes) - those should handle wheel/trackpad input natively rather
+        than scrolling the window body."""
         widget = self.root.winfo_containing(event.x_root, event.y_root)
         self_scrolling_widgets = (
             getattr(self, "playlist_tree", None),
             getattr(self, "analysis_text", None),
             getattr(self, "sync_text", None),
             getattr(self, "xml_text", None),
+            getattr(self, "import_text", None),
         )
         w = widget
         while w is not None:
@@ -226,14 +316,17 @@ class PlaylistSyncUI:
         if settings.itunes_xml_path and os.path.exists(settings.itunes_xml_path):
             self.itunes_xml_var.set(settings.itunes_xml_path)
         else:
-            # Fall back to default paths
+            # Fall back to default paths - "~" resolves to the right home
+            # directory on both Windows and macOS, so the same candidate
+            # list works cross-platform without an OS branch. Includes both
+            # the legacy iTunes export and modern macOS Music.app's XML
+            # (only written if "Share Library XML with other apps" is on).
             possible_itunes_paths = [
                 "~/Music/iTunes/iTunes Music Library.xml",
                 "~/Music/iTunes/iTunes Library.xml",
+                "~/Music/Music/Music Library.xml",
                 "~/My Music/iTunes/iTunes Music Library.xml",
-                os.path.join(os.environ.get('USERPROFILE', ''), 'Music', 'iTunes', 'iTunes Music Library.xml'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'My Music', 'iTunes', 'iTunes Music Library.xml'),
-                "M:\\iTunes Music Library.xml"
+                "M:\\iTunes Music Library.xml",
             ]
 
             for path in possible_itunes_paths:
@@ -242,17 +335,18 @@ class PlaylistSyncUI:
                     self.itunes_xml_var.set(expanded_path)
                     break
 
-        # Load DJ Library and Export XML paths
+        # Load DJ Library and Export XML paths - default to "~/Music/DJ
+        # Library" on any OS, matching the External-mode Mac path already
+        # hardcoded below (mac_dj_library_path) for the shared-folder setup.
+        default_dj_path = os.path.join(os.path.expanduser("~"), "Music")
         if settings.dj_library_path:
             self.dj_library_var.set(settings.dj_library_path)
         else:
-            default_dj_path = os.path.join(os.environ.get('USERPROFILE', ''), 'Music')
             self.dj_library_var.set(os.path.join(default_dj_path, 'DJ Library'))
 
         if settings.export_xml_path:
             self.export_xml_var.set(settings.export_xml_path)
         else:
-            default_dj_path = os.path.join(os.environ.get('USERPROFILE', ''), 'Music')
             self.export_xml_var.set(os.path.join(default_dj_path, 'DJ Library.xml'))
 
         # Load other settings
@@ -266,6 +360,13 @@ class PlaylistSyncUI:
 
         # Update Mac paths visibility based on loaded target_os
         self.on_target_os_changed()
+
+        # Load Import tab settings and refresh its auto-detected info.
+        self.import_source_dir_var.set(settings.import_source_dir)
+        self.import_skip_existing_var.set(settings.import_skip_existing)
+        self.import_overwrite_all_var.set(settings.import_overwrite_all)
+        self._run_import_autodetect()
+        self._update_import_destination_info()
 
     def create_config_panel(self, parent):
         # === OPTIONS (first, before configuration) ===
@@ -524,8 +625,267 @@ class PlaylistSyncUI:
             self.mac_paths_frame.grid_remove()
             self.os_info_label.config(text="")
 
+    # ------------------------------------------------------------------
+    # Import tab: bring a DJ Library folder + XML exported (by this same
+    # tool, on another machine) into this machine's own DJ Library.
+    # ------------------------------------------------------------------
+
+    def create_import_tab(self, tab):
+        tab.columnconfigure(0, weight=1)
+
+        # --- Source ---
+        source_frame = ttk.LabelFrame(tab, text="Source: folder to import from (e.g. a USB stick or shared folder)")
+        source_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        source_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(source_frame, text="Folder:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.import_source_dir_var = tk.StringVar()
+        self._import_autodetect_after_id = None
+        self.import_source_dir_var.trace_add('write', lambda *a: self._schedule_import_autodetect())
+        ttk.Entry(source_frame, textvariable=self.import_source_dir_var, width=50).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
+        ttk.Button(source_frame, text="Browse", command=self._browse_import_source).grid(row=0, column=2, padx=5, pady=10)
+
+        self.import_info_var = tk.StringVar(value="No folder selected")
+        ttk.Label(source_frame, textvariable=self.import_info_var, foreground="gray", wraplength=820, justify="left").grid(
+            row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+        )
+
+        # --- Destination ---
+        dest_frame = ttk.LabelFrame(tab, text="Destination")
+        dest_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        dest_frame.columnconfigure(0, weight=1)
+        self.import_dest_info_var = tk.StringVar()
+        ttk.Label(dest_frame, textvariable=self.import_dest_info_var, foreground="gray", wraplength=820, justify="left").grid(
+            row=0, column=0, sticky="w", padx=10, pady=(10, 0)
+        )
+        ttk.Label(
+            dest_frame, text="Set on the Export tab (DJ Library Folder / Export XML).",
+            foreground="gray", font=("Arial", 8),
+        ).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 10))
+
+        # --- Options ---
+        options_frame = ttk.LabelFrame(tab, text="Options")
+        options_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+
+        ttk.Label(options_frame, text="For files that already exist:", font=('', 9, 'bold')).grid(
+            row=0, column=0, sticky="w", padx=10, pady=(10, 2)
+        )
+
+        file_mode_frame = ttk.Frame(options_frame)
+        file_mode_frame.grid(row=1, column=0, sticky="w", padx=30, pady=(2, 10))
+
+        self.import_skip_existing_var = tk.BooleanVar(value=True)
+        self.import_overwrite_all_var = tk.BooleanVar(value=False)
+
+        def on_import_skip_toggle():
+            if self.import_skip_existing_var.get():
+                self.import_overwrite_all_var.set(False)
+            elif not self.import_overwrite_all_var.get():
+                self.import_skip_existing_var.set(True)
+
+        def on_import_overwrite_toggle():
+            if self.import_overwrite_all_var.get():
+                self.import_skip_existing_var.set(False)
+            elif not self.import_skip_existing_var.get():
+                self.import_overwrite_all_var.set(True)
+
+        ttk.Checkbutton(
+            file_mode_frame, text="⏭  Skip existing files", variable=self.import_skip_existing_var,
+            command=on_import_skip_toggle,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 20))
+        ttk.Checkbutton(
+            file_mode_frame, text="♻  Overwrite files", variable=self.import_overwrite_all_var,
+            command=on_import_overwrite_toggle,
+        ).grid(row=0, column=1, sticky="w")
+
+        # --- Actions ---
+        action_frame = ttk.Frame(tab)
+        action_frame.grid(row=3, column=0, sticky="ew", pady=(5, 10))
+        action_frame.columnconfigure(0, weight=1)
+        tab.rowconfigure(4, weight=1)
+
+        self.import_btn = tk.Button(action_frame, text="Import", command=self.start_import, width=15,
+                                     bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
+        self.import_btn.pack(side=tk.RIGHT, padx=10, anchor="n")
+
+        # --- Log ---
+        log_frame = ttk.LabelFrame(tab, text="Import Log")
+        log_frame.grid(row=4, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+
+        self.import_text = tk.Text(log_frame, wrap=tk.WORD, height=8, font=("Consolas", 9))
+        self.import_text.grid(row=0, column=0, sticky="nsew")
+        import_log_scroll = ttk.Scrollbar(log_frame, command=self.import_text.yview)
+        import_log_scroll.grid(row=0, column=1, sticky="ns")
+        self.import_text.config(yscrollcommand=import_log_scroll.set)
+
+    def _browse_import_source(self):
+        directory = filedialog.askdirectory(title="Select folder to import from")
+        if directory:
+            self.import_source_dir_var.set(directory)
+
+    def _schedule_import_autodetect(self, delay=400):
+        """Debounced auto-detect of the DJ Library folder/XML when the import
+        source folder path changes."""
+        if self._import_autodetect_after_id is not None:
+            try:
+                self.root.after_cancel(self._import_autodetect_after_id)
+            except Exception:
+                pass
+        self._import_autodetect_after_id = self.root.after(delay, self._run_import_autodetect)
+
+    def _run_import_autodetect(self):
+        self._import_autodetect_after_id = None
+        source_dir = self.import_source_dir_var.get()
+        dj_library_dir, xml_path = detect_import_source(source_dir)
+        self._import_detected_dj_library_dir = dj_library_dir
+        self._import_detected_xml_path = xml_path
+
+        if not source_dir:
+            self.import_info_var.set("No folder selected")
+            self.import_btn.config(state=tk.DISABLED)
+            return
+        if not os.path.isdir(source_dir):
+            self.import_info_var.set("Folder not found")
+            self.import_btn.config(state=tk.DISABLED)
+            return
+
+        parts = []
+        if dj_library_dir:
+            try:
+                track_count = sum(
+                    1 for f in os.listdir(dj_library_dir)
+                    if os.path.isfile(os.path.join(dj_library_dir, f))
+                    and os.path.splitext(f)[1].lower() in VALID_EXTENSIONS
+                )
+            except OSError:
+                track_count = 0
+            parts.append(f"DJ Library folder: {dj_library_dir} ({track_count} track(s))")
+        else:
+            parts.append("DJ Library folder: not found")
+
+        parts.append(f"XML: {os.path.basename(xml_path)}" if xml_path else "XML: not found")
+        self.import_info_var.set(" | ".join(parts))
+        self.import_btn.config(state=tk.NORMAL if (dj_library_dir and xml_path) else tk.DISABLED)
+
+    def _update_import_destination_info(self):
+        if not hasattr(self, "import_dest_info_var"):
+            return
+        dj_library = self.dj_library_var.get() if hasattr(self, "dj_library_var") else ""
+        export_xml = self.export_xml_var.get() if hasattr(self, "export_xml_var") else ""
+        if dj_library and export_xml:
+            self.import_dest_info_var.set(f"Will import into: {dj_library}\nXML target: {export_xml}")
+        else:
+            self.import_dest_info_var.set("Set the DJ Library Folder and Export XML path on the Export tab first.")
+
+    def start_import(self):
+        if self.importing or self.syncing:
+            return
+
+        dj_library_dir = self._import_detected_dj_library_dir
+        xml_path = self._import_detected_xml_path
+        if not dj_library_dir or not os.path.isdir(dj_library_dir):
+            messagebox.showerror("Import", "No DJ Library folder detected in that source folder.")
+            return
+        if not xml_path or not os.path.exists(xml_path):
+            messagebox.showerror("Import", "No DJ Library.xml found in that source folder.")
+            return
+
+        dest_dj_library = self.dj_library_var.get()
+        dest_xml = self.export_xml_var.get()
+        if not dest_dj_library or not dest_xml:
+            messagebox.showerror("Import", "Set the DJ Library Folder and Export XML path on the Export tab first.")
+            return
+
+        self.import_btn.config(state=tk.DISABLED)
+        self.importing = True
+        self.import_text.delete(1.0, tk.END)
+
+        thread = threading.Thread(
+            target=self._import_process,
+            args=(dj_library_dir, xml_path, dest_dj_library, dest_xml),
+            daemon=True,
+        )
+        thread.start()
+
+    def _import_process(self, source_dj_library_dir, source_xml_path, dest_dj_library, dest_xml):
+        try:
+            skip_existing = self.import_skip_existing_var.get()
+            os.makedirs(dest_dj_library, exist_ok=True)
+
+            self.append_to_text_widget(self.import_text, f"Importing from: {source_dj_library_dir}\n")
+            self.append_to_text_widget(self.import_text, f"Into: {dest_dj_library}\n\n")
+
+            try:
+                filenames = sorted(os.listdir(source_dj_library_dir))
+            except OSError as e:
+                self.append_to_text_widget(self.import_text, f"Error reading source folder: {e}\n")
+                filenames = []
+
+            copied = 0
+            skipped = 0
+            errors = 0
+            for filename in filenames:
+                src_file = os.path.join(source_dj_library_dir, filename)
+                if not os.path.isfile(src_file):
+                    continue
+                dest_file = os.path.join(dest_dj_library, filename)
+                if skip_existing and os.path.exists(dest_file):
+                    skipped += 1
+                    continue
+                try:
+                    shutil.copy2(src_file, dest_file)
+                    copied += 1
+                except Exception as e:
+                    errors += 1
+                    self.append_to_text_widget(self.import_text, f"Error copying {filename}: {e}\n")
+
+            self.append_to_text_widget(
+                self.import_text, f"\nCopied {copied} file(s), skipped {skipped} existing, {errors} error(s)\n"
+            )
+
+            # Bring in the updated XML manifest, backing up whatever was there first.
+            if os.path.exists(dest_xml):
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+                backup_path = f"{dest_xml}.bak-{timestamp}"
+                shutil.copy2(dest_xml, backup_path)
+                self.append_to_text_widget(self.import_text, f"Backed up existing XML to: {backup_path}\n")
+
+            shutil.copy2(source_xml_path, dest_xml)
+            self.append_to_text_widget(self.import_text, f"Copied XML to: {dest_xml}\n")
+
+            self.status_var.set("Import complete!")
+            self.append_to_text_widget(self.import_text, "\nImport complete.\n")
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Import Complete", f"Copied {copied} file(s) ({skipped} skipped, {errors} error(s))."
+            ))
+            self.config_manager.update_settings(last_mode="import")
+            self.root.after(0, self._save_settings_silent)
+
+        except Exception as e:
+            error_msg = f"Error during import: {e}"
+            logger.error(error_msg)
+            self.append_to_text_widget(self.import_text, f"\n{error_msg}\n")
+            self.status_var.set("Error during import")
+            self.root.after(0, lambda: messagebox.showerror("Import Error", error_msg))
+        finally:
+            self.root.after(0, self._enable_import_button)
+            self.importing = False
+
+    def _enable_import_button(self):
+        self.import_btn.config(state=tk.NORMAL)
+
     def _save_settings(self):
-        """Save current UI settings to config file."""
+        """Save current UI settings to config file (button handler - shows a confirmation)."""
+        self._save_settings_silent()
+        self.status_var.set("Settings saved")
+        messagebox.showinfo("Settings Saved", "Configuration saved successfully!")
+
+    def _save_settings_silent(self):
+        """Save current UI settings to config file with no confirmation popup -
+        used after a successful Export/Sync/Import so direct-run from the
+        FastRack hub always replays the most recently used settings."""
         # Collect selected playlists
         selected = [
             self.playlist_tree.item(item, "text")
@@ -546,9 +906,10 @@ class PlaylistSyncUI:
             selection_mode=self.selection_mode.get(),
             playlist_presets=self.config_manager.settings.playlist_presets,
             active_preset=self.preset_var.get(),
+            import_source_dir=self.import_source_dir_var.get(),
+            import_skip_existing=self.import_skip_existing_var.get(),
+            import_overwrite_all=self.import_overwrite_all_var.get(),
         )
-        self.status_var.set("Settings saved")
-        messagebox.showinfo("Settings Saved", "Configuration saved successfully!")
 
     def update_selection_mode(self):
         """Update the UI when selection mode changes"""
@@ -1595,6 +1956,10 @@ class PlaylistSyncUI:
         self.start_sync()
 
     def start_sync(self):
+        if self.importing:
+            messagebox.showerror("Error", "An import is currently running - wait for it to finish first.")
+            return
+
         # Initialize export_xml_only_var if it doesn't exist (for normal sync)
         if not hasattr(self, 'export_xml_only_var'):
             self.export_xml_only_var = tk.BooleanVar(value=False)
@@ -1753,10 +2118,12 @@ class PlaylistSyncUI:
             total_time = time.time() - start_time
             self.append_to_text_widget(self.xml_text, f"\nTotal sync process completed in {total_time:.2f} seconds\n")
             self.status_var.set("Sync complete!")
-            
-            self.root.after(0, lambda: messagebox.showinfo("Sync Complete", 
+
+            self.root.after(0, lambda: messagebox.showinfo("Sync Complete",
                 f"Playlist Sync completed in {total_time:.2f} seconds."))
-            
+            self.config_manager.update_settings(last_mode="export")
+            self.root.after(0, self._save_settings_silent)
+
         except Exception as e:
             error_msg = f"Error during sync process: {str(e)}"
             logger.error(error_msg)
@@ -3427,6 +3794,69 @@ def run_headless_sync(args=None) -> bool:
     return outcome["success"]
 
 
+def run_headless_import(args=None) -> bool:
+    """Run a folder import with no visible window, using saved settings from
+    ConfigManager (the Import source folder, and the Export tab's DJ Library
+    Folder / Export XML as the destination). Returns True on success."""
+    outcome = {"success": True}
+
+    def _showerror(title="", message="", *a, **kw):
+        logger.error(f"{title}: {message}")
+        outcome["success"] = False
+
+    def _showwarning(title="", message="", *a, **kw):
+        logger.warning(f"{title}: {message}")
+
+    def _showinfo(title="", message="", *a, **kw):
+        logger.info(f"{title}: {message}")
+
+    messagebox.showerror = _showerror
+    messagebox.showwarning = _showwarning
+    messagebox.showinfo = _showinfo
+
+    root = tk.Tk()
+    root.withdraw()
+    app = PlaylistSyncUI(root)
+
+    if not app.import_source_dir_var.get() or not os.path.isdir(app.import_source_dir_var.get()):
+        logger.error("No import source folder configured — open the tool (gear icon) to set it up first.")
+        root.destroy()
+        return False
+
+    app._run_import_autodetect()
+    if not app._import_detected_dj_library_dir or not app._import_detected_xml_path:
+        logger.error("Could not detect a DJ Library folder/XML in the configured import source folder.")
+        root.destroy()
+        return False
+
+    orig_enable_import_button = app._enable_import_button
+    def _finish():
+        orig_enable_import_button()
+        root.quit()
+    app._enable_import_button = _finish
+
+    app.start_import()
+    if not app.importing:
+        # start_import() bailed out synchronously (validation error) before
+        # spawning the worker thread - nothing left to wait for.
+        root.destroy()
+        return outcome["success"]
+
+    root.mainloop()
+    root.destroy()
+    return outcome["success"]
+
+
+def run_headless(args=None) -> bool:
+    """Replay whichever mode (export or import) was last used, with saved
+    settings - the FastRack hub's direct-run entry point. Mirrors the same
+    dispatch pattern as Sync Traktor Playlists' run_headless()."""
+    config_manager = ConfigManager()
+    if config_manager.settings.last_mode == "import":
+        return run_headless_import(args)
+    return run_headless_sync(args)
+
+
 def main():
     # Setup logging when the app actually runs (not at import time)
     setup_shared_logging("traktor_sync")
@@ -3436,11 +3866,11 @@ def main():
     parser.add_argument("--dj-library", help="Path to DJ Library folder (overrides saved settings)")
     parser.add_argument("--export-xml", help="Path for exported XML file (overrides saved settings)")
     parser.add_argument("--auto-run", action="store_true",
-                         help="Run the sync immediately with saved settings, no window")
+                         help="Run export or import (whichever was last used) immediately with saved settings, no window")
     args = parser.parse_args()
 
     if args.auto_run:
-        return 0 if run_headless_sync(args) else 1
+        return 0 if run_headless(args) else 1
 
     root = tk.Tk()
     apply_category_icon(root)

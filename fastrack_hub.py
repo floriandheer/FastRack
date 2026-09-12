@@ -10,6 +10,7 @@ Location: P:\\_Scripts\\fastrack_hub.py
 
 import os
 import sys
+import importlib
 import tkinter as tk
 from tkinter import ttk, font
 import datetime
@@ -1263,28 +1264,35 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.notes_button_container.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=(5, 10))
             self._update_notes_button(primary)
 
-    def _get_traktor_playlist_mode(self):
-        """Which mode (export/import) direct-run will replay for Sync Traktor
-        Playlists - read straight from that script's own saved settings."""
+    def _get_traktor_mode(self, module_name):
+        """Which mode (export/import) direct-run will replay for a Traktor
+        sync tool (Sync to Traktor or Sync Traktor Playlists) - read straight
+        from that script's own saved settings."""
+        if not module_name:
+            # _compute_sidebar_width()'s probe rows pass no module - they're
+            # only measuring chrome width and are never shown or clicked.
+            return "export"
         try:
-            import PipelineScript_Audio_TraktorPlaylistSync as traktor_playlist_sync
-            mode = traktor_playlist_sync.ConfigManager().settings.last_mode
+            module = importlib.import_module(module_name)
+            mode = module.ConfigManager().settings.last_mode
             return "import" if mode == "import" else "export"
         except Exception as e:
-            logger.warning(f"Could not read Traktor Playlist Sync mode: {e}")
+            logger.warning(f"Could not read {module_name} mode: {e}")
             return "export"
 
-    def _set_traktor_playlist_mode(self, mode):
+    def _set_traktor_mode(self, module_name, mode):
+        if not module_name:
+            return
         try:
-            import PipelineScript_Audio_TraktorPlaylistSync as traktor_playlist_sync
-            traktor_playlist_sync.ConfigManager().update_settings(last_mode=mode)
+            module = importlib.import_module(module_name)
+            module.ConfigManager().update_settings(last_mode=mode)
         except Exception as e:
-            logger.warning(f"Could not save Traktor Playlist Sync mode: {e}")
+            logger.warning(f"Could not save {module_name} mode: {e}")
 
-    def _create_mode_switch(self, parent):
+    def _create_mode_switch(self, parent, module_name):
         """Two stacked half-height segments acting as a single switch (only
-        one selected at a time) - lets you pick which mode Sync Traktor
-        Playlists' direct-run will replay (out=export, in=import) without
+        one selected at a time) - lets you pick which mode a Traktor sync
+        tool's direct-run will replay (out=export, in=import) without
         opening the full tool. Each option keeps a consistent color
         (out=green, in=red) whether selected or not, so the two stay
         identifiable at a glance."""
@@ -1311,10 +1319,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 in_label.configure(bg=in_color, fg=COLORS["bg_primary"])
 
         def select(mode):
-            self._set_traktor_playlist_mode(mode)
+            self._set_traktor_mode(module_name, mode)
             refresh(mode)
 
-        refresh(self._get_traktor_playlist_mode())
+        refresh(self._get_traktor_mode(module_name))
         out_label.bind("<Button-1>", lambda e: select("export"))
         in_label.bind("<Button-1>", lambda e: select("import"))
 
@@ -1355,7 +1363,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             spacer.pack(side=tk.LEFT, fill=tk.Y)
 
         if script_data.get("mode_switch"):
-            self._create_mode_switch(content)
+            self._create_mode_switch(content, script_data.get("module", ""))
 
             spacer2 = tk.Frame(content, bg=COLORS["bg_secondary"], width=8)
             spacer2.pack(side=tk.LEFT, fill=tk.Y)
