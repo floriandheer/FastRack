@@ -63,10 +63,12 @@ DEFAULT_PRESET_NAME = "Default (Auto)"
 class SyncSettings:
     """Sync configuration settings."""
     itunes_xml_path: str = ""
-    dj_library_path: str = ""
-    export_xml_path: str = ""
     target_os: str = "Local"
     mac_dj_library_path: str = "/Users/flori/Music/DJ Library"
+    dj_library_path_local: str = ""
+    export_xml_path_local: str = ""
+    dj_library_path_external: str = ""
+    export_xml_path_external: str = ""
     debug_mode: bool = True
     skip_existing: bool = True
     overwrite_all: bool = False
@@ -86,7 +88,26 @@ class SyncSettings:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SyncSettings':
         valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        return cls(**valid_fields)
+        settings = cls(**valid_fields)
+
+        # Migrate pre-dual-path configs: dj_library_path/export_xml_path
+        # used to be a single pair shared between Local and External. Fold
+        # them into whichever mode was active when saved, unless that mode
+        # already has its own value.
+        legacy_mode = "External" if data.get('target_os') == "External" else "Local"
+        legacy_dj = data.get('dj_library_path')
+        legacy_xml = data.get('export_xml_path')
+        if legacy_mode == "External":
+            if legacy_dj and not settings.dj_library_path_external:
+                settings.dj_library_path_external = legacy_dj
+            if legacy_xml and not settings.export_xml_path_external:
+                settings.export_xml_path_external = legacy_xml
+        else:
+            if legacy_dj and not settings.dj_library_path_local:
+                settings.dj_library_path_local = legacy_dj
+            if legacy_xml and not settings.export_xml_path_local:
+                settings.export_xml_path_local = legacy_xml
+        return settings
 
 
 # ============================================================================
@@ -339,16 +360,27 @@ class PlaylistSyncUI:
         # Load DJ Library and Export XML paths - default to "~/Music/DJ
         # Library" on any OS, matching the External-mode Mac path already
         # hardcoded below (mac_dj_library_path) for the shared-folder setup.
+        # Local and External each keep their own pair of paths (e.g. a local
+        # Traktor library folder vs. a USB staging folder), cached here and
+        # swapped in/out as the Destination radio button is switched - see
+        # on_target_os_changed().
         default_dj_path = os.path.join(os.path.expanduser("~"), "Music")
-        if settings.dj_library_path:
-            self.dj_library_var.set(settings.dj_library_path)
-        else:
-            self.dj_library_var.set(os.path.join(default_dj_path, 'DJ Library'))
+        default_dj_library = os.path.join(default_dj_path, 'DJ Library')
+        default_export_xml = os.path.join(default_dj_path, 'DJ Library.xml')
 
-        if settings.export_xml_path:
-            self.export_xml_var.set(settings.export_xml_path)
-        else:
-            self.export_xml_var.set(os.path.join(default_dj_path, 'DJ Library.xml'))
+        self._dest_by_mode = {
+            "Local": {
+                "dj_library": settings.dj_library_path_local or default_dj_library,
+                "export_xml": settings.export_xml_path_local or default_export_xml,
+            },
+            "External": {
+                "dj_library": settings.dj_library_path_external or default_dj_library,
+                "export_xml": settings.export_xml_path_external or default_export_xml,
+            },
+        }
+        self._active_dest_mode = settings.target_os if settings.target_os in self._dest_by_mode else "Local"
+        self.dj_library_var.set(self._dest_by_mode[self._active_dest_mode]["dj_library"])
+        self.export_xml_var.set(self._dest_by_mode[self._active_dest_mode]["export_xml"])
 
         # Load other settings
         self.target_os_var.set(settings.target_os)
@@ -618,6 +650,23 @@ class PlaylistSyncUI:
     def on_target_os_changed(self, event=None):
         """Handle target OS selection change"""
         target_os = self.target_os_var.get()
+
+        # Local and External keep independent DJ Library/Export XML paths.
+        # Stash whatever's currently in the entry fields under the mode
+        # we're leaving, then swap in the new mode's own values.
+        if hasattr(self, "_dest_by_mode"):
+            old_mode = getattr(self, "_active_dest_mode", None)
+            if old_mode and old_mode != target_os:
+                self._dest_by_mode[old_mode] = {
+                    "dj_library": self.dj_library_var.get(),
+                    "export_xml": self.export_xml_var.get(),
+                }
+            dest = self._dest_by_mode.get(target_os, {})
+            if "dj_library" in dest:
+                self.dj_library_var.set(dest["dj_library"])
+            if "export_xml" in dest:
+                self.export_xml_var.set(dest["export_xml"])
+            self._active_dest_mode = target_os
 
         if target_os == "External":
             self.mac_paths_frame.grid()
@@ -895,10 +944,23 @@ class PlaylistSyncUI:
             for item in self.playlist_tree.selection()
         ]
 
+        # Make sure the mode currently shown in the entry fields is folded
+        # back into the per-mode cache before persisting, in case the user
+        # edited it without switching the Destination radio away and back.
+        if hasattr(self, "_dest_by_mode"):
+            self._dest_by_mode[self.target_os_var.get()] = {
+                "dj_library": self.dj_library_var.get(),
+                "export_xml": self.export_xml_var.get(),
+            }
+        local_dest = self._dest_by_mode.get("Local", {}) if hasattr(self, "_dest_by_mode") else {}
+        external_dest = self._dest_by_mode.get("External", {}) if hasattr(self, "_dest_by_mode") else {}
+
         self.config_manager.update_settings(
             itunes_xml_path=self.itunes_xml_var.get(),
-            dj_library_path=self.dj_library_var.get(),
-            export_xml_path=self.export_xml_var.get(),
+            dj_library_path_local=local_dest.get("dj_library", self.dj_library_var.get()),
+            export_xml_path_local=local_dest.get("export_xml", self.export_xml_var.get()),
+            dj_library_path_external=external_dest.get("dj_library", ""),
+            export_xml_path_external=external_dest.get("export_xml", ""),
             target_os=self.target_os_var.get(),
             mac_dj_library_path=self.mac_dj_library_var.get(),
             debug_mode=self.debug_var.get(),
