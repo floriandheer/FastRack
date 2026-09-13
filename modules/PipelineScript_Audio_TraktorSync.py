@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from shared_window_icon import apply_category_icon
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
+from shared_color_button import ColorButton
 import xml.etree.ElementTree as ET
 import urllib.parse
 import re
@@ -602,13 +603,13 @@ class PlaylistSyncUI:
         action_btns = ttk.Frame(main_btn_frame)
         action_btns.grid(row=0, column=1, sticky="e", padx=10)
 
-        self.export_xml_btn = tk.Button(action_btns, text="Export XML", command=self.export_xml_only, width=15, bg="yellow", fg="black", font=('', 9, 'bold'))
+        self.export_xml_btn = ColorButton(action_btns, text="Export XML", command=self.export_xml_only, width=15, bg="yellow", fg="black", font=('', 9, 'bold'))
         self.export_xml_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.sync_btn = tk.Button(action_btns, text="Start Sync", command=self.start_sync, width=15, bg="green", fg="white", font=('', 9, 'bold'))
+        self.sync_btn = ColorButton(action_btns, text="Start Sync", command=self.start_sync, width=15, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.cancel_btn = tk.Button(action_btns, text="Cancel", command=self._cancel_sync, width=15, bg="red", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
+        self.cancel_btn = ColorButton(action_btns, text="Cancel", command=self._cancel_sync, width=15, bg="red", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
         self.cancel_btn.pack(side=tk.LEFT)
 
         # Initialize Mac paths visibility
@@ -704,8 +705,8 @@ class PlaylistSyncUI:
         action_frame.columnconfigure(0, weight=1)
         tab.rowconfigure(4, weight=1)
 
-        self.import_btn = tk.Button(action_frame, text="Import", command=self.start_import, width=15,
-                                     bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
+        self.import_btn = ColorButton(action_frame, text="Import", command=self.start_import, width=15,
+                                       bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
         self.import_btn.pack(side=tk.RIGHT, padx=10, anchor="n")
 
         # --- Log ---

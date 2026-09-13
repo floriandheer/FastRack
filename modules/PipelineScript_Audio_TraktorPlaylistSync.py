@@ -39,6 +39,7 @@ from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_open_path import open_path
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
+from shared_color_button import ColorButton
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -126,6 +127,7 @@ class SyncSettings:
     playlist_presets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_preset: str = ""
     last_mode: str = ""
+    import_file_path: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1117,8 +1119,8 @@ class TraktorPlaylistSyncUI:
 
         right_btns = ttk.Frame(action_frame)
         right_btns.grid(row=0, column=1, sticky="e", padx=10)
-        self.export_btn = tk.Button(right_btns, text="Export", command=self._export, width=15,
-                                     bg="green", fg="white", font=('', 9, 'bold'))
+        self.export_btn = ColorButton(right_btns, text="Export", command=self._export, width=15,
+                                       bg="green", fg="white", font=('', 9, 'bold'))
         self.export_btn.pack(side=tk.LEFT)
 
     def _create_import_tab(self, tab):
@@ -1187,8 +1189,10 @@ class TraktorPlaylistSyncUI:
         action_frame.grid(row=2, column=0, sticky="ew", pady=10)
         action_frame.columnconfigure(0, weight=1)
 
-        self.import_btn = tk.Button(action_frame, text="Import into Traktor", command=self._do_import, width=20,
-                                     bg="#c0392b", fg="white", font=('', 9, 'bold'))
+        ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).pack(side=tk.LEFT, padx=10)
+
+        self.import_btn = ColorButton(action_frame, text="Import into Traktor", command=self._do_import, width=20,
+                                       bg="#c0392b", fg="white", font=('', 9, 'bold'))
         self.import_btn.pack(side=tk.RIGHT, padx=10)
 
     def _create_results_panel(self, main):
@@ -1267,6 +1271,10 @@ class TraktorPlaylistSyncUI:
         if self.nml_path_var.get():
             self._load_nml(silent=True)
 
+        if settings.import_file_path and os.path.exists(settings.import_file_path):
+            self.import_path_var.set(settings.import_file_path)
+            self._load_import_file(settings.import_file_path, silent=True)
+
     @staticmethod
     def _default_nml_candidates() -> List[str]:
         """Every 'Traktor <version>' folder under ~/Documents/Native
@@ -1304,6 +1312,7 @@ class TraktorPlaylistSyncUI:
             selection_mode=self.selection_mode.get(),
             playlist_presets=self.config_manager.settings.playlist_presets,
             active_preset=self.preset_var.get(),
+            import_file_path=self.import_path_var.get(),
         )
         self.status_var.set("Settings saved")
         messagebox.showinfo("Settings Saved", "Configuration saved successfully!")
@@ -1316,6 +1325,7 @@ class TraktorPlaylistSyncUI:
             export_output_dir=self.output_dir_var.get(),
             selected_playlists=selected,
             selection_mode=self.selection_mode.get(),
+            import_file_path=self.import_path_var.get(),
         )
 
     # ------------------------------------------------------------------
@@ -1700,7 +1710,7 @@ class TraktorPlaylistSyncUI:
             self.import_path_var.set(filename)
             self._load_import_file(filename)
 
-    def _load_import_file(self, path: str):
+    def _load_import_file(self, path: str, silent: bool = False):
         try:
             tree = load_nml(path)
             root = tree.getroot()
@@ -1717,7 +1727,8 @@ class TraktorPlaylistSyncUI:
             nodes = walk_playlist_nodes(playlists_root) if playlists_root is not None else []
         except Exception as e:
             logger.error(f"Failed to load import file: {e}")
-            messagebox.showerror("Import", f"Could not read that file:\n{e}")
+            if not silent:
+                messagebox.showerror("Import", f"Could not read that file:\n{e}")
             self.import_info_var.set("Failed to load file")
             return
 
@@ -1877,6 +1888,7 @@ class TraktorPlaylistSyncUI:
             f"{added} added, {replaced} replaced, {stats.tracks_merged} track(s).\n\n"
             f"Backup saved to:\n{backup_path}",
         )
+        self._save_settings_silent()
         self.config_manager.update_settings(last_mode="import")
         self._load_nml(silent=True)
 
