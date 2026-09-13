@@ -2062,7 +2062,15 @@ def main():
     args, _unknown = parser.parse_known_args()
 
     if args.auto_run:
-        return 0 if run_headless() else 1
+        try:
+            return 0 if run_headless() else 1
+        except Exception:
+            # No window to show a messagebox in during a headless run - log
+            # the full traceback explicitly (goes to the same stdout stream
+            # the hub already tails) so a failure here is diagnosable from
+            # the hub's log instead of a bare "exit code 1".
+            logger.exception("Unhandled error during headless run")
+            return 1
 
     root = tk.Tk()
     apply_category_icon(root)
