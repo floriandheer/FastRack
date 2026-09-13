@@ -705,6 +705,8 @@ class PlaylistSyncUI:
         action_frame.columnconfigure(0, weight=1)
         tab.rowconfigure(4, weight=1)
 
+        ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).pack(side=tk.LEFT, padx=10, anchor="n")
+
         self.import_btn = ColorButton(action_frame, text="Import", command=self.start_import, width=15,
                                        bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
         self.import_btn.pack(side=tk.RIGHT, padx=10, anchor="n")
