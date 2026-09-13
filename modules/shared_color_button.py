@@ -10,9 +10,11 @@ native-rendered on any platform, so the same code paints the same color
 everywhere.
 """
 
+import sys
 import tkinter as tk
 
 DISABLED_FG = "#888888"
+POINTER_CURSOR = "pointinghand" if sys.platform == "darwin" else "hand2"
 
 
 class ColorButton(tk.Label):
@@ -59,7 +61,7 @@ class ColorButton(tk.Label):
         if self._state == tk.DISABLED:
             tk.Label.config(self, fg=DISABLED_FG, cursor="arrow")
         else:
-            tk.Label.config(self, fg=self._fg, cursor="pointinghand")
+            tk.Label.config(self, fg=self._fg, cursor=POINTER_CURSOR)
 
     def config(self, **kwargs):
         if "state" in kwargs:
