@@ -29,6 +29,7 @@ from urllib.parse import quote
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import is_wordpress_folder
 from rack_settings import get_rack_settings, join_native_path
+from shared_appdata import get_appdata_path
 
 # Get logger reference (configured in main())
 logger = get_logger("web_publish_static")
@@ -42,7 +43,7 @@ class WebPublishConfig:
     """Configuration manager for static site publishing."""
 
     def __init__(self):
-        app_data = Path.home() / "AppData" / "Local" / "PipelineManager"
+        app_data = get_appdata_path()
         app_data.mkdir(parents=True, exist_ok=True)
         self.config_file = app_data / "web_publish_config.json"
         self.config = self._load_config()

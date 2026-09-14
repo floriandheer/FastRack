@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from rack_settings import get_rack_settings, join_native_path
+from shared_appdata import get_appdata_path
 
 logger = get_logger("laragon_workspace")
 
@@ -34,7 +35,7 @@ class LaragonConfig:
     """Configuration manager for Laragon workspace junctions."""
 
     def __init__(self):
-        app_data = Path.home() / "AppData" / "Local" / "PipelineManager"
+        app_data = get_appdata_path()
         app_data.mkdir(parents=True, exist_ok=True)
         self.config_file = app_data / "laragon_config.json"
         self.config = self._load_config()

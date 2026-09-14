@@ -15,35 +15,42 @@ import tkinter as tk
 from tkinter import ttk, simpledialog
 from typing import List, Optional, Callable, Dict
 
+from shared_colors import (
+    BG_DARKEST, BG_RAISED_1, BG_RAISED_2, BG_HOVER,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_PLACEHOLDER,
+    ACCENT, ACCENT_DARK, ACCENT_HOVER,
+    BORDER, SUCCESS, WARNING, ERROR,
+)
+
 
 # ==================== COLOR SCHEME ====================
 # Matching the main pipeline's GitHub-dark aesthetic
 
 FORM_COLORS = {
     # Backgrounds
-    "bg": "#0d1117",              # Form background
-    "bg_input": "#161b22",        # Input field background
-    "bg_input_focus": "#1c2128",  # Focused input background
-    "bg_hover": "#262c36",        # Hover state
+    "bg": BG_DARKEST,              # Form background
+    "bg_input": BG_RAISED_1,       # Input field background
+    "bg_input_focus": BG_RAISED_2, # Focused input background
+    "bg_hover": BG_HOVER,          # Hover state
 
     # Text
-    "text": "#f0f6fc",            # Primary text
-    "text_dim": "#8b949e",        # Labels, hints, placeholders
-    "text_placeholder": "#6e7681", # Placeholder text
+    "text": TEXT_PRIMARY,           # Primary text
+    "text_dim": TEXT_SECONDARY,     # Labels, hints, placeholders
+    "text_placeholder": TEXT_PLACEHOLDER, # Placeholder text
 
     # Accents
-    "accent": "#58a6ff",          # Focus ring, links
-    "accent_dark": "#1f6feb",     # Buttons, active elements
-    "accent_hover": "#79c0ff",    # Hover state for accents
+    "accent": ACCENT,              # Focus ring, links
+    "accent_dark": ACCENT_DARK,    # Buttons, active elements
+    "accent_hover": ACCENT_HOVER,  # Hover state for accents
 
     # Borders
-    "border": "#30363d",          # Input borders
-    "border_focus": "#58a6ff",    # Focused border
+    "border": BORDER,              # Input borders
+    "border_focus": ACCENT,        # Focused border
 
     # Status
-    "success": "#3fb950",
-    "warning": "#d29922",
-    "error": "#f85149",
+    "success": SUCCESS,
+    "warning": WARNING,
+    "error": ERROR,
 }
 
 

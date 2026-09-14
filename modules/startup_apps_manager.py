@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from shared_logging import get_logger
+from shared_appdata import get_appdata_path
 
 logger = get_logger(__name__)
 
@@ -47,28 +48,20 @@ _TASK_HELPER_SRC = _PROJECT_ROOT / "tools" / "startup" / "install_task.ps1"
 TASK_NAME = "FastRack_StartupLauncher"
 
 
-def _appdata_dir() -> Path:
-    """Same target as rack_settings._get_appdata_path — kept local to
-    avoid importing RackSettings just to derive a path."""
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager"
-    return Path.home() / ".local" / "share" / "PipelineManager"
-
-
 def config_path() -> Path:
-    return _appdata_dir() / "startup_apps.json"
+    return get_appdata_path() / "startup_apps.json"
 
 
 def deployed_launcher_path() -> Path:
-    return _appdata_dir() / "StartupLauncher.ps1"
+    return get_appdata_path() / "StartupLauncher.ps1"
 
 
 def deployed_ahk_path() -> Path:
-    return _appdata_dir() / "SendF11.ahk"
+    return get_appdata_path() / "SendF11.ahk"
 
 
 def deployed_task_helper_path() -> Path:
-    return _appdata_dir() / "install_task.ps1"
+    return get_appdata_path() / "install_task.ps1"
 
 
 # ============================================================

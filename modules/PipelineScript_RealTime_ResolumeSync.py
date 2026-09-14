@@ -35,6 +35,7 @@ from typing import Dict, List, Optional, Tuple, Callable
 
 from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
+from shared_appdata import get_appdata_path
 
 logger = get_logger("resolume_sync")
 
@@ -67,7 +68,7 @@ class ResolumeSyncConfig:
     """Persisted user configuration."""
 
     def __init__(self):
-        app_data = Path.home() / "AppData" / "Local" / "PipelineManager"
+        app_data = get_appdata_path()
         app_data.mkdir(parents=True, exist_ok=True)
         self.config_file = app_data / "resolume_sync_config.json"
         self.config = self._load()

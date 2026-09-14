@@ -28,6 +28,7 @@ import base64
 from shared_logging import get_logger
 from rack_settings import get_rack_settings
 from shared_project_db import ProjectDatabase
+from shared_appdata import get_appdata_path
 
 logger = get_logger("invoice_manager.wc_monitor")
 
@@ -38,15 +39,7 @@ def _get_user_data_dir() -> Path:
     Matches the pattern used by ``invoice_manager.core.config._get_user_data_dir``
     so all InvoiceManager user data lives side-by-side.
     """
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager" / "wc_monitor"
-    windows_users = Path("/mnt/c/Users")
-    if windows_users.exists():
-        username = os.environ.get("USER", "")
-        user_path = windows_users / username
-        if user_path.exists():
-            return user_path / "AppData" / "Local" / "PipelineManager" / "wc_monitor"
-    return Path.home() / ".local" / "share" / "PipelineManager" / "wc_monitor"
+    return get_appdata_path() / "wc_monitor"
 
 
 DATA_DIR = _get_user_data_dir()
@@ -140,7 +133,7 @@ class Config:
             },
             "logging": {
                 "enabled": True,
-                "log_file": str(Path.home() / "AppData" / "Local" / "PipelineManager" / "logs" / "woocommerce_monitor.log"),
+                "log_file": str(get_appdata_path() / "logs" / "woocommerce_monitor.log"),
                 "log_level": "INFO"
             }
         }
@@ -162,7 +155,7 @@ class Config:
                         mon["processed_orders_file"] = str(self.data_dir / "processed_orders.json")
                     log = default_config.get("logging", {})
                     if not log.get("log_file"):
-                        log["log_file"] = str(Path.home() / "AppData" / "Local" / "PipelineManager" / "logs" / "woocommerce_monitor.log")
+                        log["log_file"] = str(get_appdata_path() / "logs" / "woocommerce_monitor.log")
                     # Persist the fix so we don't redo the rewrite each launch
                     if loaded_config != default_config:
                         self.config = default_config

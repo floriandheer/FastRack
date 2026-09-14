@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from shared_logging import get_logger
+from shared_appdata import get_appdata_path
 
 from .models import Company
 
@@ -48,16 +49,7 @@ _MIGRATABLE_FILENAMES = (
 
 def _get_user_data_dir() -> Path:
     """Per-user PipelineManager AppData dir, matching rack_settings convention."""
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager" / "global_invoice"
-    # WSL: prefer the Windows user's AppData so it stays in sync with native runs
-    windows_users = Path("/mnt/c/Users")
-    if windows_users.exists():
-        username = os.environ.get("USER", "")
-        user_path = windows_users / username
-        if user_path.exists():
-            return user_path / "AppData" / "Local" / "PipelineManager" / "global_invoice"
-    return Path.home() / ".local" / "share" / "PipelineManager" / "global_invoice"
+    return get_appdata_path() / "global_invoice"
 
 
 DATA_DIR = _get_user_data_dir()

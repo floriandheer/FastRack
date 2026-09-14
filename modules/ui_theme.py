@@ -9,24 +9,30 @@ UPPER ("AUDIO") keys are populated for compatibility with legacy callers.
 import tkinter as tk
 
 from pipeline_categories import CATEGORIES as _CATEGORIES
+from shared_colors import (
+    BG_DARKEST, BG_RAISED_1, BG_RAISED_2, BG_HOVER,
+    TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, ACCENT_HOVER, ACCENT_DARK,
+    SUCCESS, WARNING, ERROR, BORDER,
+)
 
 # Professional color scheme
 COLORS = {
-    "bg_primary": "#0d1117",      # GitHub dark background
-    "bg_secondary": "#161b22",    # Slightly lighter
-    "bg_card": "#1c2128",         # Card background
-    "bg_hover": "#262c36",        # Hover state
-    "text_primary": "#f0f6fc",    # Main text
-    "text_secondary": "#8b949e",  # Secondary text
-    "accent": "#58a6ff",          # Bright blue accent
-    "accent_hover": "#79c0ff",    # Hover accent
-    "accent_dark": "#1f6feb",     # Darker accent
-    "success": "#3fb950",
-    "warning": "#d29922",
-    "error": "#f85149",
-    "border": "#30363d",
-    "tab_active_bg": "#1f6feb",   # Active tab background
-    "tab_active_fg": "#ffffff"    # Active tab text
+    "bg_primary": BG_DARKEST,      # GitHub dark background
+    "bg_secondary": BG_RAISED_1,   # Slightly lighter
+    "bg_card": BG_RAISED_2,        # Card background
+    "bg_hover": BG_HOVER,          # Hover state
+    "text_primary": TEXT_PRIMARY,  # Main text
+    "text_secondary": TEXT_SECONDARY, # Secondary text
+    "accent": ACCENT,              # Bright blue accent
+    "accent_hover": ACCENT_HOVER,  # Hover accent
+    "accent_dark": ACCENT_DARK,    # Darker accent
+    "success": SUCCESS,
+    "warning": WARNING,
+    "error": ERROR,
+    "border": BORDER,
+    "tab_active_bg": ACCENT_DARK,  # Active tab background
+    "tab_active_fg": "#ffffff"     # Active tab text
 }
 
 # Category colors — built from the unified pipeline_categories.CATEGORIES.

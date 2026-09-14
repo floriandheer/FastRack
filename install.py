@@ -531,10 +531,12 @@ def _seed_invoice_manager_config(opts) -> None:
     if not example.exists():
         return  # nothing to seed
 
-    if sys.platform == "win32":
-        data_dir = Path.home() / "AppData" / "Local" / "PipelineManager" / "global_invoice"
-    else:
-        data_dir = Path.home() / ".local" / "share" / "PipelineManager" / "global_invoice"
+    modules_dir = str(SCRIPT_DIR / "modules")
+    if modules_dir not in sys.path:
+        sys.path.insert(0, modules_dir)
+    from shared_appdata import get_appdata_path  # noqa: WPS433
+
+    data_dir = get_appdata_path() / "global_invoice"
     target = data_dir / "config.json"
 
     print()
@@ -1162,10 +1164,12 @@ def step_doctor(opts) -> bool:
                f"could not check: {e}", warn=True)
 
     # invoice_manager config (per-user AppData)
-    if sys.platform == "win32":
-        inv_cfg = Path.home() / "AppData" / "Local" / "PipelineManager" / "global_invoice" / "config.json"
-    else:
-        inv_cfg = Path.home() / ".local" / "share" / "PipelineManager" / "global_invoice" / "config.json"
+    modules_dir = str(SCRIPT_DIR / "modules")
+    if modules_dir not in sys.path:
+        sys.path.insert(0, modules_dir)
+    from shared_appdata import get_appdata_path  # noqa: WPS433
+
+    inv_cfg = get_appdata_path() / "global_invoice" / "config.json"
     status("invoice_manager config", inv_cfg.exists(),
            str(inv_cfg) if inv_cfg.exists()
            else "missing - hub will disable Business tab",

@@ -16,22 +16,9 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from shared_logging import get_logger
+from shared_appdata import get_appdata_path
 
 logger = get_logger(__name__)
-
-
-def _get_appdata_path() -> Path:
-    """Get the appropriate AppData path for the platform."""
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager"
-    else:
-        windows_appdata = Path("/mnt/c/Users")
-        if windows_appdata.exists():
-            username = os.environ.get("USER", "")
-            user_path = windows_appdata / username
-            if user_path.exists():
-                return user_path / "AppData" / "Local" / "PipelineManager"
-        return Path.home() / ".local" / "share" / "PipelineManager"
 
 
 class SandboxTagStore:
@@ -46,7 +33,7 @@ class SandboxTagStore:
 
     def __init__(self, store_path: Optional[str] = None):
         if store_path is None:
-            app_data = _get_appdata_path()
+            app_data = get_appdata_path()
             app_data.mkdir(parents=True, exist_ok=True)
             self.store_path = app_data / "sandbox_tags.json"
         else:

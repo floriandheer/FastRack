@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import parse_wp_config as _shared_parse_wp_config
 from rack_settings import get_rack_settings
+from shared_appdata import get_appdata_path
 
 logger = get_logger("web_devbackup")
 
@@ -53,7 +54,7 @@ class DevBackupConfig:
     """Configuration manager for WordPress dev backups."""
 
     def __init__(self):
-        app_data = Path.home() / "AppData" / "Local" / "PipelineManager"
+        app_data = get_appdata_path()
         app_data.mkdir(parents=True, exist_ok=True)
         self.config_file = app_data / "web_devbackup_config.json"
         self.config = self._load_config()

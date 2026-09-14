@@ -16,24 +16,9 @@ import shutil
 
 from shared_logging import get_logger
 from rack_settings import get_rack_settings
+from shared_appdata import get_appdata_path
 
 logger = get_logger(__name__)
-
-
-def _get_appdata_path() -> Path:
-    """Get the appropriate AppData path for the platform."""
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager"
-    else:
-        # WSL/Linux: use Windows user profile via /mnt/c
-        windows_appdata = Path("/mnt/c/Users")
-        if windows_appdata.exists():
-            username = os.environ.get("USER", "")
-            user_path = windows_appdata / username
-            if user_path.exists():
-                return user_path / "AppData" / "Local" / "PipelineManager"
-        # Fallback to Linux standard location
-        return Path.home() / ".local" / "share" / "PipelineManager"
 
 
 class ProjectDatabase:
@@ -61,7 +46,7 @@ class ProjectDatabase:
         """
         if db_path is None:
             # Default location (handles WSL path translation)
-            app_data = _get_appdata_path()
+            app_data = get_appdata_path()
             app_data.mkdir(parents=True, exist_ok=True)
             self.db_path = app_data / "project_database.json"
         else:

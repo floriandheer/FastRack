@@ -33,6 +33,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from shared_window_icon import apply_category_icon
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
+from shared_appdata import get_appdata_path
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -47,7 +48,7 @@ APP_NAME = "Sync to PowerAmp"
 APP_VERSION = "2.1.0"
 
 # Configuration paths
-APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "PipelineManager")
+APP_DATA_DIR = str(get_appdata_path())
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "poweramp_sync_config.json")
 
 # Local ADB path (relative to script location)

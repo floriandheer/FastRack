@@ -16,32 +16,19 @@ import sys
 import logging
 import datetime
 
+from shared_appdata import get_appdata_path
+
 
 # Default log directory
 def _get_log_dir():
     """Get the appropriate log directory for the platform."""
-    if sys.platform == "win32":
-        return os.path.join(
-            os.path.expanduser("~"),
-            "AppData", "Local", "PipelineManager", "logs"
-        )
-    elif sys.platform == "darwin":
-        # Native macOS location for app log files.
+    if sys.platform == "darwin":
+        # Native macOS location for app log files (distinct from the
+        # Application Support folder shared_appdata otherwise points at).
         return os.path.join(
             os.path.expanduser("~"), "Library", "Logs", "PipelineManager"
         )
-    else:
-        # WSL/Linux: use Windows user profile via /mnt/c
-        # Fall back to ~/.local/share if /mnt/c doesn't exist
-        windows_appdata = "/mnt/c/Users"
-        if os.path.exists(windows_appdata):
-            # Try to find the Windows username (usually same as WSL user)
-            username = os.environ.get("USER", "")
-            user_path = os.path.join(windows_appdata, username)
-            if os.path.exists(user_path):
-                return os.path.join(user_path, "AppData", "Local", "PipelineManager", "logs")
-        # Fallback to Linux standard location
-        return os.path.join(os.path.expanduser("~"), ".local", "share", "PipelineManager", "logs")
+    return str(get_appdata_path() / "logs")
 
 LOG_DIR = _get_log_dir()
 

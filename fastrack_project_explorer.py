@@ -32,6 +32,7 @@ from shared_logging import get_logger, setup_logging
 from shared_project_db import ProjectDatabase
 from shared_wordpress import is_wordpress_project
 from rack_settings import get_rack_settings
+from shared_appdata import get_appdata_path
 from shared_creator_registry import (
     CREATIVE_CATEGORIES,
     get_subtypes_for_category, get_subtype_display_name,
@@ -123,22 +124,6 @@ def _get_platform_path(windows_path: str) -> Path:
 # archive_category_for() instead of inlining constants here.
 
 
-def _get_appdata_path() -> Path:
-    """Get the appropriate AppData path for the platform."""
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "PipelineManager"
-    else:
-        # WSL/Linux: use Windows user profile via /mnt/c
-        windows_appdata = Path("/mnt/c/Users")
-        if windows_appdata.exists():
-            username = os.environ.get("USER", "")
-            user_path = windows_appdata / username
-            if user_path.exists():
-                return user_path / "AppData" / "Local" / "PipelineManager"
-        # Fallback to Linux standard location
-        return Path.home() / ".local" / "share" / "PipelineManager"
-
-
 class TrackerSettings:
     """Manages UI settings persistence for Project Tracker."""
 
@@ -151,7 +136,7 @@ class TrackerSettings:
     }
 
     def __init__(self):
-        self.settings_path = _get_appdata_path() / "tracker_settings.json"
+        self.settings_path = get_appdata_path() / "tracker_settings.json"
         self.settings = self._load()
 
     def _load(self) -> Dict:

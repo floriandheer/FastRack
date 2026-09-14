@@ -26,6 +26,7 @@ from typing import Dict, Any
 
 from rack_settings import get_rack_settings, join_native_path
 from pipeline_categories import CATEGORIES, creative_categories
+from shared_appdata import get_appdata_path
 
 # Base script directory (relative to the main pipeline file)
 SCRIPT_FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,9 +37,7 @@ APP_NAME = "FastRack"
 APP_VERSION = "0.5.0"
 APP_ICON = None
 LOGO_PATH = os.path.join(SCRIPT_FILE_DIR, "assets", "Logo_FlorianDheer_LogoWhite.png")
-DEFAULT_CONFIG_PATH = os.path.join(
-    os.path.expanduser("~"), "AppData", "Local", "PipelineManager", "config.json"
-)
+DEFAULT_CONFIG_PATH = str(get_appdata_path() / "config.json")
 
 
 def _resolve_folder_path(category_name: str, work_path_key) -> str:

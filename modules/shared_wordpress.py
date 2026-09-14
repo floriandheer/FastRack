@@ -20,11 +20,10 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
+from shared_appdata import get_appdata_path
 
 DEFAULT_LARAGON_PATH = r"C:\laragon"
-_DEVBACKUP_CONFIG = (
-    Path.home() / "AppData" / "Local" / "PipelineManager" / "web_devbackup_config.json"
-)
+_DEVBACKUP_CONFIG = get_appdata_path() / "web_devbackup_config.json"
 
 
 _DEFINE_RE = re.compile(

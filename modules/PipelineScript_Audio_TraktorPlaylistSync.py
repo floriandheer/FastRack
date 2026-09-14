@@ -40,6 +40,7 @@ from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_open_path import open_path
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 from shared_color_button import ColorButton
+from shared_appdata import get_appdata_path
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -47,26 +48,7 @@ APP_NAME = "Traktor Playlist Sync"
 APP_VERSION = "2.0.0"
 HEADER_COLOR = "#2c3e50"
 
-def _appdata_dir() -> str:
-    """Platform-appropriate PipelineManager app-data folder (same
-    convention as rak_settings._get_appdata_path) - this file's config
-    holds per-machine profiles, so it has to land in the right place on
-    both Windows and macOS rather than the Windows-only path this used to
-    be, which just silently created a stray ~/AppData folder on Mac."""
-    home = os.path.expanduser("~")
-    if sys.platform == "win32":
-        return os.path.join(home, "AppData", "Local", "PipelineManager")
-    if sys.platform == "darwin":
-        return os.path.join(home, "Library", "Application Support", "PipelineManager")
-    windows_appdata = "/mnt/c/Users"
-    if os.path.exists(windows_appdata):
-        user_path = os.path.join(windows_appdata, os.environ.get("USER", ""))
-        if os.path.exists(user_path):
-            return os.path.join(user_path, "AppData", "Local", "PipelineManager")
-    return os.path.join(home, ".local", "share", "PipelineManager")
-
-
-APP_DATA_DIR = _appdata_dir()
+APP_DATA_DIR = str(get_appdata_path())
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "traktor_playlist_sync_config.json")
 
 # Built-in preset that mirrors the Auto Select rule (digits 1-9 prefix).

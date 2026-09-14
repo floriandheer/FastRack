@@ -30,24 +30,14 @@ from dataclasses import dataclass, asdict, field
 
 # Setup logging using shared utility
 from shared_logging import get_logger, setup_logging as setup_shared_logging
+from shared_appdata import get_appdata_path
 
 # Get logger reference (configured in main())
 logger = get_logger("traktor_sync")
 VALID_EXTENSIONS = {'.mp3', '.flac', '.wav', '.aiff', '.m4a', '.ogg', '.opus'}
 
-def _appdata_dir() -> str:
-    """Platform-appropriate PipelineManager app-data folder (same convention
-    as rak_settings._get_appdata_path / the Traktor Playlist Sync tool)."""
-    home = os.path.expanduser("~")
-    if sys.platform == "win32":
-        return os.path.join(home, "AppData", "Local", "PipelineManager")
-    if sys.platform == "darwin":
-        return os.path.join(home, "Library", "Application Support", "PipelineManager")
-    return os.path.join(home, ".local", "share", "PipelineManager")
-
-
 # Configuration paths
-APP_DATA_DIR = _appdata_dir()
+APP_DATA_DIR = str(get_appdata_path())
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "traktor_sync_config.json")
 
 # Built-in preset that mirrors the Auto Select rule (digits 1-9 prefix).
