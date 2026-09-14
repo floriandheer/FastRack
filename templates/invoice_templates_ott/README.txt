@@ -1,7 +1,16 @@
 LibreOffice invoice templates (.ott)
 ====================================
 
-Drop one .ott file per company that uses LibreOffice rendering:
+Only Template_Factuur.odt is committed to the repo — it's a generic
+starting point with no real company data, using nothing but the
+{{company_...}} placeholders below. Everything else you drop in this
+folder (florian_dheer.ott, hyphen_v.ott, or any other per-company file
+with your real legal name, VAT, IBAN, BIC, address, or logo) is
+git-ignored, the same as config.json itself: real business/financial
+data never gets committed, only your own machine keeps it.
+
+Drop one real .ott file per company that uses LibreOffice rendering,
+copied from Template_Factuur.odt and customized:
   - florian_dheer.ott   for company key "FD"
   - hyphen_v.ott        for company key "HV"
 

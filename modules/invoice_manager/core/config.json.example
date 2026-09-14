@@ -10,7 +10,7 @@
                 "1000 Brussels",
                 "Belgium"
             ],
-            "email": "floriandheer@outlook.com",
+            "email": "you@example.com",
             "iban": "BE00 0000 0000 0000",
             "bic": "BBRUBEBB",
             "template_path": "templates/invoice_templates_ott/florian_dheer.ott",

@@ -73,6 +73,14 @@ modules/woocommerce_monitor_data/*.log
 # legacy in-repo folder so leftovers from older checkouts can't slip in.
 modules/global_invoice_data/
 
+# Invoice templates - real per-company templates carry your legal name,
+# VAT/IBAN/BIC and address, so only the generic placeholder-only starter
+# template is committed. Drop your own filled-in .odt/.ott files here;
+# they stay local.
+templates/invoice_templates_ott/*
+!templates/invoice_templates_ott/README.txt
+!templates/invoice_templates_ott/Template_Factuur.odt
+
 # Tools directory - binaries downloaded externally, keep README
 tools/*
 !tools/platform-tools/
