@@ -2570,7 +2570,62 @@ class PlaylistSyncUI:
         except Exception as e:
             self.append_to_text_widget(self.sync_text, f"Warning: Could not extract embedded art: {e}\n")
             return None
-    
+
+    def flac_has_embedded_art(self, flac_path):
+        """Check whether a FLAC file already has an attached picture stream."""
+        try:
+            process_args = self.get_subprocess_args()
+            result = subprocess.run([
+                "ffprobe", "-v", "error", "-select_streams", "v",
+                "-show_entries", "stream=codec_type", "-of", "csv=p=0", flac_path
+            ], **process_args)
+            return bool(result.stdout.decode('utf-8', errors='replace').strip())
+        except Exception:
+            return False
+
+    def add_missing_album_art(self, original_source_path, dest_path, temp_dir):
+        """Embed album art into an already-synced FLAC that's missing it.
+
+        Used when skip_existing keeps a file from ever being reprocessed: a
+        track that synced fine but lost its art on a run where extraction
+        failed (a transient ffmpeg hiccup, art added to the source only
+        afterward, etc.) would otherwise never get a retry, since every later
+        run just sees the destination file already exists and skips it.
+        Finds art the same way a fresh sync would - external image next to
+        the source track, else the source's own embedded art - and attaches
+        it to the existing destination file in place.
+        """
+        external_art = self.find_album_art(original_source_path)
+        embedded_art = self.extract_embedded_art(original_source_path, temp_dir)
+        art_to_use = embedded_art or external_art
+        if not art_to_use:
+            return False
+
+        try:
+            temp_output = os.path.join(temp_dir, "temp_with_art.flac")
+            process_args = self.get_subprocess_args()
+            result = subprocess.run([
+                "ffmpeg",
+                "-i", dest_path,
+                "-i", art_to_use,
+                "-c", "copy",
+                "-disposition:v:0", "attached_pic",
+                "-y",
+                temp_output
+            ], **process_args)
+
+            if result.returncode == 0 and os.path.exists(temp_output):
+                shutil.move(temp_output, dest_path)
+                self.append_to_text_widget(
+                    self.sync_text,
+                    f"  → Added missing album art to existing file: {os.path.basename(dest_path)}\n"
+                )
+                return True
+            return False
+        except Exception as e:
+            self.append_to_text_widget(self.sync_text, f"Error adding missing album art: {e}\n")
+            return False
+
     def analyze_library(self, xml_path, debug_missing=True):
         """
         Analyze the iTunes library XML and extract the selected playlists and their tracks.
@@ -3080,6 +3135,16 @@ class PlaylistSyncUI:
                         file_mapping[track_path] = dest_path
                         synced_tracks.append(dest_path)
                         skipped_count += 1
+
+                        # Still check for missing album art even though the audio
+                        # itself is being skipped - otherwise a track that once
+                        # lost its art (e.g. a transient ffmpeg failure) stays
+                        # art-less forever, since skip_existing means it's never
+                        # reprocessed again.
+                        if preserve_album_art and dest_path.lower().endswith('.flac') \
+                                and not self.flac_has_embedded_art(dest_path):
+                            if self.add_missing_album_art(track_path, dest_path, temp_dir):
+                                album_art_embedded_count += 1
 
                         # Log the skip
                         self.append_to_text_widget(

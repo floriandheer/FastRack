@@ -2232,6 +2232,68 @@ TROUBLESHOOTING
 
         return None
 
+    def _ensure_cover_art_adb(self, source_path: str, dest_dir: str, relative_dest_key: str,
+                               existing_set: set, processed_dirs: set) -> bool:
+        """ADB equivalent of _ensure_cover_art: push a cover.jpg to dest_dir on
+        the device if one doesn't already exist there.
+
+        Tries, in order: an external image file next to the source track,
+        this track's own embedded art, then any other audio file in the same
+        source folder that has embedded art - so a cover is found whether
+        it's a folder image or embedded in some file in the album, matching
+        local-mode behavior.
+
+        Runs once per destination directory per sync (tracked via
+        processed_dirs), but is meant to be called even when the audio track
+        itself was skipped as already-existing: otherwise an album whose
+        cover failed to push once (a transient ffmpeg/adb hiccup) stays
+        cover-less forever, since skip_existing means its tracks are never
+        reprocessed again.
+        """
+        if dest_dir in processed_dirs:
+            return False
+        processed_dirs.add(dest_dir)
+
+        # Check the pre-scanned set rather than another adb shell call
+        cover_rel_dir = os.path.dirname(relative_dest_key)
+        cover_rel = (cover_rel_dir + '/cover.jpg').lstrip('/') if cover_rel_dir else 'cover.jpg'
+        if cover_rel in existing_set:
+            return False
+
+        remote_cover = dest_dir + '/cover.jpg'
+
+        external_cover = self._find_cover_art(source_path)
+        if external_cover:
+            success, _ = self._adb_push(external_cover, remote_cover)
+            return success
+
+        # No external cover - try this track, then any sibling audio file in
+        # the same source folder, for embedded art.
+        candidates = [source_path]
+        source_dir = os.path.dirname(source_path)
+        try:
+            for f in os.listdir(source_dir):
+                candidate = os.path.join(source_dir, f)
+                if candidate != source_path and f.lower().endswith(tuple(VALID_EXTENSIONS)):
+                    candidates.append(candidate)
+        except OSError:
+            pass
+
+        for candidate in candidates:
+            if self._source_has_embedded_art(candidate):
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                    tmp_cover = tmp.name
+                try:
+                    if self._extract_cover_art(candidate, tmp_cover):
+                        success, _ = self._adb_push(tmp_cover, remote_cover)
+                        if success:
+                            return True
+                finally:
+                    if os.path.exists(tmp_cover):
+                        os.remove(tmp_cover)
+
+        return False
+
     def _convert_to_opus(self, source_path: str, dest_path: str) -> bool:
         """Convert an audio file to Opus using FFmpeg, preserving metadata."""
         try:
@@ -2609,9 +2671,17 @@ TROUBLESHOOTING
                     relative_dest_key = relative_path_converted.replace('\\', '/').lstrip('/')
 
                     if is_adb_mode:
+                        dest_dir = os.path.dirname(dest_path)
+
                         # ADB mode: O(1) check against the pre-scanned set
                         if skip_existing and relative_dest_key in existing_set:
                             skipped_count += 1
+                            # Still check for cover art even though the audio
+                            # itself is skipped - see _ensure_cover_art_adb.
+                            if dest_dir not in processed_cover_dirs:
+                                if self._ensure_cover_art_adb(source_path, dest_dir, relative_dest_key,
+                                                               existing_set, processed_cover_dirs):
+                                    covers_count += 1
                             continue
 
                         # Convert to temp file then push
@@ -2648,32 +2718,10 @@ TROUBLESHOOTING
                                 error_count += 1
 
                         # Handle cover art for ADB
-                        dest_dir = os.path.dirname(dest_path)
                         if dest_dir not in processed_cover_dirs:
-                            processed_cover_dirs.add(dest_dir)
-                            # Check the pre-scanned set rather than another adb shell call
-                            cover_rel_dir = os.path.dirname(relative_dest_key)
-                            cover_rel = (cover_rel_dir + '/cover.jpg').lstrip('/') if cover_rel_dir else 'cover.jpg'
-                            remote_cover = dest_dir + '/cover.jpg'
-                            if cover_rel not in existing_set:
-                                # Try to find and push cover art
-                                cover_source = self._find_cover_art(source_path)
-                                if cover_source:
-                                    success, _ = self._adb_push(cover_source, remote_cover)
-                                    if success:
-                                        covers_count += 1
-                                elif self._source_has_embedded_art(source_path):
-                                    # Extract to temp then push
-                                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                                        tmp_cover = tmp.name
-                                    try:
-                                        if self._extract_cover_art(source_path, tmp_cover):
-                                            success, _ = self._adb_push(tmp_cover, remote_cover)
-                                            if success:
-                                                covers_count += 1
-                                    finally:
-                                        if os.path.exists(tmp_cover):
-                                            os.remove(tmp_cover)
+                            if self._ensure_cover_art_adb(source_path, dest_dir, relative_dest_key,
+                                                           existing_set, processed_cover_dirs):
+                                covers_count += 1
                     else:
                         # Local mode: O(1) check against the pre-scanned set
                         if skip_existing and relative_dest_key in existing_set:
