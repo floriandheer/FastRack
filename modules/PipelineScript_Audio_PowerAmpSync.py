@@ -2286,6 +2286,51 @@ TROUBLESHOOTING
             logger.error(f"Error copying {source_path}: {e}")
             return False
 
+    # A mirror-sync deletion this large relative to what's already there almost
+    # never reflects real cleanup (removing a handful of tracks from a
+    # playlist) - it's the signature of a bug upstream (e.g. a path/prefix
+    # mismatch, or a chunk of tracks silently dropped from this run) computing
+    # the wrong "expected files" set and flagging the whole library as
+    # orphaned. Refuse to delete in that case rather than risk wiping
+    # everything, the way a bad prefix once did here.
+    MIRROR_DELETE_MIN_FILES = 20
+    MIRROR_DELETE_MAX_FRACTION = 0.35
+
+    def _mirror_deletion_guard(self, orphaned_count: int, existing_count: int) -> Tuple[bool, str]:
+        """Sanity-check a mirror-sync deletion before it runs.
+
+        Returns (safe_to_delete, reason_if_not).
+        """
+        if existing_count < self.MIRROR_DELETE_MIN_FILES:
+            return True, ""
+        fraction = orphaned_count / existing_count
+        if fraction > self.MIRROR_DELETE_MAX_FRACTION:
+            return False, (
+                f"Mirror sync would delete {orphaned_count} of {existing_count} "
+                f"existing files ({fraction:.0%}). That's far more than a normal "
+                "playlist change accounts for and looks like a bug (e.g. a "
+                "path/prefix mismatch or a batch of tracks that failed to sync) "
+                "rather than real cleanup. Skipping deletion - re-run after "
+                "checking the sync settings and source library."
+            )
+        return True, ""
+
+    def _apply_opus_extension(self, path: str) -> str:
+        """Swap a convertible-audio extension for .opus, when opus conversion
+        is enabled - mirrors the rename Phase 1 applies via relative_path_converted.
+
+        Needed here too: this path can be written into a playlist without ever
+        going through Phase 1 in the same run (e.g. "Sync Playlists" only, or
+        any track path_mapping didn't cover), and PowerAmp will only find a
+        file that has actually been converted, not the original filename.
+        """
+        if not self.convert_opus_var.get():
+            return path
+        ext = os.path.splitext(path)[1].lower()
+        if ext in CONVERTIBLE_EXTENSIONS:
+            return os.path.splitext(path)[0] + '.opus'
+        return path
+
     def _translate_path(self, windows_path: str) -> str:
         """Translate a Windows path to an Android-compatible path."""
         path = windows_path.strip()
@@ -2295,7 +2340,7 @@ TROUBLESHOOTING
 
         if self.relative_paths_var.get():
             # Return just the filename
-            return os.path.basename(path)
+            return self._apply_opus_extension(os.path.basename(path))
 
         # Replace source prefix with Android prefix
         source_prefix = self.source_prefix_var.get().replace('\\', '/')
@@ -2311,7 +2356,7 @@ TROUBLESHOOTING
         # Ensure forward slashes
         path = path.replace('\\', '/')
 
-        return path
+        return self._apply_opus_extension(path)
 
     def _write_m3u8_playlist(self, playlist_name: str, track_ids: List[str], output_path: str,
                               path_mapping: Optional[Dict[str, str]] = None) -> Tuple[bool, int]:
@@ -2708,6 +2753,12 @@ TROUBLESHOOTING
                         if f not in expected_files:
                             orphaned.append(f)
 
+                    safe, guard_reason = self._mirror_deletion_guard(len(orphaned), len(existing_files))
+                    if orphaned and not safe:
+                        self._append_sync_text(f"⚠ SKIPPING DELETION: {guard_reason}\n")
+                        logger.warning(guard_reason)
+                        orphaned = []
+
                     if orphaned:
                         self._append_sync_text(f"Found {len(orphaned)} orphaned files to delete\n")
                         for orphan in orphaned:
@@ -2759,6 +2810,12 @@ TROUBLESHOOTING
                             continue
                         if f not in expected_files:
                             orphaned.append(f)
+
+                    safe, guard_reason = self._mirror_deletion_guard(len(orphaned), len(existing_files))
+                    if orphaned and not safe:
+                        self._append_sync_text(f"⚠ SKIPPING DELETION: {guard_reason}\n")
+                        logger.warning(guard_reason)
+                        orphaned = []
 
                     if orphaned:
                         self._append_sync_text(f"Found {len(orphaned)} orphaned files to delete\n")
@@ -2988,6 +3045,11 @@ TROUBLESHOOTING
                     self._append_sync_text(f"\nCleaning up orphaned {label.lower()} files...\n")
                     deleted = 0
                     orphaned = [f for f in existing_set if f not in expected]
+                    safe, guard_reason = self._mirror_deletion_guard(len(orphaned), len(existing_set))
+                    if orphaned and not safe:
+                        self._append_sync_text(f"⚠ SKIPPING DELETION: {guard_reason}\n")
+                        logger.warning(guard_reason)
+                        orphaned = []
                     for orphan in orphaned:
                         if not self.syncing:
                             break
@@ -3010,7 +3072,18 @@ TROUBLESHOOTING
         threading.Thread(target=sync_thread, daemon=True).start()
 
     def _append_sync_text(self, text: str) -> None:
-        """Append text to sync output (thread-safe)."""
+        """Append text to sync output (thread-safe).
+
+        Also mirrors non-blank lines to the persistent log file. The Sync Log
+        tab itself is GUI-only and vanishes when the window closes, which
+        previously meant a sync's actual per-file activity (what got pushed,
+        skipped, or deleted) left no trace anywhere once the app was closed -
+        only high-level events like device selection made it to disk.
+        """
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not set(line) <= {'='}:
+                logger.info(line)
         self.root.after(0, lambda: self._do_append_sync_text(text))
 
     def _do_append_sync_text(self, text: str) -> None:
