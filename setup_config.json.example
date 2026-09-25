@@ -22,7 +22,7 @@
     },
     {
       "drive_letter": "F:",
-      "target_path": "D:\\personal",
+      "target_path": "D:\\_personal",
       "label": "Personal",
       "description": "Personal files"
     }
@@ -43,7 +43,7 @@
     "subcategories": {},
     "extra_dirs": [
       "D:\\_work\\_PIPELINE",
-      "D:\\personal",
+      "D:\\_personal",
       "D:\\music"
     ]
   },
@@ -64,7 +64,7 @@
       },
       {
         "name": "Personal",
-        "local_path": "D:\\personal",
+        "local_path": "D:\\_personal",
         "remote_path": "/personal",
         "sync_mode": "two_way",
         "on_demand": false
