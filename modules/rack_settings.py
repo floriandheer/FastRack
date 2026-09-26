@@ -153,7 +153,7 @@ class RackSettings:
 
     Categories and their default subpaths:
     - Visual: Visual/ (includes GD, CG, VJ subcategories)
-    - RealTime: RealTime/ (includes Godot, TouchDesigner, Resolume subcategories)
+    - RealTime: Realtime/ (includes Godot, TouchDesigner, Resolume subcategories)
     - Audio: Audio/
     - Physical: Physical/
     - Photo: Photo/
@@ -175,8 +175,8 @@ class RackSettings:
                 "subcategories": ["GD", "CG", "VJ"]
             },
             "RealTime": {
-                "work_subpath": "RealTime",
-                "archive_subpath": "RealTime",
+                "work_subpath": "Realtime",
+                "archive_subpath": "Realtime",
                 "subcategories": ["Godot", "TD", "Resolume"]
             },
             "Audio": {

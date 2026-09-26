@@ -34,7 +34,7 @@
     ],
     "categories": [
       "Visual",
-      "RealTime",
+      "Realtime",
       "Audio",
       "Physical",
       "Photo",
@@ -274,7 +274,7 @@
     },
     {
       "name": "Resolume",
-      "category": "RealTime",
+      "category": "Realtime",
       "install_method": "manual",
       "exe": "Avenue",
       "why": "VJ / live video performance",
@@ -282,7 +282,7 @@
     },
     {
       "name": "TouchDesigner",
-      "category": "RealTime",
+      "category": "Realtime",
       "install_method": "manual",
       "exe": "TouchDesigner",
       "why": "Real-time visual programming",
@@ -290,7 +290,7 @@
     },
     {
       "name": "TIXL",
-      "category": "RealTime",
+      "category": "Realtime",
       "install_method": "manual",
       "exe": "Editor",
       "why": "Real-time motion graphics (formerly Tooll3)",
@@ -298,7 +298,7 @@
     },
     {
       "name": "MadMapper",
-      "category": "RealTime",
+      "category": "Realtime",
       "install_method": "manual",
       "exe": "MadMapper",
       "why": "Video / lighting projection mapping",
@@ -383,6 +383,30 @@
       "brew_cask": true
     },
     {
+      "name": "IrfanView",
+      "category": "Photo",
+      "install_method": "winget",
+      "winget_id": "IrfanSkiljan.IrfanView",
+      "exe": "i_view64",
+      "why": "Fast, lightweight image viewer/converter",
+      "url": "https://www.irfanview.com/",
+      "platforms": [
+        "win32"
+      ]
+    },
+    {
+      "name": "IrfanView PlugIns",
+      "category": "Photo",
+      "install_method": "winget",
+      "winget_id": "IrfanSkiljan.IrfanView.PlugIns",
+      "exe": "",
+      "why": "Extra format/codec support for IrfanView (RAW, PSD, video, etc.)",
+      "url": "https://www.irfanview.com/plugins.htm",
+      "platforms": [
+        "win32"
+      ]
+    },
+    {
       "name": "Kodi",
       "category": "Media",
       "install_method": "winget",
@@ -446,7 +470,7 @@
       "categories": [
         "General",
         "Visual",
-        "RealTime"
+        "Realtime"
       ],
       "extra_apps": [
         "Traktor Pro"
@@ -507,7 +531,7 @@
       "categories": [
         "General",
         "Visual",
-        "RealTime",
+        "Realtime",
         "Audio",
         "Physical",
         "Photo",

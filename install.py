@@ -632,7 +632,7 @@ def step_apps(opts) -> bool:
     #
     # General apps install automatically — they're the universal
     # baseline (KeePass, Synology Drive, Sublime, ...). Role-specific
-    # categories (Visual, Audio, RealTime, ...) always go through the
+    # categories (Visual, Audio, Realtime, ...) always go through the
     # picker so the user can pick what this machine is actually for.
     general_missing = [a for a in missing
                        if wa.DEFAULT_CATEGORY in a.categories]
@@ -653,7 +653,7 @@ def step_apps(opts) -> bool:
     # If --yes, fall through and tell the user how to install them.
     if opts.yes:
         print()
-        print(f"  {WARN} Role-specific categories (Visual, Audio, RealTime, ...) "
+        print(f"  {WARN} Role-specific categories (Visual, Audio, Realtime, ...) "
               f"need a manual pick.")
         if getattr(opts, "interactive_unattended", False):
             print(f"  {dim('You will be asked at the end to pick a profile or individual apps.')}")
@@ -963,7 +963,7 @@ def _offer_post_install_picker(opts) -> None:
     unattended ('A' at start) install.
 
     The point: 'A' is meant to be one-keystroke convenient, so we don't
-    pester the user mid-run about Visual/Audio/RealTime/... picks.
+    pester the user mid-run about Visual/Audio/Realtime/... picks.
     Instead, after the final report we re-surface what's missing and let
     them pick a profile / category / individual apps — or just walk away.
     Skipped silently when --yes was passed on the CLI (CI use case).
@@ -989,7 +989,7 @@ def _offer_post_install_picker(opts) -> None:
     print()
     print(bold("  One more thing - role-specific apps"))
     print(f"  {dim(f'{len(missing)} app(s) still missing across '
-                   f'Visual / RealTime / Audio / Physical / Photo / Media / Web.')}")
+                   f'Visual / Realtime / Audio / Physical / Photo / Media / Web.')}")
     print(f"  {dim('Pick a profile (VJ rig / Audio rig / ...), a category, individual apps,')}")
     print(f"  {dim('or press S / Enter to skip - install.py --step apps brings this back.')}")
 

@@ -1452,7 +1452,7 @@ class SettingsDialog:
             ("3D", ["houdini", "blender", "freecad", "alibre", "slicer", "printer"]),
             ("2D", ["affinity"]),
             ("FX", ["fusion", "after_effects"]),
-            ("RealTime", ["godot", "resolume", "touchdesigner", "python", "platform", "renderer", "resolution"]),
+            ("Realtime", ["godot", "resolume", "touchdesigner", "python", "platform", "renderer", "resolution"]),
             ("Audio", ["ableton", "reaper", "traktor"]),
         ]
 

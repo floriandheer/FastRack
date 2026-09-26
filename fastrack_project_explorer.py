@@ -570,9 +570,9 @@ class ProjectImporter:
             "Physical_Project": _get_platform_path(active_base + r"\Physical\Project"),
             "Physical_Personal": _get_platform_path(active_base + r"\Physical\_Personal"),
             # RealTime
-            "RealTime": _get_platform_path(active_base + r"\RealTIme"),  # Note: folder has typo "RealTIme"
-            "RealTime_Personal": _get_platform_path(active_base + r"\RealTIme\_Personal"),
-            "RealTime_Sandbox": _get_platform_path(active_base + r"\RealTIme\_Sandbox"),
+            "RealTime": _get_platform_path(active_base + r"\Realtime"),
+            "RealTime_Personal": _get_platform_path(active_base + r"\Realtime\_Personal"),
+            "RealTime_Sandbox": _get_platform_path(active_base + r"\Realtime\_Sandbox"),
             # Photo
             "Photo": _get_platform_path(active_base + r"\Photo"),
             "Photo_Personal": _get_platform_path(active_base + r"\Photo\_Personal"),
@@ -595,9 +595,9 @@ class ProjectImporter:
             "Physical_Project": _get_platform_path(archive_base + r"\Physical\Project"),
             "Physical_Personal": _get_platform_path(archive_base + r"\Physical\_Personal"),
             # RealTime
-            "RealTime": _get_platform_path(archive_base + r"\RealTime"),
-            "RealTime_Personal": _get_platform_path(archive_base + r"\RealTime\_Personal"),
-            "RealTime_Sandbox": _get_platform_path(archive_base + r"\RealTime\_Sandbox"),
+            "RealTime": _get_platform_path(archive_base + r"\Realtime"),
+            "RealTime_Personal": _get_platform_path(archive_base + r"\Realtime\_Personal"),
+            "RealTime_Sandbox": _get_platform_path(archive_base + r"\Realtime\_Sandbox"),
             # Photo
             "Photo": _get_platform_path(archive_base + r"\Photo"),
             "Photo_Personal": _get_platform_path(archive_base + r"\Photo\_Personal"),

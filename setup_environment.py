@@ -402,6 +402,36 @@ def step_drives(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
             if not accessible:
                 ok = False
 
+    # --- Sync into startup_apps.json for the logon-triggered launcher ---
+    # The HKCU\Run entries above are a simple fallback, but they routinely
+    # lose the race against Defender / OneDrive / indexer warm-up on cold
+    # boot and the drives silently don't come back after a restart. The
+    # scheduled-task launcher (deployed + registered by Step 6) does the
+    # subst itself at logon and wins that race (see
+    # tools/startup/StartupLauncher.ps1) — but only if it knows the
+    # mappings. Keep its sidecar config in sync here so that stays true
+    # without a trip through Settings > Startup Apps.
+    print()
+    try:
+        import startup_apps_manager as sam
+        letters = []
+        drive_mappings = []
+        for m in mappings:
+            letter = m["drive_letter"].upper().rstrip("\\").rstrip(":") + ":"
+            letters.append(letter)
+            drive_mappings.append({"letter": letter, "target": m["target_path"]})
+        if dry_run:
+            print(f"  [DRY RUN] Would sync {len(drive_mappings)} mapping(s) into startup_apps.json")
+        else:
+            startup_cfg = sam.load_config()
+            startup_cfg["drive_mappings"] = drive_mappings
+            startup_cfg["wait_for_drives"] = letters
+            sam.save_config(startup_cfg)
+            status_line("Startup-launcher drive sync", True,
+                         f"{len(drive_mappings)} mapping(s) written to startup_apps.json")
+    except Exception as e:
+        status_line("Startup-launcher drive sync", False, str(e))
+
     return ok
 
 

@@ -131,7 +131,7 @@ Layer 4: Quick Actions (context-sensitive)
 | Keys | Category |
 |------|----------|
 | **Shift+V** | Visual |
-| **Shift+R** | RealTime |
+| **Shift+R** | Realtime |
 | **Shift+A** | Audio |
 | **Shift+P** | Physical |
 | **Shift+H** | Photo |

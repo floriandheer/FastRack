@@ -167,7 +167,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
     "RealTime": {
         "color": "#06b6d4",
         "emoji": "⚡",
-        "display_name": "RealTime",
+        "display_name": "Realtime",
         "description": "Real-time processing and performance tools",
         "work_path_key": "RealTime",
         "category_scripts": [

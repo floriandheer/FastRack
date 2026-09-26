@@ -84,7 +84,7 @@ python install.py
 2. **Python packages** — `pip install -r requirements.txt`
 3. **External tools** — FFmpeg, FLAC, rclone (offers a winget install on Windows)
 4. **Environment** — folders, `subst` drive mappings (with registry persistence, no admin needed), Synology checks, pipeline config
-5. **Workstation apps** — KeePassXC, Synology Drive, browser, media player, and role-specific picks (Visual / Audio / RealTime / ...)
+5. **Workstation apps** — KeePassXC, Synology Drive, browser, media player, and role-specific picks (Visual / Audio / Realtime / ...)
 6. **Desktop shortcut** — generates `Fastrack.lnk` you can pin to the taskbar
 7. **Doctor** — verifies the end state is healthy
 
