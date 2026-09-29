@@ -119,6 +119,25 @@ def _get_platform_path(windows_path: str) -> Path:
     return Path(windows_path)
 
 
+def _resolve_top_segment(base: str, subpath: str) -> str:
+    """Resolve `subpath`'s first path segment case-insensitively against
+    what's actually on disk under `base` (e.g. code says "Realtime" but
+    the real folder is cased differently, or vice versa) - any remaining
+    segments are left untouched. Falls back to `subpath` unchanged when
+    `base` doesn't exist yet or has no case-insensitive match, so scanning
+    a not-yet-created category folder is still a harmless no-op."""
+    head, sep, rest = subpath.partition("\\")
+    try:
+        target = head.lower()
+        for entry in os.listdir(base):
+            if entry.lower() == target:
+                head = entry
+                break
+    except OSError:
+        pass
+    return head + sep + rest
+
+
 # Category colors, project type info, and archive routing all live in
 # pipeline_categories.py. Use category_color()/project_type_info()/
 # archive_category_for() instead of inlining constants here.
@@ -555,56 +574,61 @@ class ProjectImporter:
         active_base = settings.get_active_base()
         archive_base = settings.get_archive_base()
 
+        def _p(base, subpath):
+            """Build a scan path, tolerating a casing mismatch between the
+            hardcoded category name below and the real on-disk folder."""
+            return _get_platform_path(base + "\\" + _resolve_top_segment(base, subpath))
+
         active = {
             # Visual
-            "Visual": _get_platform_path(active_base + r"\Visual"),
-            "Visual_Personal": _get_platform_path(active_base + r"\Visual\_Personal"),
-            "Visual_Sandbox": _get_platform_path(active_base + r"\Visual\_Sandbox"),
+            "Visual": _p(active_base, r"Visual"),
+            "Visual_Personal": _p(active_base, r"Visual\_Personal"),
+            "Visual_Sandbox": _p(active_base, r"Visual\_Sandbox"),
             # Audio
-            "Audio_InProgress": _get_platform_path(active_base + r"\Audio\01_Prod\01_InProgress"),
-            "Audio_Finished": _get_platform_path(active_base + r"\Audio\01_Prod\03_Finished"),
-            "Audio_Personal": _get_platform_path(active_base + r"\Audio\_Personal"),
+            "Audio_InProgress": _p(active_base, r"Audio\01_Prod\01_InProgress"),
+            "Audio_Finished": _p(active_base, r"Audio\01_Prod\03_Finished"),
+            "Audio_Personal": _p(active_base, r"Audio\_Personal"),
             # Physical (scan each subdirectory separately)
-            "Physical_Order": _get_platform_path(active_base + r"\Physical\Order"),
-            "Physical_Product": _get_platform_path(active_base + r"\Physical\Product"),
-            "Physical_Project": _get_platform_path(active_base + r"\Physical\Project"),
-            "Physical_Personal": _get_platform_path(active_base + r"\Physical\_Personal"),
+            "Physical_Order": _p(active_base, r"Physical\Order"),
+            "Physical_Product": _p(active_base, r"Physical\Product"),
+            "Physical_Project": _p(active_base, r"Physical\Project"),
+            "Physical_Personal": _p(active_base, r"Physical\_Personal"),
             # RealTime
-            "RealTime": _get_platform_path(active_base + r"\Realtime"),
-            "RealTime_Personal": _get_platform_path(active_base + r"\Realtime\_Personal"),
-            "RealTime_Sandbox": _get_platform_path(active_base + r"\Realtime\_Sandbox"),
+            "RealTime": _p(active_base, r"Realtime"),
+            "RealTime_Personal": _p(active_base, r"Realtime\_Personal"),
+            "RealTime_Sandbox": _p(active_base, r"Realtime\_Sandbox"),
             # Photo
-            "Photo": _get_platform_path(active_base + r"\Photo"),
-            "Photo_Personal": _get_platform_path(active_base + r"\Photo\_Personal"),
-            "Photo_Sandbox": _get_platform_path(active_base + r"\Photo\_Sandbox"),
+            "Photo": _p(active_base, r"Photo"),
+            "Photo_Personal": _p(active_base, r"Photo\_Personal"),
+            "Photo_Sandbox": _p(active_base, r"Photo\_Sandbox"),
             # Web
-            "Web": _get_platform_path(active_base + r"\Web"),
-            "Web_Personal": _get_platform_path(active_base + r"\Web\_Personal"),
+            "Web": _p(active_base, r"Web"),
+            "Web_Personal": _p(active_base, r"Web\_Personal"),
         }
 
         archive = {
             # Visual
-            "Visual": _get_platform_path(archive_base + r"\Visual"),
-            "Visual_Personal": _get_platform_path(archive_base + r"\Visual\_Personal"),
-            "Visual_Sandbox": _get_platform_path(archive_base + r"\Visual\_Sandbox"),
+            "Visual": _p(archive_base, r"Visual"),
+            "Visual_Personal": _p(archive_base, r"Visual\_Personal"),
+            "Visual_Sandbox": _p(archive_base, r"Visual\_Sandbox"),
             # Audio
-            "Audio_Personal": _get_platform_path(archive_base + r"\Audio\_Personal"),
+            "Audio_Personal": _p(archive_base, r"Audio\_Personal"),
             # Physical (mirror active subdirectory structure)
-            "Physical_Order": _get_platform_path(archive_base + r"\Physical\Order"),
-            "Physical_Product": _get_platform_path(archive_base + r"\Physical\Product"),
-            "Physical_Project": _get_platform_path(archive_base + r"\Physical\Project"),
-            "Physical_Personal": _get_platform_path(archive_base + r"\Physical\_Personal"),
+            "Physical_Order": _p(archive_base, r"Physical\Order"),
+            "Physical_Product": _p(archive_base, r"Physical\Product"),
+            "Physical_Project": _p(archive_base, r"Physical\Project"),
+            "Physical_Personal": _p(archive_base, r"Physical\_Personal"),
             # RealTime
-            "RealTime": _get_platform_path(archive_base + r"\Realtime"),
-            "RealTime_Personal": _get_platform_path(archive_base + r"\Realtime\_Personal"),
-            "RealTime_Sandbox": _get_platform_path(archive_base + r"\Realtime\_Sandbox"),
+            "RealTime": _p(archive_base, r"Realtime"),
+            "RealTime_Personal": _p(archive_base, r"Realtime\_Personal"),
+            "RealTime_Sandbox": _p(archive_base, r"Realtime\_Sandbox"),
             # Photo
-            "Photo": _get_platform_path(archive_base + r"\Photo"),
-            "Photo_Personal": _get_platform_path(archive_base + r"\Photo\_Personal"),
-            "Photo_Sandbox": _get_platform_path(archive_base + r"\Photo\_Sandbox"),
+            "Photo": _p(archive_base, r"Photo"),
+            "Photo_Personal": _p(archive_base, r"Photo\_Personal"),
+            "Photo_Sandbox": _p(archive_base, r"Photo\_Sandbox"),
             # Web
-            "Web": _get_platform_path(archive_base + r"\Web"),
-            "Web_Personal": _get_platform_path(archive_base + r"\Web\_Personal"),
+            "Web": _p(archive_base, r"Web"),
+            "Web_Personal": _p(archive_base, r"Web\_Personal"),
         }
 
         return active, archive

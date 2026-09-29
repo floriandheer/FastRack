@@ -1124,7 +1124,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 # the Business button alone to flip to invoices.
                 self._show_tracker_panel()
                 category_names = [
-                    CREATIVE_CATEGORIES.get(k, {}).get("name", k) for k in creative_selected
+                    CREATIVE_CATEGORIES.get(k, {}).get("category_key", k) for k in creative_selected
                 ]
                 if hasattr(self.project_tracker, 'set_categories'):
                     self.project_tracker.set_categories(category_names)

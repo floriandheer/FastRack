@@ -384,7 +384,7 @@
     },
     {
       "name": "IrfanView",
-      "category": "Photo",
+      "category": "General",
       "install_method": "winget",
       "winget_id": "IrfanSkiljan.IrfanView",
       "exe": "i_view64",
@@ -396,7 +396,7 @@
     },
     {
       "name": "IrfanView PlugIns",
-      "category": "Photo",
+      "category": "General",
       "install_method": "winget",
       "winget_id": "IrfanSkiljan.IrfanView.PlugIns",
       "exe": "",

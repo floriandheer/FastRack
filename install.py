@@ -890,7 +890,6 @@ def _install_set(wa, target, opts, label: str,
                         print(f"     {CROSS} {a.name} - {dim(result.detail)}")
                         if a.url:
                             print(f"     {dim('Fallback: ' + a.url)}")
-                        _offer_skip(wa, a, opts)
 
     # Manual block — just URLs, optionally opened in browser.
     # Unattended mode (--yes) deliberately NEVER auto-opens browser tabs —
@@ -910,8 +909,6 @@ def _install_set(wa, target, opts, label: str,
                         print(f"  {dim('[dry-run] would open ' + a.url)}")
                     else:
                         wa.open_download_page(a)
-            for a in manual_targets:
-                _offer_skip(wa, a, opts)
 
     return True  # never block downstream
 
@@ -1008,18 +1005,6 @@ def _offer_post_install_picker(opts) -> None:
                      force_yes=True)
     finally:
         opts.yes = saved_yes
-
-
-def _offer_skip(wa, app, opts):
-    """After a failed/declined install, offer to remember the skip."""
-    if opts.yes or opts.dry_run:
-        return
-    if wa.is_skipped(app):
-        return
-    if confirm(f"  Don't ask about {bold(app.name)} again on this machine?",
-               auto_yes=False, default_yes=False):
-        wa.mark_skipped(app.name)
-        print(f"     {dim('Marked as skipped in setup_apps_state.json')}")
 
 
 # ============================================================

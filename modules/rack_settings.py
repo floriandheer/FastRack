@@ -43,6 +43,23 @@ def join_native_path(base: str, *parts: str) -> str:
     return os.path.join(base, *parts) if parts else base
 
 
+def _resolve_existing_casing(parent: str, name: str) -> str:
+    """Return the actual on-disk name matching `name` case-insensitively
+    under `parent`, if one exists (e.g. config says "RealTime" but the
+    real folder was renamed to "Realtime" - or vice versa). Falls back to
+    `name` unchanged when `parent` doesn't exist yet or has no
+    case-insensitive match, so a not-yet-created folder still gets its
+    configured name when a caller creates it."""
+    try:
+        target = name.lower()
+        for entry in os.listdir(parent):
+            if entry.lower() == target:
+                return entry
+    except OSError:
+        pass
+    return name
+
+
 def _normalize_user_path(path: str) -> str:
     """Normalize a user-entered path's separators for the current OS.
 
@@ -481,6 +498,9 @@ class RackSettings:
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("work_subpath", category)
 
+        work_root = work_drive + "\\" if _is_bare_drive_letter(work_drive) else work_drive
+        subpath = _resolve_existing_casing(work_root, subpath)
+
         return join_native_path(work_drive, subpath)
 
     def get_active_path(self, category: str) -> str:
@@ -496,6 +516,7 @@ class RackSettings:
         active_base = self.get_active_base()
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("work_subpath", category)
+        subpath = _resolve_existing_casing(active_base, subpath)
 
         return join_native_path(active_base, subpath)
 
@@ -512,6 +533,7 @@ class RackSettings:
         archive_base = self.get_archive_base()
         cat_config = self.config["categories"].get(category, {})
         subpath = cat_config.get("archive_subpath", category)
+        subpath = _resolve_existing_casing(archive_base, subpath)
 
         return join_native_path(archive_base, subpath)
 

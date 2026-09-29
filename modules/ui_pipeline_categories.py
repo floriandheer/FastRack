@@ -92,6 +92,11 @@ def _build_menu_entry(category_name: str, cat: Dict[str, Any]) -> Dict[str, Any]
 
     entry: Dict[str, Any] = {
         "name": cat["display_name"],
+        # The canonical mixed-case key (e.g. "RealTime") pipeline_categories.py
+        # and fastrack_project_explorer.py route on. Kept separate from
+        # "name" (display text) since the two can now differ - a display
+        # rename must not change what callers pass to set_categories().
+        "category_key": category_name,
         "description": cat.get("description", ""),
         "icon": cat["emoji"],
         "scripts": _scripts_dict(cat.get("category_scripts", [])),

@@ -468,7 +468,7 @@ class KeyboardNavigatorMixin:
                     from ui_pipeline_categories import CREATIVE_CATEGORIES
                     match_key = next(
                         (k for k, v in CREATIVE_CATEGORIES.items()
-                         if v.get("name") == category),
+                         if v.get("category_key") == category),
                         None,
                     )
                     if match_key is not None:
