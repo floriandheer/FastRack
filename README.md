@@ -17,45 +17,6 @@ FastRack is a Pipeline-Manager: a toolkit designed to streamline various product
 ## Screenshots
 
 ![FastRack Interface](docs/screenshot-2026-04-27.png)
-## Requirements
-
-### System Requirements
-- **Python**: 3.8 or higher
-- **Operating System**: Windows, macOS, or Linux
-- **Dependencies**: See `requirements.txt`
-
-### Python Dependencies
-- `pillow>=10.0.0` - Image processing and logo display
-- `pyexiv2>=2.8.0` - EXIF metadata handling for images
-- `setuptools<81` - Required by invoice2data (Python 3.13+ removed `pkg_resources`)
-- `pdfplumber>=0.9.0` - PDF text extraction for invoice processing
-- `invoice2data>=0.4.0` - Template-based invoice data extraction
-- `tkinter` - GUI framework (included with Python)
-
-### External Software Dependencies
-
-Some pipeline scripts require additional external software:
-
-#### Audio Production Scripts
-- **FFmpeg** - Required for audio conversion and format handling
-  - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
-  - macOS: `brew install ffmpeg`
-  - Linux: `apt-get install ffmpeg` or equivalent
-
-- **FLAC Tools (flac-1.5.0-win or later)** - Required for FLAC metadata operations
-  - Used by: Sync iTunes Playlists to DJ Library (for writing playlist metadata to FLAC comment fields)
-  - Windows: Download from [xiph.org FLAC downloads](https://xiph.org/flac/download.html)
-  - macOS: `brew install flac`
-  - Linux: `apt-get install flac` or equivalent
-  - Note: The `metaflac` command-line tool must be in your system PATH
-
-#### Cloud Sync Tools
-- **rclone** - Required for cloud storage synchronization (OneDrive, Google Drive, etc.)
-  - Used by: Backup MusicBee to OneDrive
-  - Download from [rclone.org](https://rclone.org/downloads/)
-  - After downloading, extract `rclone.exe` to the `tools/rclone/` folder in this repository
-  - Configure your remote: `rclone config` (follow the interactive setup for your cloud provider)
-  - Note: The `tools/` folder is gitignored - you must download rclone separately
 
 ## Installation
 
@@ -110,6 +71,46 @@ python make_shortcut.py                    # Fastrack.lnk
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full walkthrough.
+
+## Requirements
+
+### System Requirements
+- **Python**: 3.8 or higher
+- **Operating System**: Windows, macOS, or Linux
+- **Dependencies**: See `requirements.txt`
+
+### Python Dependencies
+- `pillow>=10.0.0` - Image processing and logo display
+- `pyexiv2>=2.8.0` - EXIF metadata handling for images
+- `setuptools<81` - Required by invoice2data (Python 3.13+ removed `pkg_resources`)
+- `pdfplumber>=0.9.0` - PDF text extraction for invoice processing
+- `invoice2data>=0.4.0` - Template-based invoice data extraction
+- `tkinter` - GUI framework (included with Python)
+
+### External Software Dependencies
+
+Some pipeline scripts require additional external software:
+
+#### Audio Production Scripts
+- **FFmpeg** - Required for audio conversion and format handling
+  - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
+  - macOS: `brew install ffmpeg`
+  - Linux: `apt-get install ffmpeg` or equivalent
+
+- **FLAC Tools (flac-1.5.0-win or later)** - Required for FLAC metadata operations
+  - Used by: Sync iTunes Playlists to DJ Library (for writing playlist metadata to FLAC comment fields)
+  - Windows: Download from [xiph.org FLAC downloads](https://xiph.org/flac/download.html)
+  - macOS: `brew install flac`
+  - Linux: `apt-get install flac` or equivalent
+  - Note: The `metaflac` command-line tool must be in your system PATH
+
+#### Cloud Sync Tools
+- **rclone** - Required for cloud storage synchronization (OneDrive, Google Drive, etc.)
+  - Used by: Backup MusicBee to OneDrive
+  - Download from [rclone.org](https://rclone.org/downloads/)
+  - After downloading, extract `rclone.exe` to the `tools/rclone/` folder in this repository
+  - Configure your remote: `rclone config` (follow the interactive setup for your cloud provider)
+  - Note: The `tools/` folder is gitignored - you must download rclone separately
 
 ## Usage
 
