@@ -22,9 +22,13 @@ FastRack is a Pipeline-Manager: a toolkit designed to streamline various product
 
 ### Prerequisites (one-time, ~2 minutes)
 
-You need **Python** and **git** on the machine before `install.py` can run. Open Command Prompt — press **Start**, type **`cmd`**, press Enter — then:
+You need **Python** and **git** on the machine before `install.py` can run. Open Command Prompt - press **Start**, type **`cmd`**, press Enter - then:
 
-1. Type **`python`**. Windows opens the Microsoft Store on the Python page; click **Get**.
+1. Type:
+```
+   python
+```
+. Windows opens the Microsoft Store on the Python page; click **Get**.
 2. Type **`winget install Git.Git -e`** to install git.
    *If you get "winget is not recognized"*: install **App Installer** from the Microsoft Store first, then retry.
 3. Close the window and open a fresh `cmd` so the new tools land on PATH.
