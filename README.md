@@ -28,8 +28,11 @@ You need **Python** and **git** on the machine before `install.py` can run. Open
 ```
    python
 ```
-. Windows opens the Microsoft Store on the Python page; click **Get**.
-2. Type **`winget install Git.Git -e`** to install git.
+   Windows opens the Microsoft Store on the Python page; click **Get**.
+2. Type the following to install git:
+```
+   winget install Git.Git -e
+```
    *If you get "winget is not recognized"*: install **App Installer** from the Microsoft Store first, then retry.
 3. Close the window and open a fresh `cmd` so the new tools land on PATH.
 
