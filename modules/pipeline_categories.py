@@ -421,6 +421,22 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "work_path_key": "Photo",
         "category_scripts": [
             {
+                "key": "open_root_darktable",
+                "name": "Open in Darktable",
+                "module": "PipelineScript_Photo_OpenRootDarktable",
+                "description": "Import the project's root folder (no subfolders) into Darktable and show it in the lighttable",
+                "icon": "🎞️",
+                "context": "project",
+            },
+            {
+                "key": "open_export_irfanview",
+                "name": "Open export in IrfanView",
+                "module": "PipelineScript_Photo_OpenExportIrfanView",
+                "description": "Open the first picture of the project's _export folder in IrfanView",
+                "icon": "🖼️",
+                "context": "project",
+            },
+            {
                 "key": "raw_cleanup",
                 "name": "RAW Cleanup",
                 "module": "PipelineScript_Photo_RawCleanup",

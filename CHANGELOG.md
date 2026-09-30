@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Open in Darktable** — new Photo project action (first in the list, above
+  Open export in IrfanView and RAW Cleanup) that imports the pictures directly in the
+  project's root folder into Darktable — no subfolders, so `_export` stays
+  out of the library — and shows them in the lighttable. Done with a small
+  Lua script (`--luacmd`) because `darktable <folder>` crashes on
+  Darktable 5.2.1 and only opens a collection without importing. Recursive
+  import is switched off for that run only (`--conf`, not saved). Darktable
+  allows one instance per library, so a message asks you to close it first
+  if it is already open.
+- **Open export in IrfanView** — new Photo project action (above RAW
+  Cleanup, in both the project Actions panel and the project deck) that
+  opens the first picture of the project's `_export` folder in IrfanView
+  (the rest of the folder is then one arrow key away). IrfanView is located
+  via PATH, its install folder, or the registry, and a message box explains
+  if the folder is missing, has no pictures, or IrfanView isn't installed.
 - `install.py` — a friendly first-run installer that takes a fresh machine
   to a working Pipeline Hub in six guided steps: prerequisites, Python
   packages, external tools (FFmpeg / FLAC / rclone via winget),
