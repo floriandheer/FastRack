@@ -38,6 +38,12 @@ def install_keep_on_bottom(root: tk.Tk) -> Optional[callable]:
     clicks on the parts of FastRack that ARE visible still fire
     button handlers, keyboard shortcuts still work.
 
+    The pin is skipped while the window is fullscreen. Windows hides
+    the taskbar for an active fullscreen window by moving the taskbar
+    to the bottom of the z-order, directly beneath that window;
+    sending the window to ``HWND_BOTTOM`` afterwards would sink it
+    below the taskbar and bring the taskbar back on top.
+
     Caveat: there is an unavoidable brief flash where Windows
     activates the window before we can react. The flash is short
     (typically < 50 ms) but is not entirely eliminable from
@@ -56,6 +62,8 @@ def install_keep_on_bottom(root: tk.Tk) -> Optional[callable]:
 
     def to_back(event=None):
         try:
+            if root.attributes("-fullscreen"):
+                return
             # winfo_id() gives the Tk widget id; on Windows top-levels,
             # the actual HWND is its parent (Tk wraps the window).
             hwnd = user32.GetParent(root.winfo_id())
