@@ -142,8 +142,22 @@ class KeyboardNavigatorMixin:
             self._update_panel_focus()
             self._focus_tracker_widget()
 
+    def _active_sandbox(self):
+        """The Sandbox browser if it currently fills the right-hand slot,
+        else None. While it does, the "tracker" focus panel (WASD target)
+        means the Sandbox browser instead of the hidden project tracker."""
+        sandbox = getattr(self, 'sandbox_browser', None)
+        panel = getattr(self, 'sandbox_browser_panel', None)
+        if sandbox is not None and panel is not None and panel.winfo_ismapped():
+            return sandbox
+        return None
+
     def _focus_tracker_widget(self):
         """Give focus to whichever tracker widget matches the active view."""
+        sandbox = self._active_sandbox()
+        if sandbox is not None:
+            sandbox.focus_browser()
+            return
         tracker = getattr(self, 'project_tracker', None)
         if tracker is None:
             return
@@ -175,6 +189,8 @@ class KeyboardNavigatorMixin:
                 self.tools_focus_index -= 1
                 self._update_item_focus()
         elif self.focused_panel == "tracker":
+            if self._active_sandbox() is not None:
+                return  # the focused Sandbox list/grid moves itself
             tracker = getattr(self, 'project_tracker', None)
             if tracker is not None:
                 if tracker.view_mode.get() == "list":
@@ -205,6 +221,8 @@ class KeyboardNavigatorMixin:
                 self.tools_focus_index += 1
                 self._update_item_focus()
         elif self.focused_panel == "tracker":
+            if self._active_sandbox() is not None:
+                return
             tracker = getattr(self, 'project_tracker', None)
             if tracker is not None:
                 if tracker.view_mode.get() == "list":
@@ -227,6 +245,8 @@ class KeyboardNavigatorMixin:
                 self.operations_focus_index -= 1
                 self._select_focused_operation()
         elif self.focused_panel == "tracker":
+            if self._active_sandbox() is not None:
+                return
             tracker = getattr(self, 'project_tracker', None)
             # Left/Right are meaningless in the 1-D list view; only forward
             # to the grid handler when grid view is active.
@@ -248,6 +268,8 @@ class KeyboardNavigatorMixin:
                 self.operations_focus_index += 1
                 self._select_focused_operation()
         elif self.focused_panel == "tracker":
+            if self._active_sandbox() is not None:
+                return
             tracker = getattr(self, 'project_tracker', None)
             if tracker is not None and tracker.view_mode.get() != "list":
                 tracker._on_grid_right(None)
@@ -286,7 +308,10 @@ class KeyboardNavigatorMixin:
                 # Open notes
                 self._quick_open_notes()
         elif self.focused_panel == "tracker":
-            if hasattr(self, 'project_tracker'):
+            sandbox = self._active_sandbox()
+            if sandbox is not None:
+                sandbox.activate_selected()
+            elif hasattr(self, 'project_tracker'):
                 self.project_tracker._on_enter_key(None)
 
     def _quick_select_category(self, category_key):
@@ -363,12 +388,22 @@ class KeyboardNavigatorMixin:
         """Focus the project tracker search field (/ key)."""
         if not self._should_handle_keyboard():
             return
+        sandbox = self._active_sandbox()
+        if sandbox is not None:
+            sandbox.focus_filter()
+            return
         if hasattr(self, 'project_tracker') and hasattr(self.project_tracker, 'search_entry'):
             self.project_tracker.search_entry.focus_set()
 
     def _toggle_tracker_view(self):
         """Toggle the project tracker between list and grid view (T key)."""
         if not self._should_handle_keyboard():
+            return
+        # The Sandbox browser shares the right-hand slot and has its own
+        # list/grid toggle; T goes to whichever one is on screen.
+        sandbox = self._active_sandbox()
+        if sandbox is not None:
+            sandbox._toggle_view_mode()
             return
         tracker = getattr(self, 'project_tracker', None)
         if tracker is None or not hasattr(tracker, '_toggle_view_mode'):
@@ -523,6 +558,7 @@ class KeyboardNavigatorMixin:
             ("ops_grid", self.ops_grid, "operations", COLORS["bg_card"]),
             ("tools_section", self.category_panel_outer if hasattr(self, 'category_panel_outer') else None, "tools", COLORS["border"]),
             ("tracker_panel", self.tracker_panel if hasattr(self, 'tracker_panel') else None, "tracker", COLORS["bg_primary"]),
+            ("sandbox_panel", getattr(self, 'sandbox_browser_panel', None), "tracker", COLORS["bg_primary"]),
         ]
 
         for grid_name, grid_widget, panel_name, bg_color in grids:
@@ -631,5 +667,8 @@ class KeyboardNavigatorMixin:
             "tools": "Up/Down: navigate | Enter: run | G: folder | N: notes | W/S: panels",
             "tracker": "Arrows: navigate | Enter: open | T: list/grid | A: left panel | /: search",
         }
+        if self._active_sandbox() is not None:
+            hints["tracker"] = ("Arrows: navigate | Enter: open | T: list/grid | Alt+Up: up | "
+                                "Ctrl+E: show in Explorer | A: left panel | /: filter")
         if hasattr(self, 'header_hint_label'):
             self.header_hint_label.config(text=hints.get(self.focused_panel, ""))

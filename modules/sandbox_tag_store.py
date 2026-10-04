@@ -95,10 +95,32 @@ class SandboxTagStore:
             self.data["tags"].pop(key, None)
         self._save()
 
-    def all_tags(self) -> Dict[str, int]:
+    def set_tags_bulk(self, paths: List[str], tags: List[str]) -> None:
+        """Give every path in ``paths`` the same tag list with a single
+        write (used to tag all versions of a document at once)."""
+        cleaned = sorted({t.strip() for t in tags if t.strip()})
+        for path in paths:
+            key = self.normalize(path)
+            if cleaned:
+                self.data["tags"][key] = list(cleaned)
+            else:
+                self.data["tags"].pop(key, None)
+        self._save()
+
+    def all_tags(self, by_document: bool = False) -> Dict[str, int]:
         """tag -> number of items carrying it, most-used first isn't sorted
-        here; callers sort as needed."""
+        here; callers sort as needed. With ``by_document`` all versions of
+        a file (name_v002.ext ...) count once."""
         counts: Dict[str, int] = {}
+        if by_document:
+            from sandbox_versioning import group_key
+            docs: Dict[tuple, set] = {}
+            for path, tags in self.data["tags"].items():
+                docs.setdefault(group_key(path), set()).update(tags)
+            for tags in docs.values():
+                for tag in tags:
+                    counts[tag] = counts.get(tag, 0) + 1
+            return counts
         for tags in self.data["tags"].values():
             for tag in tags:
                 counts[tag] = counts.get(tag, 0) + 1

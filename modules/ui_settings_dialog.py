@@ -1548,6 +1548,41 @@ class SettingsDialog:
         var.trace_add("write", lambda *_a: render())
         return btn
 
+    @staticmethod
+    def _startup_dim(color, strength=0.55):
+        """Blend ``color`` toward the card background (strength = share of
+        the original colour kept) for muted-but-still-coloured buttons."""
+        def rgb(h):
+            h = h.lstrip("#")
+            return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+        fg, bg = rgb(color), rgb(COLORS["bg_card"])
+        return "#%02x%02x%02x" % tuple(
+            round(f * strength + b * (1 - strength)) for f, b in zip(fg, bg)
+        )
+
+    def _startup_btn(self, parent, text, command, color=None, size=9):
+        """Shared button look for this tab: dimmed colour that keeps its
+        meaning (green/red task toggle, blue test, amber import), neutral
+        grey for plain utilities."""
+        base = color or COLORS["bg_hover"]
+        return tk.Button(
+            parent, text=text, command=command,
+            bg=self._startup_dim(base), fg=COLORS["text_primary"],
+            activebackground=self._startup_dim(base, 0.8),
+            activeforeground=COLORS["text_primary"],
+            font=font.Font(family="Segoe UI", size=size),
+            relief=tk.FLAT, cursor="hand2", padx=12, pady=4,
+        )
+
+    # Pixel widths for the app-list columns (On, Label, Monitor, Desktop,
+    # Position, Timeout, Order); column 7 stretches and holds the row buttons.
+    _STARTUP_COLS = (46, 130, 68, 68, 108, 88, 48)
+
+    def _startup_grid_columns(self, frame):
+        for col, width in enumerate(self._STARTUP_COLS):
+            frame.columnconfigure(col, minsize=width)
+        frame.columnconfigure(len(self._STARTUP_COLS), weight=1)
+
     def _startup_build_timing_controls(self, parent):
         """Controls for the launcher's two desktop-switch delays plus
         where it lands when done (StartupLauncher.ps1):
@@ -1561,93 +1596,72 @@ class SettingsDialog:
         write straight into self._startup_cfg) so the global Save button
         picks them up with no extra sync step."""
         timing = self._startup_cfg.setdefault("timing", {})
+        parent.columnconfigure(1, weight=1)
 
-        row1 = tk.Frame(parent, bg=COLORS["bg_card"])
-        row1.pack(fill=tk.X, anchor="w")
+        def _bind(var, store, key, minimum):
+            def _cb(*_a):
+                try:
+                    store[key] = max(minimum, int(var.get()))
+                except (ValueError, tk.TclError):
+                    pass
+            var.trace_add("write", _cb)
 
-        tk.Label(
-            row1, text="Delay between desktop switches:",
-            font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        ).pack(side=tk.LEFT)
+        def _row(r, title, hint, widget_factory, unit=None):
+            tk.Label(
+                parent, text=title, anchor="w",
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["text_primary"], bg=COLORS["bg_card"],
+            ).grid(row=r, column=0, sticky="w", padx=(0, 12), pady=3)
+            ctl = tk.Frame(parent, bg=COLORS["bg_card"])
+            ctl.grid(row=r, column=1, sticky="w", pady=3)
+            widget_factory(ctl).pack(side=tk.LEFT)
+            if unit:
+                tk.Label(
+                    ctl, text=unit,
+                    font=font.Font(family="Segoe UI", size=9),
+                    fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+                ).pack(side=tk.LEFT, padx=(4, 0))
+            tk.Label(
+                ctl, text=hint,
+                font=font.Font(family="Segoe UI", size=8),
+                fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+            ).pack(side=tk.LEFT, padx=(16, 0))
 
         self._startup_between_desktops_var = tk.IntVar(
             value=int(timing.get("between_desktops_delay_ms", 1500))
         )
-
-        def _on_between_change(*_a):
-            try:
-                self._startup_cfg["timing"]["between_desktops_delay_ms"] = \
-                    max(0, int(self._startup_between_desktops_var.get()))
-            except (ValueError, tk.TclError):
-                pass
-        self._startup_between_desktops_var.trace_add("write", _on_between_change)
-
-        ttk.Spinbox(
-            row1, from_=0, to=10000, increment=100, width=8,
-            textvariable=self._startup_between_desktops_var,
-        ).pack(side=tk.LEFT, padx=(6, 4))
-
-        tk.Label(
-            row1, text="ms  (pause after placing a desktop's apps, before switching to the next)",
-            font=font.Font(family="Segoe UI", size=8),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        ).pack(side=tk.LEFT)
-
-        row2 = tk.Frame(parent, bg=COLORS["bg_card"])
-        row2.pack(fill=tk.X, anchor="w", pady=(4, 0))
-
-        tk.Label(
-            row2, text="Before returning to the landing desktop:",
-            font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        ).pack(side=tk.LEFT)
+        _bind(self._startup_between_desktops_var, self._startup_cfg["timing"],
+              "between_desktops_delay_ms", 0)
+        _row(0, "Between desktop switches",
+             "Pause after placing a desktop's apps",
+             lambda p: ttk.Spinbox(
+                 p, from_=0, to=10000, increment=100, width=8,
+                 textvariable=self._startup_between_desktops_var),
+             unit="ms")
 
         self._startup_final_delay_var = tk.IntVar(
             value=int(timing.get("final_init_delay_ms", 15000))
         )
-
-        def _on_final_delay_change(*_a):
-            try:
-                self._startup_cfg["timing"]["final_init_delay_ms"] = \
-                    max(0, int(self._startup_final_delay_var.get()))
-            except (ValueError, tk.TclError):
-                pass
-        self._startup_final_delay_var.trace_add("write", _on_final_delay_change)
-
-        ttk.Spinbox(
-            row2, from_=0, to=60000, increment=500, width=8,
-            textvariable=self._startup_final_delay_var,
-        ).pack(side=tk.LEFT, padx=(6, 4))
-
-        tk.Label(
-            row2, text="ms   Land on desktop:",
-            font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        ).pack(side=tk.LEFT, padx=(10, 0))
+        _bind(self._startup_final_delay_var, self._startup_cfg["timing"],
+              "final_init_delay_ms", 0)
+        _row(1, "Before returning",
+             "Wait after the last app is placed",
+             lambda p: ttk.Spinbox(
+                 p, from_=0, to=60000, increment=500, width=8,
+                 textvariable=self._startup_final_delay_var),
+             unit="ms")
 
         self._startup_final_desktop_var = tk.IntVar(
             value=int(self._startup_cfg.get("final_desktop", 1))
         )
-
-        def _on_final_desktop_change(*_a):
-            try:
-                self._startup_cfg["final_desktop"] = max(1, int(self._startup_final_desktop_var.get()))
-            except (ValueError, tk.TclError):
-                pass
-        self._startup_final_desktop_var.trace_add("write", _on_final_desktop_change)
-
-        ttk.Combobox(
-            row2, textvariable=self._startup_final_desktop_var,
-            values=list(self._STARTUP_DESKTOP_CHOICES),
-            state="readonly", width=4,
-        ).pack(side=tk.LEFT, padx=(4, 4))
-
-        tk.Label(
-            row2, text="(after every app is placed — was always desktop 1 before)",
-            font=font.Font(family="Segoe UI", size=8),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        ).pack(side=tk.LEFT)
+        _bind(self._startup_final_desktop_var, self._startup_cfg,
+              "final_desktop", 1)
+        _row(2, "Landing desktop",
+             "Desktop shown once everything is placed",
+             lambda p: ttk.Combobox(
+                 p, textvariable=self._startup_final_desktop_var,
+                 values=list(self._STARTUP_DESKTOP_CHOICES),
+                 state="readonly", width=6))
 
     def _build_startup_apps_tab(self, parent):
         try:
@@ -1686,115 +1700,97 @@ class SettingsDialog:
             fg=COLORS["text_primary"], bg=COLORS["bg_primary"],
         ).pack(side=tk.LEFT)
 
-        # ----- Dependencies panel -----
-        # Compact view of what the launcher needs to work — kept in this
-        # tab (not a separate Dependencies tab) because every dep here
-        # exists solely to enable this feature.
-        self._startup_deps_frame = tk.LabelFrame(
-            parent, text=" Dependencies ",
-            font=font.Font(family="Segoe UI", size=10, weight="bold"),
-            fg=COLORS["text_primary"], bg=COLORS["bg_card"],
-            padx=10, pady=6,
-        )
-        self._startup_deps_frame.pack(fill=tk.X, padx=20, pady=(6, 4))
-        self._startup_render_deps()
+        _btn = self._startup_btn
 
-        # ----- Actions -----
-        # Boxless — sits between Dependencies and Desktop Transition
-        # Timing rather than in its own panel. Even gaps between buttons
-        # (padx=(0, 8), none trailing) since there's no frame padding to
-        # rely on here. Colors carry meaning: green/red for the task
-        # toggle mirror the per-app ON/OFF style below, blue marks the
-        # primary "try it" action, amber flags the one action that can
-        # overwrite the app list, and grey is reserved for the truly
-        # inert utility.
-        actions_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
-        actions_frame.pack(fill=tk.X, padx=20, pady=(4, 4))
-
-        self._startup_task_btn = tk.Button(
-            actions_frame, text="...",
-            command=self._startup_toggle_task,
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
-        )
-        self._startup_task_btn.pack(side=tk.LEFT, padx=(0, 8))
-
-        tk.Button(
-            actions_frame, text="Test now",
-            command=self._startup_test_now,
-            bg=COLORS["accent_dark"], fg="#ffffff",
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
-        ).pack(side=tk.LEFT, padx=(0, 8))
-
-        tk.Button(
-            actions_frame, text="Refresh paths",
-            command=self._startup_refresh_paths,
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
-        ).pack(side=tk.LEFT, padx=(0, 8))
-
-        self._startup_import_btn = tk.Button(
-            actions_frame, text="Import legacy Startup folder",
-            command=self._startup_import_legacy,
-            bg=COLORS["warning"], fg=COLORS["bg_primary"],
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
-        )
-        self._startup_import_btn.pack(side=tk.LEFT)
+        # Launcher-level actions sit on the master toggle row: they act
+        # on the scheduled task / whole launcher, not on one app.
+        self._startup_task_btn = _btn(top, "...", self._startup_toggle_task)
+        _btn(top, "Test now", self._startup_test_now,
+             COLORS["accent_dark"]).pack(side=tk.RIGHT)
+        self._startup_task_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
         # ----- Desktop transition timing -----
         timing_frame = tk.LabelFrame(
             parent, text=" Desktop Transition Timing ",
-            font=font.Font(family="Segoe UI", size=10, weight="bold"),
+            font=font.Font(family="Segoe UI", size=11, weight="bold"),
             fg=COLORS["text_primary"], bg=COLORS["bg_card"],
-            padx=10, pady=6,
+            padx=15, pady=8,
         )
         timing_frame.pack(fill=tk.X, padx=20, pady=(6, 4))
         self._startup_build_timing_controls(timing_frame)
 
-        # ----- Monitor strip -----
-        mon_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
-        mon_frame.pack(fill=tk.X, padx=20, pady=(4, 4))
+        # ----- Dependencies panel -----
+        # Compact view of what the launcher needs to work — kept in this
+        # tab (not a separate Dependencies tab) because every dep here
+        # exists solely to enable this feature. Packed with side=tk.BOTTOM
+        # BEFORE the apps box so the apps list (which expands) eats the
+        # slack above it instead of pushing this off-screen.
+        self._startup_deps_frame = tk.LabelFrame(
+            parent, text=" Dependencies ",
+            font=font.Font(family="Segoe UI", size=11, weight="bold"),
+            fg=COLORS["text_primary"], bg=COLORS["bg_card"],
+            padx=15, pady=8,
+        )
+        self._startup_deps_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=(4, 10))
+        self._startup_render_deps()
 
-        if not self._startup_monitors:
-            mon_text = "Monitors: detection unavailable (non-Windows or display API failed)"
-        else:
-            parts = []
-            for m in self._startup_monitors:
-                tag = " primary" if m["primary"] else ""
-                parts.append(
-                    f"  [{m['index']}] {m['width']}x{m['height']} @ ({m['x']},{m['y']}){tag}"
-                )
-            mon_text = "Monitors:" + "  ".join(parts)
-        tk.Label(
-            mon_frame, text=mon_text,
-            font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_primary"],
-            anchor="w", justify="left",
-        ).pack(anchor="w")
-
-        # ----- Add-app footer -----
-        # Packed BEFORE the apps list with side=tk.BOTTOM so the apps
-        # list (which expands) eats the slack ABOVE it. Same trick the
-        # bottom Save/Cancel button row uses — without it the footer
-        # gets pushed off-screen whenever the dialog is shorter than
-        # the unconstrained app list would be.
-        add_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
-        add_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=(4, 10))
-
-        # ----- Apps list (scrollable, takes remaining vertical space) -----
+        # ----- Apps box -----
+        # One card for everything that concerns the app list: monitor info
+        # and list-level actions on top, the scrollable list in the middle,
+        # the add controls underneath.
         list_frame = tk.LabelFrame(
             parent, text=" Apps ",
-            font=font.Font(family="Segoe UI", size=10, weight="bold"),
+            font=font.Font(family="Segoe UI", size=11, weight="bold"),
             fg=COLORS["text_primary"], bg=COLORS["bg_card"],
-            padx=8, pady=6,
+            padx=15, pady=8,
         )
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(4, 4))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(6, 4))
 
-        canvas = tk.Canvas(list_frame, bg=COLORS["bg_card"], highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        # Header: monitors (left) + list actions (right)
+        apps_hdr = tk.Frame(list_frame, bg=COLORS["bg_card"])
+        apps_hdr.pack(fill=tk.X, pady=(0, 6))
+
+        if not self._startup_monitors:
+            mon_text = "Monitors: detection unavailable"
+        else:
+            mon_text = "Monitors:  " + "   ".join(
+                f"[{m['index']}] {m['width']}x{m['height']}"
+                + (" primary" if m["primary"] else "")
+                for m in self._startup_monitors
+            )
+        tk.Label(
+            apps_hdr, text=mon_text,
+            font=font.Font(family="Segoe UI", size=9),
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        self._startup_import_btn = _btn(
+            apps_hdr, "Import legacy Startup folder",
+            self._startup_import_legacy, COLORS["warning"])
+        self._startup_import_btn.pack(side=tk.RIGHT)
+        self._startup_attach_tooltip(
+            self._startup_import_btn,
+            "Import from your old Startup folder",
+            "Scans the Desktop1, Desktop2, … subfolders of your legacy "
+            "Startup folder and turns each shortcut into an app entry, "
+            "using the folder number as its virtual desktop.\n\n"
+            "You'll see a preview and choose to add or replace before "
+            "anything changes.",
+        )
+        _btn(apps_hdr, "Refresh paths",
+             self._startup_refresh_paths).pack(side=tk.RIGHT, padx=(0, 6))
+
+        # Footer (packed before the list so the list expands above it)
+        add_frame = tk.Frame(list_frame, bg=COLORS["bg_card"])
+        add_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Frame(list_frame, height=1, bg=COLORS["border"]).pack(
+            side=tk.BOTTOM, fill=tk.X, pady=(6, 8))
+
+        list_body = tk.Frame(list_frame, bg=COLORS["bg_card"])
+        list_body.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(list_body, bg=COLORS["bg_card"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_body, orient="vertical", command=canvas.yview)
         self._startup_list_inner = tk.Frame(canvas, bg=COLORS["bg_card"])
 
         self._startup_list_inner.bind(
@@ -1828,37 +1824,26 @@ class SettingsDialog:
             self._startup_choice_map[label] = name
 
         tk.Label(
-            add_frame, text="Add workstation app:",
+            add_frame, text="Add app:",
             font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_primary"],
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
         ).pack(side=tk.LEFT)
 
         self._startup_add_combo = ttk.Combobox(
             add_frame, values=choice_labels, state="readonly", width=32,
         )
-        self._startup_add_combo.pack(side=tk.LEFT, padx=(6, 4))
+        self._startup_add_combo.pack(side=tk.LEFT, padx=(8, 6))
 
-        tk.Button(
-            add_frame, text="Add",
-            command=self._startup_add_workstation,
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-            font=font.Font(family="Segoe UI", size=9),
-            relief=tk.FLAT, cursor="hand2", padx=10, pady=2,
-        ).pack(side=tk.LEFT)
+        _btn(add_frame, "Add", self._startup_add_workstation).pack(side=tk.LEFT)
 
         tk.Label(
-            add_frame, text="    or    ",
+            add_frame, text="or",
             font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_primary"],
-        ).pack(side=tk.LEFT)
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+        ).pack(side=tk.LEFT, padx=10)
 
-        tk.Button(
-            add_frame, text="Browse for file...",
-            command=self._startup_browse_custom,
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-            font=font.Font(family="Segoe UI", size=9),
-            relief=tk.FLAT, cursor="hand2", padx=10, pady=2,
-        ).pack(side=tk.LEFT)
+        _btn(add_frame, "Browse for file...",
+             self._startup_browse_custom).pack(side=tk.LEFT)
 
         # Initial render
         self._startup_update_task_button()
@@ -1887,12 +1872,8 @@ class SettingsDialog:
             fg=COLORS["warning"] if n_req_missing else COLORS["text_secondary"],
             bg=COLORS["bg_card"],
         ).pack(side=tk.LEFT)
-        tk.Button(
-            hdr, text="Recheck",
-            command=self._startup_render_deps,
-            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-            font=font.Font(family="Segoe UI", size=9),
-            relief=tk.FLAT, cursor="hand2", padx=10, pady=2,
+        self._startup_btn(
+            hdr, "Recheck", self._startup_render_deps,
         ).pack(side=tk.RIGHT)
 
         for dep in deps:
@@ -1912,12 +1893,9 @@ class SettingsDialog:
         # Install button on the right first so the detail label can fill
         # the remaining space and wrap cleanly.
         if dep.get("install_label") and dep.get("install_action") and not ok:
-            tk.Button(
-                row, text=dep["install_label"],
-                command=lambda a=dep["install_action"]: self._startup_run_install(a),
-                bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
-                font=font.Font(family="Segoe UI", size=9),
-                relief=tk.FLAT, cursor="hand2", padx=10, pady=2,
+            self._startup_btn(
+                row, dep["install_label"],
+                lambda a=dep["install_action"]: self._startup_run_install(a),
             ).pack(side=tk.RIGHT, padx=(4, 0))
         elif dep.get("install_label") and dep.get("install_action") and ok:
             # Already installed but offer a Reinstall path (useful for the
@@ -1984,18 +1962,18 @@ class SettingsDialog:
             ).pack(anchor="nw", padx=4, pady=8)
             return
 
-        # Header row
+        # Header row — shares _STARTUP_COLS with the rows so columns line up
         hdr = tk.Frame(self._startup_list_inner, bg=COLORS["bg_card"])
         hdr.pack(fill=tk.X, padx=2, pady=(0, 4))
-        for text, width in [
-            ("On", 3), ("Label", 22), ("Monitor", 8), ("Desktop", 8),
-            ("Position", 12), ("Timeout", 9), ("Order", 8),
-        ]:
+        self._startup_grid_columns(hdr)
+        for col, text in enumerate(
+            ["On", "Label", "Monitor", "Desktop", "Position", "Timeout", "Order"]
+        ):
             tk.Label(
-                hdr, text=text, width=width, anchor="w",
+                hdr, text=text, anchor="w",
                 font=font.Font(family="Segoe UI", size=9, weight="bold"),
                 fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-            ).pack(side=tk.LEFT)
+            ).grid(row=0, column=col, sticky="w")
 
         monitor_count = max(1, len(self._startup_monitors) or 1)
         monitor_choices = list(range(1, max(monitor_count, 1) + 1))
@@ -2034,7 +2012,8 @@ class SettingsDialog:
             "timeout": timeout_var,
         })
 
-        self._startup_make_toggle(row, enabled_var).pack(side=tk.LEFT, padx=(2, 6))
+        self._startup_grid_columns(row)
+        self._startup_make_toggle(row, enabled_var).grid(row=0, column=0, sticky="w")
 
         label = app.get("label") or "(unnamed)"
         path = app.get("resolved_path") or app.get("custom_path") or ""
@@ -2042,28 +2021,28 @@ class SettingsDialog:
         label_color = COLORS["text_primary"] if path_ok else "#f59e0b"  # amber when missing
         tooltip = path or "(unresolved path)"
         lbl = tk.Label(
-            row, text=label, width=22, anchor="w",
+            row, text=label, anchor="w",
             font=font.Font(family="Segoe UI", size=10),
             fg=label_color, bg=COLORS["bg_card"],
         )
-        lbl.pack(side=tk.LEFT)
+        lbl.grid(row=0, column=1, sticky="w")
         # Lightweight "tooltip": click the label to print path to status — keep simple
         lbl.bind("<Button-1>", lambda e, p=tooltip: messagebox.showinfo("Path", p, parent=self.dialog))
 
         ttk.Combobox(
             row, textvariable=monitor_var, values=monitor_choices,
             state="readonly", width=4,
-        ).pack(side=tk.LEFT, padx=(4, 6))
+        ).grid(row=0, column=2, sticky="w")
 
         ttk.Combobox(
             row, textvariable=desktop_var, values=list(self._STARTUP_DESKTOP_CHOICES),
             state="readonly", width=4,
-        ).pack(side=tk.LEFT, padx=(4, 6))
+        ).grid(row=0, column=3, sticky="w")
 
         ttk.Combobox(
             row, textvariable=position_var, values=list(self._STARTUP_POSITIONS),
             state="readonly", width=10,
-        ).pack(side=tk.LEFT, padx=(4, 6))
+        ).grid(row=0, column=4, sticky="w")
 
         # How long the launcher waits for this app's window before giving
         # up on placing it — was a hardcoded 2500ms (browsers) / 5000ms
@@ -2072,36 +2051,32 @@ class SettingsDialog:
         ttk.Spinbox(
             row, from_=500, to=30000, increment=500, width=7,
             textvariable=timeout_var,
-        ).pack(side=tk.LEFT, padx=(4, 6))
+        ).grid(row=0, column=5, sticky="w")
 
         # Order is implicit (list index within its desktop); show order
         # number for clarity but the buttons drive it.
-        order_label = tk.Label(
-            row, text=str(app.get("launch_order", 0)), width=4, anchor="w",
+        tk.Label(
+            row, text=str(app.get("launch_order", 0)), anchor="w",
             font=font.Font(family="Segoe UI", size=9),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
-        )
-        order_label.pack(side=tk.LEFT, padx=(4, 4))
+        ).grid(row=0, column=6, sticky="w")
 
         # Right-side action buttons
-        tk.Button(
-            row, text="×", command=lambda i=idx: self._startup_remove(i),
-            bg=COLORS["bg_card"], fg="#ef4444",
-            font=font.Font(family="Segoe UI", size=11, weight="bold"),
-            relief=tk.FLAT, cursor="hand2", width=2, padx=0, pady=0,
-        ).pack(side=tk.RIGHT, padx=(2, 0))
-        tk.Button(
-            row, text="↓", command=lambda i=idx: self._startup_move(i, +1),
-            bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", width=2, padx=0, pady=0,
-        ).pack(side=tk.RIGHT)
-        tk.Button(
-            row, text="↑", command=lambda i=idx: self._startup_move(i, -1),
-            bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
-            font=font.Font(family="Segoe UI", size=10),
-            relief=tk.FLAT, cursor="hand2", width=2, padx=0, pady=0,
-        ).pack(side=tk.RIGHT)
+        actions = tk.Frame(row, bg=COLORS["bg_card"])
+        actions.grid(row=0, column=7, sticky="e")
+        for text, fg, cmd, size in (
+            ("↑", COLORS["text_secondary"], lambda i=idx: self._startup_move(i, -1), 10),
+            ("↓", COLORS["text_secondary"], lambda i=idx: self._startup_move(i, +1), 10),
+            ("×", "#ef4444", lambda i=idx: self._startup_remove(i), 11),
+        ):
+            tk.Button(
+                actions, text=text, command=cmd,
+                bg=COLORS["bg_card"], fg=fg,
+                activebackground=COLORS["bg_card"], activeforeground=fg,
+                font=font.Font(family="Segoe UI", size=size,
+                               weight="bold" if text == "×" else "normal"),
+                relief=tk.FLAT, cursor="hand2", width=2, padx=0, pady=0,
+            ).pack(side=tk.LEFT)
 
     # ---------- List mutations ----------
 
@@ -2191,31 +2166,156 @@ class SettingsDialog:
         self._startup_renumber_orders()
         self._startup_render_list()
 
+    def _startup_attach_tooltip(self, widget, title, body, delay_ms=400):
+        """Small dark info card that appears under ``widget`` after a short
+        hover and disappears on leave/click."""
+        state = {"job": None, "tip": None}
+
+        def hide(_e=None):
+            if state["job"]:
+                widget.after_cancel(state["job"])
+                state["job"] = None
+            if state["tip"]:
+                state["tip"].destroy()
+                state["tip"] = None
+
+        def show():
+            state["job"] = None
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.attributes("-topmost", True)
+            card = tk.Frame(
+                tip, bg=COLORS["bg_primary"],
+                highlightbackground=COLORS["border"], highlightthickness=1,
+                padx=12, pady=10,
+            )
+            card.pack()
+            tk.Label(
+                card, text=title, anchor="w", justify="left",
+                font=font.Font(family="Segoe UI", size=9, weight="bold"),
+                fg=COLORS["text_primary"], bg=COLORS["bg_primary"],
+            ).pack(anchor="w")
+            tk.Label(
+                card, text=body, anchor="w", justify="left", wraplength=340,
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["text_secondary"], bg=COLORS["bg_primary"],
+            ).pack(anchor="w", pady=(4, 0))
+            tip.update_idletasks()
+            # Right-align under the widget so it stays inside the dialog.
+            x = widget.winfo_rootx() + widget.winfo_width() - tip.winfo_reqwidth()
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+            tip.wm_geometry(f"+{max(0, x)}+{y}")
+            state["tip"] = tip
+
+        def schedule(_e=None):
+            hide()
+            state["job"] = widget.after(delay_ms, show)
+
+        widget.bind("<Enter>", schedule, add="+")
+        widget.bind("<Leave>", hide, add="+")
+        widget.bind("<ButtonPress>", hide, add="+")
+
     def _startup_import_legacy(self):
         sam = self._sam
+        root = str(sam._legacy_startup_root())
         discovered = sam.find_importable_shortcuts()
         if not discovered:
             messagebox.showinfo(
                 "Nothing to import",
-                "No DesktopN subfolders or shortcuts found under "
-                f"{os.path.expanduser('~')}\\Startup.",
+                f"No shortcuts found to import.\n\n"
+                f"Expected a folder layout like:\n"
+                f"  {root}\\Desktop1\\MyApp.lnk\n"
+                f"  {root}\\Desktop2\\Other.lnk\n\n"
+                "Each DesktopN subfolder maps to virtual desktop N.",
                 parent=self.dialog,
             )
             return
-        existing = len(self._startup_cfg.get("apps", []))
-        msg = (
-            f"Found {len(discovered)} shortcut(s) under your legacy Startup folder.\n\n"
-            "Replace the current list, or append to it?\n\n"
-            f"  Yes  = REPLACE (current list of {existing} will be discarded)\n"
-            "  No   = APPEND\n"
-            "  Cancel = do nothing"
-        )
-        choice = messagebox.askyesnocancel("Import startup shortcuts", msg, parent=self.dialog)
+        choice = self._startup_import_dialog(root, discovered)
         if choice is None:
             return
-        sam.import_existing_shortcuts(self._startup_cfg, replace=bool(choice))
+        sam.import_existing_shortcuts(self._startup_cfg, replace=(choice == "replace"))
         self._startup_renumber_orders()
         self._startup_render_list()
+
+    def _startup_import_dialog(self, root, discovered):
+        """Explains what the import does, previews what was found per
+        desktop, and offers Add / Replace / Cancel as labelled buttons
+        (instead of a Yes/No/Cancel that needs reading the fine print).
+        Returns "append", "replace" or None."""
+        existing = len(self._startup_cfg.get("apps", []))
+        result = {"value": None}
+
+        dlg = tk.Toplevel(self.dialog)
+        dlg.title("Import legacy Startup folder")
+        dlg.configure(bg=COLORS["bg_primary"])
+        dlg.transient(self.dialog)
+        dlg.resizable(False, False)
+
+        body = tk.Frame(dlg, bg=COLORS["bg_primary"], padx=20, pady=16)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            body, text="Import from your old Startup folder",
+            font=font.Font(family="Segoe UI", size=11, weight="bold"),
+            fg=COLORS["text_primary"], bg=COLORS["bg_primary"],
+        ).pack(anchor="w")
+        tk.Label(
+            body, justify="left", anchor="w", wraplength=420,
+            text=f"Found {len(discovered)} shortcut(s) in {root}. "
+                 "Each DesktopN subfolder becomes virtual desktop N; "
+                 "you can fine-tune monitor, position and timeout afterwards.",
+            font=font.Font(family="Segoe UI", size=9),
+            fg=COLORS["text_secondary"], bg=COLORS["bg_primary"],
+        ).pack(anchor="w", pady=(4, 10))
+
+        preview = tk.Frame(body, bg=COLORS["bg_card"], padx=12, pady=8)
+        preview.pack(fill=tk.X)
+        by_desktop: dict = {}
+        for entry in discovered:
+            by_desktop.setdefault(int(entry.get("virtual_desktop") or 1), []).append(
+                entry.get("label") or "(unnamed)")
+        for vd in sorted(by_desktop):
+            row = tk.Frame(preview, bg=COLORS["bg_card"])
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(
+                row, text=f"Desktop {vd}", width=10, anchor="w",
+                font=font.Font(family="Segoe UI", size=9, weight="bold"),
+                fg=COLORS["text_primary"], bg=COLORS["bg_card"],
+            ).pack(side=tk.LEFT, anchor="n")
+            tk.Label(
+                row, text=", ".join(by_desktop[vd]), anchor="w",
+                justify="left", wraplength=320,
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def finish(value):
+            result["value"] = value
+            dlg.destroy()
+
+        btns = tk.Frame(body, bg=COLORS["bg_primary"])
+        btns.pack(fill=tk.X, pady=(14, 0))
+        self._startup_btn(
+            btns, "Cancel", lambda: finish(None),
+        ).pack(side=tk.RIGHT)
+        self._startup_btn(
+            btns, f"Replace current list ({existing})" if existing else "Replace current list",
+            lambda: finish("replace"), COLORS["error"],
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+        self._startup_btn(
+            btns, "Add to current list", lambda: finish("append"),
+            COLORS["accent_dark"],
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
+        dlg.protocol("WM_DELETE_WINDOW", lambda: finish(None))
+        dlg.update_idletasks()
+        x = self.dialog.winfo_rootx() + (self.dialog.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self.dialog.winfo_rooty() + (self.dialog.winfo_height() - dlg.winfo_reqheight()) // 3
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dlg.grab_set()
+        dlg.focus_set()
+        self.dialog.wait_window(dlg)
+        return result["value"]
 
     def _startup_refresh_paths(self):
         """Re-resolve every entry's resolved_path. Useful after installing
@@ -2228,13 +2328,15 @@ class SettingsDialog:
     def _startup_update_task_button(self):
         installed = self._sam.is_task_installed()
         # Green = safe/constructive (nothing installed yet); red = this
-        # click removes the logon automation — same color language as the
-        # per-app ON/OFF toggle.
+        # click removes the logon automation. Both dimmed to sit quietly.
         if installed:
-            text, bg = "Uninstall scheduled task", COLORS["error"]
+            text, color = "Uninstall scheduled task", COLORS["error"]
         else:
-            text, bg = "Install scheduled task", COLORS["success"]
-        self._startup_task_btn.config(text=text, bg=bg, fg="#ffffff")
+            text, color = "Install scheduled task", COLORS["success"]
+        self._startup_task_btn.config(
+            text=text, bg=self._startup_dim(color),
+            activebackground=self._startup_dim(color, 0.75),
+        )
 
     def _startup_toggle_task(self):
         sam = self._sam
