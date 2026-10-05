@@ -342,6 +342,13 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "mode_switch": True,
                     },
                     {
+                        "key": "traktor_drive_sync",
+                        "name": "Traktor Drive Sync",
+                        "module": "PipelineScript_Audio_TraktorDriveSync",
+                        "description": "One button: copy music, XML and Traktor playlists to a drive, and import them on another machine with paths adjusted there",
+                        "icon": "💾",
+                    },
+                    {
                         "key": "poweramp_sync",
                         "name": "Sync to PowerAmp",
                         "module": "PipelineScript_Audio_PowerAmpSync",

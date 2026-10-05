@@ -2031,16 +2031,22 @@ class TraktorPlaylistSyncUI:
 # ============================================================================
 
 def run_headless_export(config_manager) -> bool:
+    return export_playlist_file(config_manager) is not None
+
+
+def export_playlist_file(config_manager, output_dir: Optional[str] = None) -> Optional[str]:
+    """Export the saved playlist selection to a PlaylistSync_*.nml and return
+    its path (None on failure). `output_dir` overrides the saved export folder."""
     settings = config_manager.settings
     machine_profile = (MachineProfile.from_dict(settings.this_machine) if settings.this_machine
                         else MachineProfile(name=socket.gethostname()))
 
     if not settings.collection_nml_path or not os.path.exists(settings.collection_nml_path):
         logger.error("Export: collection.nml not configured or missing — open the tool to set it up.")
-        return False
+        return None
     if not machine_profile.is_configured:
         logger.error("Export: 'This Machine' profile isn't set up — open the tool to configure it.")
-        return False
+        return None
 
     tree = load_nml(settings.collection_nml_path)
     root_el = tree.getroot()
@@ -2048,7 +2054,7 @@ def run_headless_export(config_manager) -> bool:
     playlists_root = get_playlists_root_node(root_el)
     if collection_el is None or playlists_root is None:
         logger.error("Export: collection.nml is missing <COLLECTION> or <PLAYLISTS>.")
-        return False
+        return None
     entry_index = build_entry_index(collection_el)
     all_nodes = walk_playlist_nodes(playlists_root)
 
@@ -2059,9 +2065,9 @@ def run_headless_export(config_manager) -> bool:
         nodes = list(all_nodes)  # Default (Auto) = everything, including playlists created since the last save
     if not nodes:
         logger.error("Export: no playlists/smart lists selected — open the tool to choose some first.")
-        return False
+        return None
 
-    output_dir = settings.export_output_dir or default_export_dir(settings.collection_nml_path)
+    output_dir = output_dir or settings.export_output_dir or default_export_dir(settings.collection_nml_path)
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in machine_profile.name) or "machine"
@@ -2072,7 +2078,7 @@ def run_headless_export(config_manager) -> bool:
         write_nml(export_root, output_path)
     except Exception as e:
         logger.error(f"Export failed: {e}")
-        return False
+        return None
 
     logger.info(f"Exported to: {output_path}")
     logger.info(f"Playlists exported: {stats.playlists_exported}, smart lists: {stats.smartlists_exported}, "
@@ -2085,7 +2091,7 @@ def run_headless_export(config_manager) -> bool:
                        f"COLLECTION entry and were dropped.")
 
     config_manager.update_settings(last_mode="export")
-    return True
+    return output_path
 
 
 def run_headless_import(config_manager) -> bool:
