@@ -8,6 +8,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **One-click tasks run in their own console window** — on Windows, a hub
+  button that runs a task directly (Sync to Traktor, Sync Traktor Playlists)
+  now opens a dedicated, titled console window with that task's live
+  progress, so tasks no longer share one log. The window closes 10 seconds
+  after a successful run (press a key to keep it) and stays open on an error
+  until a key is pressed; the hub status line still reports started/finished.
+  Both tasks first state whether they are replaying an export or an import
+  (the mode last used), since an import changes Traktor's `collection.nml`.
+  Change `CONSOLE_CLOSE_AFTER_SECONDS` in `modules/ui_script_runner.py`
+  (0 = close immediately, negative = always wait).
+- **Sync to Traktor direct run now logs its full progress** — every step line
+  that previously only went to the hidden window (copying, conversions,
+  kept/moved files, the playlist doctor's findings) is also written to the
+  task's log and console. In a direct run the playlist doctor never opens a
+  window: it resolves dead entries for that sync only and logs them.
+- **MusicBee Cleanup** — new standalone Audio tool (no other tool or service
+  needed) to keep MusicBee playlists clean. Scans the playlist files against
+  MusicBee's iTunes XML and lists, per playlist: dead entries (replaced with
+  the real library track when exactly one matches), the same file listed more
+  than once (extra copies removed), and the same song present as several
+  different files (you choose which to drop; at least one always stays).
+  Safe fixes start ticked, anything that removes a song starts unticked.
+  Applying makes a backup of every changed playlist first, refuses while
+  MusicBee is running, and only ever edits playlist files. The Library tab
+  reports tracks whose file is missing and songs that exist as several files
+  (report only, CSV export); music files and MusicBee's library database are
+  never touched.
+- **MusicBee playlist doctor** — Traktor Sync and PowerAmp Sync now check the
+  selected MusicBee playlists before syncing. Playlist entries that still point
+  at the Soulseek staging folder (moved to the library since) are invisible in
+  MusicBee's iTunes XML, so those tracks silently missed their playlists. The
+  doctor matches each dead entry to the real library track by artist and title
+  (only when exactly one track matches) and includes it for this sync; an
+  optional "Repair playlists" button rewrites the `.mbp` files (backup in
+  `%LOCALAPPDATA%\PipelineManager\playlist_backups`, refused while MusicBee is
+  running). A "Check Playlists" button runs the same scan on demand, and
+  `python modules/shared_musicbee_playlists.py scan|repair [--apply]` does it
+  from the command line (dry run by default). New settings:
+  `playlist_doctor_enabled`, `musicbee_playlists_dir`, `staging_roots`.
+- **Traktor Sync keeps what Traktor still uses** — the "Delete removed tracks"
+  step no longer deletes a DJ Library file that a Traktor playlist (e.g.
+  "Preparation") still references, and moves everything else to
+  `DJ Library\_Removed\<date>` instead of deleting it. Files a Traktor playlist
+  references that are missing on disk (for example after a track rolled out of
+  "Recently Added") are restored from MusicBee on the next sync. New settings:
+  `protect_traktor_referenced`, `quarantine_removed`, `traktor_collection_path`.
 - **Open in Darktable** — new Photo project action (first in the list, above
   Open export in IrfanView and RAW Cleanup) that imports the pictures directly in the
   project's root folder into Darktable — no subfolders, so `_export` stays

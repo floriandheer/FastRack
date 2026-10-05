@@ -34,6 +34,9 @@ from tkinter import ttk, filedialog, messagebox
 from shared_window_icon import apply_category_icon
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 from shared_appdata import get_appdata_path
+from shared_playlist_doctor_dialog import (
+    apply_extra_ids, run_preflight as run_doctor_preflight, show_check as show_doctor_check,
+)
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -113,6 +116,10 @@ class SyncSettings:
     adb_podcasts_path: str = "/storage/emulated/0/Podcasts/"
     extras_skip_existing: bool = True
     extras_mirror: bool = False
+    # Playlist doctor: resolve dead MusicBee playlist entries before syncing
+    playlist_doctor_enabled: bool = True
+    musicbee_playlists_dir: str = ""
+    staging_roots: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -844,6 +851,7 @@ class PowerAmpSyncApp:
         ttk.Button(sel_btn_frame, text="Select All", command=self._select_all_playlists).grid(row=0, column=0, padx=5)
         ttk.Button(sel_btn_frame, text="Clear All", command=self._clear_all_playlists).grid(row=0, column=1, padx=5)
         ttk.Button(sel_btn_frame, text="Auto Select", command=self._auto_select_playlists).grid(row=0, column=2, padx=5)
+        ttk.Button(sel_btn_frame, text="Check Playlists", command=self._check_playlists).grid(row=0, column=3, padx=5)
 
         current_row += 1
 
@@ -2468,6 +2476,10 @@ TROUBLESHOOTING
             logger.error(f"Error writing playlist {playlist_name}: {e}")
             return False, 0
 
+    def _check_playlists(self) -> None:
+        """Scan every MusicBee playlist for entries whose file no longer exists."""
+        show_doctor_check(self.root, self.itunes_root, self.itunes_xml_var.get(), self.config_manager.settings)
+
     def _start_sync_playlists_only(self) -> None:
         """Start sync in playlists-only mode."""
         self.sync_mode_var.set("playlists_only")
@@ -2485,6 +2497,14 @@ TROUBLESHOOTING
         if not selected_playlists:
             messagebox.showwarning("No Selection", "Please select at least one playlist to sync.")
             return
+
+        # Dead playlist entries are invisible in the iTunes XML; let the doctor resolve them for this run.
+        doctor_extras = run_doctor_preflight(
+            self.root, self.itunes_root, self.itunes_xml_var.get(), selected_playlists,
+            self.config_manager.settings)
+        if doctor_extras is None:
+            return
+        apply_extra_ids(self.playlist_data, doctor_extras)
 
         # Determine sync target mode
         is_adb_mode = self.sync_target_var.get() == "adb"

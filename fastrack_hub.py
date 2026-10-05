@@ -2450,16 +2450,26 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         if direct_run:
             args.append("--auto-run")
 
-        # Run script in a separate thread
-        threading.Thread(
-            target=lambda: ScriptRunner.run_script(
+        # One-click (direct-run) tasks get their own console window on Windows, so each task's live
+        # progress stays separate; everything else keeps piping its output into the hub log.
+        if direct_run and sys.platform == "win32":
+            runner = lambda: ScriptRunner.run_in_console(
+                script_path,
+                args=args,
+                env_vars=script_config.get("env_vars", {}),
+                callback=self.update_status,
+                title=f"FastRack - {script_data['name']}"
+            )
+        else:
+            runner = lambda: ScriptRunner.run_script(
                 script_path,
                 args=args,
                 env_vars=script_config.get("env_vars", {}),
                 callback=self.update_status
-            ),
-            daemon=True
-        ).start()
+            )
+
+        # Run script in a separate thread
+        threading.Thread(target=runner, daemon=True).start()
 
 # ====================================
 # MAIN APPLICATION ENTRY POINT

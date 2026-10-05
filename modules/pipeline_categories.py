@@ -282,6 +282,13 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "icon": "☁️",
             },
             {
+                "key": "musicbee_cleanup",
+                "name": "MusicBee Cleanup",
+                "module": "PipelineScript_Audio_MusicBeeCleanup",
+                "description": "Fix dead and duplicate MusicBee playlist entries; report missing and duplicate library files",
+                "icon": "🧹",
+            },
+            {
                 "key": "format_genres",
                 "name": "Format Genres",
                 "module": "PipelineScript_Audio_FormatGenres",

@@ -110,6 +110,8 @@ class SyncSettings:
     active_preset: str = ""
     last_mode: str = ""
     import_file_path: str = ""
+    import_source_dir: str = ""      # drive/folder searched for the newest export
+    import_keep_both: bool = False   # import changed playlists as copies, don't replace
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -609,6 +611,104 @@ def merge_node_into_collection(node: PlaylistNode, export_entry_index: Dict[str,
         else:
             stats.smartlists_added += 1
     subnodes.set("COUNT", str(len(subnodes.findall("NODE"))))
+
+
+@dataclass
+class PlaylistDiff:
+    """How an incoming playlist compares with the same-named one on this machine."""
+    status: str            # "new" | "identical" | "changed" | "reordered"
+    added: int = 0         # tracks only in the incoming playlist
+    removed: int = 0       # tracks only in the existing playlist
+
+    @property
+    def label(self) -> str:
+        if self.status == "new":
+            return "New"
+        if self.status == "identical":
+            return "Identical"
+        if self.status == "reordered":
+            return "Reordered"
+        if self.added or self.removed:
+            return f"Changed (+{self.added} / -{self.removed})"
+        return "Changed"
+
+
+def _canonical(el: ET.Element) -> Tuple:
+    return (el.tag, tuple(sorted(el.attrib.items())), tuple(_canonical(c) for c in el))
+
+
+def compare_playlist(incoming: PlaylistNode, existing: Optional[PlaylistNode],
+                     src: MachineProfile, dst: MachineProfile) -> PlaylistDiff:
+    """Compare an incoming node against this machine's node of the same name.
+
+    Incoming track keys are rewritten to this machine's library root first, so
+    the same track on both machines counts as the same track. Tracks outside
+    the source's library root are ignored - the import drops them too."""
+    if existing is None:
+        return PlaylistDiff("new")
+
+    if incoming.kind != "PLAYLIST" or existing.kind != "PLAYLIST":
+        same = incoming.kind == existing.kind and _canonical(incoming.element) == _canonical(existing.element)
+        return PlaylistDiff("identical" if same else "changed")
+
+    incoming_keys = [k for k in (rewrite_key_string(k, src, dst) for k in playlist_track_keys(incoming)) if k]
+    existing_keys = playlist_track_keys(existing)
+    if incoming_keys == existing_keys:
+        return PlaylistDiff("identical")
+
+    incoming_count, existing_count = Counter(incoming_keys), Counter(existing_keys)
+    added = sum((incoming_count - existing_count).values())
+    removed = sum((existing_count - incoming_count).values())
+    if not added and not removed:
+        return PlaylistDiff("reordered")
+    return PlaylistDiff("changed", added=added, removed=removed)
+
+
+def copy_node_with_name(node: PlaylistNode, new_name: str) -> PlaylistNode:
+    """A copy of `node` under a different name, so importing it sits next to
+    the existing playlist instead of replacing it."""
+    element = copy.deepcopy(node.element)
+    element.set("NAME", new_name)
+    return PlaylistNode(node.path, new_name, node.kind, element)
+
+
+def removable_drive_roots() -> List[str]:
+    """Mounted removable/external drives (USB sticks, portable disks)."""
+    roots: List[str] = []
+    if sys.platform == "win32":
+        import ctypes
+        DRIVE_REMOVABLE, DRIVE_FIXED = 2, 3
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i in range(26):
+            if not bitmask & (1 << i):
+                continue
+            root = f"{chr(65 + i)}:\\"
+            drive_type = ctypes.windll.kernel32.GetDriveTypeW(root)
+            # External hard drives often report as fixed; the system drive never is one.
+            if drive_type == DRIVE_REMOVABLE or (drive_type == DRIVE_FIXED
+                                                 and root.upper() != os.environ.get("SystemDrive", "C:").upper() + "\\"):
+                roots.append(root)
+    else:
+        for base in ("/Volumes", "/media", "/mnt", f"/run/media/{os.environ.get('USER', '')}"):
+            if os.path.isdir(base):
+                roots.extend(os.path.join(base, d) for d in sorted(os.listdir(base)))
+    return roots
+
+
+def find_latest_export(locations: List[str]) -> Optional[str]:
+    """Newest PlaylistSync_*.nml found directly in, in a `PlaylistSync`
+    subfolder of, or one folder level below any of `locations`."""
+    found: List[str] = []
+    for loc in locations:
+        if not loc or not os.path.isdir(loc):
+            continue
+        patterns = [os.path.join(loc, "PlaylistSync_*.nml"),
+                    os.path.join(loc, EXPORT_SUBFOLDER, "PlaylistSync_*.nml"),
+                    os.path.join(loc, "*", "PlaylistSync_*.nml"),
+                    os.path.join(loc, "*", EXPORT_SUBFOLDER, "PlaylistSync_*.nml")]
+        for pattern in patterns:
+            found.extend(glob.glob(pattern))
+    return max(found, key=os.path.getmtime) if found else None
 
 
 def backup_file(path: str) -> str:
@@ -1118,11 +1218,21 @@ class TraktorPlaylistSyncUI:
         self.import_path_var = tk.StringVar()
         ttk.Entry(file_frame, textvariable=self.import_path_var, width=55).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(file_frame, text="Browse", command=self._browse_import_file).grid(row=0, column=2, padx=5, pady=10)
+        ttk.Button(file_frame, text="Latest from drive...", command=self._find_latest_on_drive).grid(
+            row=0, column=3, padx=5, pady=10
+        )
 
         self.import_info_var = tk.StringVar(value="No file loaded")
         ttk.Label(file_frame, textvariable=self.import_info_var, foreground="gray", wraplength=820, justify="left").grid(
-            row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+            row=1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 5)
         )
+
+        self.import_keep_both_var = tk.BooleanVar(value=self.config_manager.settings.import_keep_both)
+        ttk.Checkbutton(
+            file_frame,
+            text="Keep both: import changed playlists as copies instead of replacing mine",
+            variable=self.import_keep_both_var, command=self._refresh_import_tree,
+        ).grid(row=2, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 10))
 
         # --- Preview / selection ---
         preview_frame = ttk.LabelFrame(tab, text="Playlists / Smart Lists to Merge")
@@ -1295,6 +1405,7 @@ class TraktorPlaylistSyncUI:
             playlist_presets=self.config_manager.settings.playlist_presets,
             active_preset=self.preset_var.get(),
             import_file_path=self.import_path_var.get(),
+            import_keep_both=self.import_keep_both_var.get(),
         )
         self.status_var.set("Settings saved")
         messagebox.showinfo("Settings Saved", "Configuration saved successfully!")
@@ -1308,6 +1419,7 @@ class TraktorPlaylistSyncUI:
             selected_playlists=selected,
             selection_mode=self.selection_mode.get(),
             import_file_path=self.import_path_var.get(),
+            import_keep_both=self.import_keep_both_var.get(),
         )
 
     # ------------------------------------------------------------------
@@ -1733,18 +1845,49 @@ class TraktorPlaylistSyncUI:
         for item in self.import_tree.get_children():
             self.import_tree.delete(item)
 
-        existing_names = {n.display_name for n in self.all_nodes}
+        keep_both = self.import_keep_both_var.get()
         for node in self._import_nodes:
             kind_label = "Playlist" if node.kind == "PLAYLIST" else "Smart List"
             count = playlist_track_count(node)
             count_display = "dynamic" if count is None else str(count)
-            action = "Replace" if node.display_name in existing_names else "New"
+            diff = self._diff_for(node)
+            action = diff.label
+            if keep_both and diff.status in ("changed", "reordered"):
+                action += " -> copy"
             item_id = self.import_tree.insert(
                 "", "end", text=node.display_name, values=(kind_label, count_display, action)
             )
-            self.import_tree.selection_add(item_id)
+            # Identical playlists have nothing to import - leave them unticked.
+            if diff.status != "identical":
+                self.import_tree.selection_add(item_id)
 
         self._update_import_summary()
+
+    def _diff_for(self, node: PlaylistNode) -> PlaylistDiff:
+        existing = next((n for n in self.all_nodes if n.display_name == node.display_name), None)
+        if not self.machine_profile.is_configured or self._import_src_profile is None:
+            return PlaylistDiff("new" if existing is None else "changed")
+        return compare_playlist(node, existing, self._import_src_profile, self.machine_profile)
+
+    def _find_latest_on_drive(self):
+        """Load the newest export from a USB stick / external drive, or any folder."""
+        settings = self.config_manager.settings
+        locations = [settings.import_source_dir] + removable_drive_roots()
+        path = find_latest_export(locations)
+        if path is None:
+            folder = filedialog.askdirectory(
+                title="No export found on connected drives - pick the drive or folder to search",
+                initialdir=settings.import_source_dir or None,
+            )
+            if not folder:
+                return
+            path = find_latest_export([folder])
+            if path is None:
+                messagebox.showinfo("Import", f"No PlaylistSync_*.nml export found in:\n{folder}")
+                return
+            self.config_manager.update_settings(import_source_dir=folder)
+        self.import_path_var.set(path)
+        self._load_import_file(path)
 
     def _select_all_import(self):
         self.import_tree.selection_set(self.import_tree.get_children())
@@ -1765,7 +1908,15 @@ class TraktorPlaylistSyncUI:
 
     def _get_import_nodes_to_merge(self) -> List[PlaylistNode]:
         selected_names = {self.import_tree.item(i, "text") for i in self.import_tree.selection()}
-        return [n for n in self._import_nodes if n.display_name in selected_names]
+        nodes = [n for n in self._import_nodes if n.display_name in selected_names]
+        if not self.import_keep_both_var.get():
+            return nodes
+        # Keep both: a playlist that differs from mine lands beside it as a copy.
+        suffix = f" (from {self._import_src_profile.name or 'other machine'})"
+        return [
+            copy_node_with_name(n, n.name + suffix) if self._diff_for(n).status in ("changed", "reordered") else n
+            for n in nodes
+        ]
 
     def _do_import(self):
         if not self._import_nodes:
@@ -1950,13 +2101,11 @@ def run_headless_import(config_manager) -> bool:
         return False
 
     output_dir = settings.export_output_dir or default_export_dir(settings.collection_nml_path)
-    candidates = sorted(glob.glob(os.path.join(output_dir, "PlaylistSync_*.nml")),
-                         key=os.path.getmtime, reverse=True)
-    if not candidates:
-        logger.error(f"Import: no exported PlaylistSync_*.nml file found in {output_dir} — "
-                     f"export one first, or open the tool to browse for a file.")
+    import_path = find_latest_export([settings.import_source_dir, output_dir] + removable_drive_roots())
+    if not import_path:
+        logger.error(f"Import: no exported PlaylistSync_*.nml file found in {output_dir} or on a connected "
+                     f"drive — export one first, or open the tool to browse for a file.")
         return False
-    import_path = candidates[0]
 
     try:
         import_root = load_nml(import_path).getroot()
@@ -2026,7 +2175,9 @@ def run_headless_import(config_manager) -> bool:
 def run_headless(args=None) -> bool:
     config_manager = ConfigManager()
     if config_manager.settings.last_mode == "import":
+        logger.info("Direct run: IMPORT (the mode last used in this tool) - merges playlists into collection.nml")
         return run_headless_import(config_manager)
+    logger.info("Direct run: EXPORT (the mode last used in this tool) - writes a PlaylistSync file, changes nothing in Traktor")
     return run_headless_export(config_manager)
 
 

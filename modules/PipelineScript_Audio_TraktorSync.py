@@ -31,6 +31,12 @@ from dataclasses import dataclass, asdict, field
 # Setup logging using shared utility
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_appdata import get_appdata_path
+from shared_musicbee_playlists import merge_track_ids
+from shared_playlist_doctor_dialog import run_preflight as run_doctor_preflight, show_check as show_doctor_check
+from shared_traktor_keep import (
+    KEEP_PLAYLIST_NAME, find_collection_nml, load_refs, match_to_library,
+    missing_referenced, move_to_quarantine, norm_name,
+)
 
 # Get logger reference (configured in main())
 logger = get_logger("traktor_sync")
@@ -71,6 +77,14 @@ class SyncSettings:
     import_source_dir: str = ""
     import_skip_existing: bool = True
     import_overwrite_all: bool = False
+    playlist_doctor_enabled: bool = True
+    musicbee_playlists_dir: str = ""
+    staging_roots: List[str] = field(default_factory=list)
+    # Files a Traktor playlist still references are never deleted and are restored when missing;
+    # other removed files are moved to DJ Library\_Removed instead of being deleted.
+    protect_traktor_referenced: bool = True
+    quarantine_removed: bool = True
+    traktor_collection_path: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -274,6 +288,10 @@ class PlaylistSyncUI:
 
         self.syncing = False
         self.importing = False
+        self.headless = False
+        self._doctor_extras = {}
+        self._traktor_refs_cache = None
+        self._keep_expected = {}
         self._import_detected_dj_library_dir = None
         self._import_detected_xml_path = None
         self.initialize_default_paths()
@@ -612,7 +630,8 @@ class PlaylistSyncUI:
         ttk.Button(btn_frame, text="Auto Select", command=self.auto_select_playlists).grid(row=0, column=2, padx=5)
         ttk.Button(btn_frame, text="Calculate New Tracks", command=self.calculate_new_tracks_for_selected).grid(row=0, column=3, padx=5)
         ttk.Button(btn_frame, text="Preview Selection", command=self.preview_selection).grid(row=0, column=4, padx=5)
-        
+        ttk.Button(btn_frame, text="Check Playlists", command=self.check_playlists).grid(row=0, column=5, padx=5)
+
         # Main action buttons
         main_btn_frame = ttk.Frame(config_frame)
         main_btn_frame.grid(row=current_row+1, column=0, columnspan=3, sticky="ew", pady=10)
@@ -1180,6 +1199,10 @@ class PlaylistSyncUI:
         self._refresh_preset_combo()
         self.status_var.set(f"Deleted preset: {name}")
 
+    def check_playlists(self):
+        """Scan every MusicBee playlist for entries whose file no longer exists."""
+        show_doctor_check(self.root, self.itunes_root, self.itunes_xml_var.get(), self.config_manager.settings)
+
     def preview_selection(self):
         """Show a preview of what will be synced"""
         selected_playlists = self.get_selected_playlists()
@@ -1364,9 +1387,114 @@ class PlaylistSyncUI:
         xml_scrollbar.grid(row=0, column=1, sticky="ns")
         self.xml_text.config(yscrollcommand=xml_scrollbar.set)
 
+    def _get_traktor_refs(self, dj_library):
+        """Traktor collection entries/playlist references for dj_library, read once per sync. None if unavailable."""
+        cache = getattr(self, '_traktor_refs_cache', None)
+        if cache and cache[0] == dj_library:
+            return cache[1]
+        settings = self.config_manager.settings
+        nml_path = settings.traktor_collection_path or find_collection_nml()
+        refs = None
+        if nml_path and os.path.isfile(nml_path):
+            try:
+                refs = load_refs(nml_path, dj_library)
+                saved = datetime.datetime.fromtimestamp(os.path.getmtime(nml_path)).strftime("%Y-%m-%d %H:%M")
+                self.append_to_text_widget(
+                    self.sync_text,
+                    f"Traktor collection: {nml_path} (last saved {saved}); "
+                    f"{len(refs.playlist_refs)} DJ Library file(s) referenced by Traktor playlists\n")
+            except Exception as e:
+                logger.warning(f"Could not read Traktor collection {nml_path}: {e}")
+                self.append_to_text_widget(self.sync_text, f"Warning: could not read Traktor collection: {e}\n")
+        self._traktor_refs_cache = (dj_library, refs)
+        return refs
+
+    def _restore_traktor_referenced(self, tracks_metadata, track_ids_to_paths, selected_playlist_data, tracks_to_copy):
+        """Bring back DJ Library files that a Traktor playlist references but that are missing on disk."""
+        settings = self.config_manager.settings
+        dj_library = self.dj_library_var.get()
+        if not settings.protect_traktor_referenced or not dj_library:
+            return
+        refs = self._get_traktor_refs(dj_library)
+        if refs is None:
+            return
+        existing = os.listdir(dj_library) if os.path.isdir(dj_library) else []
+        missing = missing_referenced(refs, existing)
+        if not missing:
+            self.append_to_text_widget(self.analysis_text, "Traktor keep-list: nothing missing\n")
+            return
+
+        library = [
+            (tid, md.get('Artist') or '', md.get('Name') or '', md.get('Album') or '')
+            for tid, md in tracks_metadata.items() if tid in track_ids_to_paths
+        ]
+        matched, unmatched = match_to_library(missing, library)
+
+        # Files are named after the track title and duplicates get renumbered per session, so a restored
+        # track whose title equals another track's in this sync could rename files Traktor already points at.
+        selected_set = set(tracks_to_copy)
+        path_to_tid = {path: tid for tid, path in track_ids_to_paths.items()}
+        name_counts = {}
+        for path in selected_set:
+            key = norm_name(tracks_metadata.get(path_to_tid.get(path), {}).get('Name') or '')
+            name_counts[key] = name_counts.get(key, 0) + 1
+
+        keep_ids = []
+        collisions = []
+        for entry in missing:
+            tid = matched.get(norm_name(entry.file))
+            if tid is None:
+                continue
+            source = track_ids_to_paths[tid]
+            if source in selected_set:
+                self._keep_expected[source] = entry.file
+                continue
+            key = norm_name(tracks_metadata.get(tid, {}).get('Name') or '')
+            if name_counts.get(key):
+                collisions.append(entry)
+                continue
+            name_counts[key] = 1
+            self._keep_expected[source] = entry.file
+            selected_set.add(source)
+            tracks_to_copy.append(source)
+            keep_ids.append(tid)
+        if keep_ids:
+            selected_playlist_data.append({'name': KEEP_PLAYLIST_NAME, 'id': 0, 'track_ids': keep_ids})
+
+        self.append_to_text_widget(
+            self.analysis_text,
+            f"Traktor keep-list: {len(missing)} file(s) referenced by Traktor playlists are missing; "
+            f"restoring {len(keep_ids)} from MusicBee\n")
+        for entry in collisions:
+            self.append_to_text_widget(
+                self.analysis_text,
+                f"  ! not restoring '{entry.file}': another track in this sync has the same title "
+                f"(add it to a synced playlist to restore it)\n")
+        for entry, reason in unmatched:
+            where = ", ".join(refs.playlist_refs.get(norm_name(entry.file), []))
+            self.append_to_text_widget(
+                self.analysis_text, f"  ! cannot restore '{entry.file}' ({reason}); in Traktor playlist(s): {where}\n")
+
+    def _report_keep_names(self, file_mapping):
+        """Warn when a restored file was written under a different name than Traktor expects."""
+        for source, expected in self._keep_expected.items():
+            dest = file_mapping.get(source)
+            if dest and norm_name(os.path.basename(dest)) != norm_name(expected):
+                self.append_to_text_widget(
+                    self.sync_text,
+                    f"Note: Traktor expects '{expected}' but the file is '{os.path.basename(dest)}' - relink it in Traktor\n")
+
     def delete_removed_tracks(self, dj_library, export_xml_path):
-        """Delete tracks in DJ Library that are not referenced in the exported XML"""
+        """Delete tracks in DJ Library that are not referenced in the exported XML.
+
+        Files a Traktor playlist still references are kept; with quarantine_removed the rest are
+        moved to <DJ Library>\\_Removed\\<date> instead of being deleted."""
         deleted_count = 0
+        settings = self.config_manager.settings
+        traktor_refs = self._get_traktor_refs(dj_library) if settings.protect_traktor_referenced else None
+        protected = traktor_refs.playlist_refs if traktor_refs else {}
+        date_label = datetime.date.today().isoformat()
+        kept_count = 0
 
         if not dj_library or not os.path.exists(dj_library):
             return deleted_count
@@ -1440,17 +1568,31 @@ class PlaylistSyncUI:
                 if not os.path.isfile(file_path):
                     continue
 
-                # If this file is not in our active files list, delete it
                 if existing_file not in active_files:
-                    os.remove(file_path)
-                    self.append_to_text_widget(self.sync_text, f"Deleted: {existing_file}\n")
-                    deleted_count += 1
+                    referenced_by = protected.get(norm_name(existing_file))
+                    if referenced_by:
+                        self.append_to_text_widget(
+                            self.sync_text,
+                            f"Kept (still in Traktor playlist {', '.join(referenced_by[:3])}): {existing_file}\n")
+                        kept_count += 1
+                    elif settings.quarantine_removed:
+                        move_to_quarantine(file_path, dj_library, date_label)
+                        self.append_to_text_widget(self.sync_text, f"Moved to _Removed: {existing_file}\n")
+                        deleted_count += 1
+                    else:
+                        os.remove(file_path)
+                        self.append_to_text_widget(self.sync_text, f"Deleted: {existing_file}\n")
+                        deleted_count += 1
 
         except Exception as e:
             self.append_to_text_widget(self.sync_text, f"Error deleting tracks: {e}\n")
 
+        if kept_count:
+            self.append_to_text_widget(
+                self.sync_text, f"\nKept {kept_count} file(s) that Traktor playlists still reference\n")
         if deleted_count > 0:
-            self.append_to_text_widget(self.sync_text, f"\nDeleted {deleted_count} removed track(s) from {dj_library}\n")
+            verb = "Moved to _Removed" if settings.quarantine_removed else "Deleted"
+            self.append_to_text_widget(self.sync_text, f"\n{verb} {deleted_count} removed track(s) from {dj_library}\n")
         else:
             self.append_to_text_widget(self.sync_text, "No orphaned tracks to delete.\n")
 
@@ -2041,6 +2183,14 @@ class PlaylistSyncUI:
             messagebox.showerror("Error", "No playlists selected for sync!")
             return
 
+        # Dead playlist entries are invisible in the iTunes XML; let the doctor resolve them for this run.
+        doctor_extras = run_doctor_preflight(
+            self.root, self.itunes_root, itunes_xml, selected_playlists, self.config_manager.settings,
+            interactive=not self.headless)
+        if doctor_extras is None:
+            return
+        self._doctor_extras = doctor_extras
+
         # Make sure the export_xml path is a file, not a directory
         if os.path.isdir(export_xml):
             export_xml = os.path.join(export_xml, "DJ Library.xml")
@@ -2110,7 +2260,9 @@ class PlaylistSyncUI:
                     self.root.after(0, lambda: self.convert_flac_var.set(False))
             
             start_time = time.time()
-            
+            self._traktor_refs_cache = None
+            self._keep_expected = {}
+
             self.status_var.set("Step 1: Analyzing iTunes Library...")
             self.append_to_text_widget(self.analysis_text, "===== STEP 1: ANALYZING ITUNES LIBRARY =====\n")
             self.results_notebook.select(0)
@@ -2146,6 +2298,7 @@ class PlaylistSyncUI:
 
                     step2_time = time.time() - step2_start
                     self.append_to_text_widget(self.sync_text, f"Step 2 completed in {step2_time:.2f} seconds\n\n")
+                    self._report_keep_names(file_mapping)
 
                 if synced_tracks:
                     self.status_var.set("Step 3: Creating updated XML...")
@@ -2201,6 +2354,12 @@ class PlaylistSyncUI:
         self.status_var.set("Cancelling...")
     
     def append_to_text_widget(self, text_widget, message):
+        if self.headless:
+            # Direct run has no visible window: send the progress to the log/stdout instead.
+            for line in message.splitlines():
+                if line.strip():
+                    logger.info(line)
+
         def update_text():
             text_widget.insert(tk.END, message)
             text_widget.see(tk.END)
@@ -2761,9 +2920,16 @@ class PlaylistSyncUI:
         selected_playlists = self.get_selected_playlists()
         
         self.append_to_text_widget(
-            self.analysis_text, 
+            self.analysis_text,
             f"Selected playlists to process: {', '.join(selected_playlists)}\n"
         )
+        doctor_extras = getattr(self, '_doctor_extras', {})
+        if doctor_extras:
+            self.append_to_text_widget(
+                self.analysis_text,
+                f"Playlist doctor: adding {sum(len(v) for v in doctor_extras.values())} resolved track(s) "
+                f"to {len(doctor_extras)} playlist(s)\n"
+            )
         
         # Find the Playlists array
         playlists_element = None
@@ -2827,6 +2993,7 @@ class PlaylistSyncUI:
             
             playlist_name = playlist_data.get('Name', 'Unknown')
             playlist_id = playlist_data.get('ID', 'Unknown')
+            playlist_items = merge_track_ids(playlist_items, getattr(self, '_doctor_extras', {}).get(playlist_name, []))
 
             # Add all tracks to the track_id -> playlists mapping (for ALL playlists, not just selected)
             # Skip system playlists like Library, Music, etc.
@@ -2893,6 +3060,8 @@ class PlaylistSyncUI:
             else:
                 self.append_to_text_widget(self.analysis_text, f"- Skipping playlist: {playlist_name}\n")
         
+        self._restore_traktor_referenced(tracks_metadata, track_ids_to_paths, selected_playlist_data, tracks_to_copy)
+
         # Remove duplicates from tracks_to_copy
         tracks_before_dedup = len(tracks_to_copy)
         tracks_to_copy = list(set(tracks_to_copy))
@@ -3470,9 +3639,10 @@ class PlaylistSyncUI:
             self.append_to_text_widget(self.sync_text, f"Error in two-step conversion for {source_path}: {e}\n")
             return False, False
     
-    def update_playlist_items(self, playlist_dict, valid_track_ids):
+    def update_playlist_items(self, playlist_dict, valid_track_ids, extra_track_ids=None):
         """
         Update a playlist's items to only include valid tracks.
+        extra_track_ids (playlist doctor) are appended when missing from the playlist.
         Returns the number of tracks kept in the playlist.
         """
         playlist_items = None
@@ -3489,11 +3659,16 @@ class PlaylistSyncUI:
                 break
         
         if playlist_items is None:
-            # No items in this playlist
-            return 0
-        
+            if not extra_track_ids:
+                # No items in this playlist
+                return 0
+            ET.SubElement(playlist_dict, 'key').text = 'Playlist Items'
+            playlist_items = ET.SubElement(playlist_dict, 'array')
+            playlist_items_index = len(playlist_dict) - 1
+
         # Count the valid tracks we keep
         kept_count = 0
+        kept_ids = set()
         
         # No need to filter if it's a special playlist like "Library"
         for i in range(len(playlist_dict)):
@@ -3529,7 +3704,16 @@ class PlaylistSyncUI:
                 # This track is in our list of valid tracks - keep it
                 new_items_array.append(copy.deepcopy(item_dict))
                 kept_count += 1
-        
+                kept_ids.add(track_id)
+
+        for extra_id in extra_track_ids or []:
+            if extra_id in valid_track_ids and extra_id not in kept_ids:
+                item = ET.SubElement(new_items_array, 'dict')
+                ET.SubElement(item, 'key').text = 'Track ID'
+                ET.SubElement(item, 'integer').text = str(extra_id)
+                kept_count += 1
+                kept_ids.add(extra_id)
+
         # Replace the items array
         playlist_dict[playlist_items_index] = new_items_array
         
@@ -3800,8 +3984,10 @@ class PlaylistSyncUI:
                     
                     # Make sure we're preserving all valid tracks in this playlist
                     # (this ensures tracks appear in all playlists they belong to)
-                    track_count = self.update_playlist_items(new_playlist, track_ids_to_keep)
-                    
+                    track_count = self.update_playlist_items(
+                        new_playlist, track_ids_to_keep,
+                        getattr(self, '_doctor_extras', {}).get(playlist_name))
+
                     new_playlists_array.append(new_playlist)
                     playlists_kept += 1
                     self.append_to_text_widget(self.xml_text, f"Added playlist: {playlist_name} with {track_count} tracks\n")
@@ -3880,6 +4066,7 @@ def run_headless_sync(args=None) -> bool:
     root = tk.Tk()
     root.withdraw()
     app = PlaylistSyncUI(root)
+    app.headless = True
 
     if args:
         if args.itunes_xml:
@@ -3937,6 +4124,7 @@ def run_headless_import(args=None) -> bool:
     root = tk.Tk()
     root.withdraw()
     app = PlaylistSyncUI(root)
+    app.headless = True
 
     if not app.import_source_dir_var.get() or not os.path.isdir(app.import_source_dir_var.get()):
         logger.error("No import source folder configured — open the tool (gear icon) to set it up first.")
@@ -3973,7 +4161,9 @@ def run_headless(args=None) -> bool:
     dispatch pattern as Sync Traktor Playlists' run_headless()."""
     config_manager = ConfigManager()
     if config_manager.settings.last_mode == "import":
+        logger.info("Direct run: IMPORT (the mode last used in this tool) - copies a DJ Library folder + XML into place")
         return run_headless_import(args)
+    logger.info("Direct run: EXPORT (the mode last used in this tool) - syncs the selected playlists to the DJ Library")
     return run_headless_sync(args)
 
 
