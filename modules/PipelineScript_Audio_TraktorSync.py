@@ -229,7 +229,7 @@ def detect_import_source(source_dir: str) -> "tuple[Optional[str], Optional[str]
 class PlaylistSyncUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Traktor Sync")
+        self.root.title("Traktor Music Sync")
         self.root.geometry("900x850")
         self.root.minsize(900, 500)
 
@@ -240,7 +240,7 @@ class PlaylistSyncUI:
         header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         header_frame.grid_propagate(False)
 
-        header_title_box = make_header_title(header_frame, "Traktor Sync")
+        header_title_box = make_header_title(header_frame, "Traktor Music Sync")
 
         # Save Settings + the main buttons live under the header, outside the scrolling body.
         self.action_bar = ActionBar(self.root)
@@ -4222,7 +4222,7 @@ def run_headless_import(args=None) -> bool:
 def run_headless(args=None) -> bool:
     """Replay whichever mode (export or import) was last used, with saved
     settings - the FastRack hub's direct-run entry point. Mirrors the same
-    dispatch pattern as Sync Traktor Playlists' run_headless()."""
+    dispatch pattern as Traktor Playlist Sync's run_headless()."""
     config_manager = ConfigManager()
     if config_manager.settings.last_mode == "import":
         logger.info("Direct run: IMPORT (the mode last used in this tool) - copies a DJ Library folder + XML into place")

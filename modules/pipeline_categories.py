@@ -325,7 +325,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "scripts": [
                     {
                         "key": "sync_playlists",
-                        "name": "Sync to Traktor",
+                        "name": "Traktor Music Sync",
                         "module": "PipelineScript_Audio_TraktorSync",
                         "description": "Export iTunes playlists to Traktor DJ library, then import that library on another machine",
                         "icon": "💻",
@@ -334,7 +334,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                     },
                     {
                         "key": "traktor_playlist_sync",
-                        "name": "Sync Traktor Playlists",
+                        "name": "Traktor Playlist Sync",
                         "module": "PipelineScript_Audio_TraktorPlaylistSync",
                         "description": "Export native Traktor playlists/smart lists to a USB-ready file, then import and auto-merge on another machine",
                         "icon": "🗂️",

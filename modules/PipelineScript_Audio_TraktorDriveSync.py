@@ -53,7 +53,7 @@ Log = Callable[[str], None]
 # ============================================================================
 
 def _traktor_sync_defaults() -> tuple:
-    """DJ Library folder / XML as already configured in Traktor Sync (Local), else the usual defaults."""
+    """DJ Library folder / XML as already configured in Traktor Music Sync (Local), else the usual defaults."""
     music = os.path.join(os.path.expanduser("~"), "Music")
     library, xml = os.path.join(music, "DJ Library"), os.path.join(music, "DJ Library.xml")
     try:
@@ -61,8 +61,8 @@ def _traktor_sync_defaults() -> tuple:
         settings = TraktorSyncConfig().settings
         library = settings.dj_library_path_local or library
         xml = settings.export_xml_path_local or xml
-    except Exception as e:  # defaults are fine if Traktor Sync isn't set up
-        logger.info(f"No Traktor Sync settings to prefill from: {e}")
+    except Exception as e:  # defaults are fine if Traktor Music Sync isn't set up
+        logger.info(f"No Traktor Music Sync settings to prefill from: {e}")
     return library, xml
 
 

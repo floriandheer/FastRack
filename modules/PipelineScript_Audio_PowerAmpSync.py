@@ -547,7 +547,7 @@ class PowerAmpSyncApp:
 
     def _create_ui(self) -> None:
         """Create the complete UI."""
-        # Header (matching Traktor Sync style)
+        # Header (matching Traktor Music Sync style)
         header = tk.Frame(self.root, bg=HEADER_COLOR, height=60)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)

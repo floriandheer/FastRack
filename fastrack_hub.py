@@ -1266,7 +1266,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
     def _get_traktor_mode(self, module_name):
         """Which mode (export/import) direct-run will replay for a Traktor
-        sync tool (Sync to Traktor or Sync Traktor Playlists) - read straight
+        sync tool (Traktor Music, Playlist or Drive Sync) - read straight
         from that script's own saved settings."""
         if not module_name:
             # _compute_sidebar_width()'s probe rows pass no module - they're

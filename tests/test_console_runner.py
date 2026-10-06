@@ -73,6 +73,6 @@ def test_start_failure_is_reported_as_failure(keys, monkeypatch, capsys):
 def test_main_passes_title_delay_and_script_args(monkeypatch):
     seen = {}
     monkeypatch.setattr(cr, "run", lambda title, close_after, command: seen.update(t=title, c=close_after, cmd=command) or 0)
-    assert cr.main(["FastRack - Sync to Traktor", "10", "task.py", "--auto-run"]) == 0
-    assert seen == {"t": "FastRack - Sync to Traktor", "c": 10.0, "cmd": [sys.executable, "task.py", "--auto-run"]}
+    assert cr.main(["FastRack - Traktor Music Sync", "10", "task.py", "--auto-run"]) == 0
+    assert seen == {"t": "FastRack - Traktor Music Sync", "c": 10.0, "cmd": [sys.executable, "task.py", "--auto-run"]}
     assert cr.main(["only-a-title"]) == 2
