@@ -37,7 +37,8 @@ Log = Callable[[str], None]
 
 @dataclass
 class CopyStats:
-    copied: int = 0
+    copied: int = 0          # files written (new or replacing an older version)
+    updated: int = 0         # ...of which replaced a file that was already there
     skipped: int = 0
     pruned: int = 0
     errors: int = 0
@@ -101,6 +102,14 @@ def resolve_existing(folder: str, name: str) -> str:
     return exact  # let the caller's error report the original name
 
 
+def copy_summary(stats: "CopyStats") -> str:
+    """'12 copied (3 replaced an older version), 2148 unchanged'"""
+    text = f"{stats.copied} copied"
+    if stats.updated:
+        text += f" ({stats.updated} replaced an older version)"
+    return text + f", {stats.skipped} unchanged"
+
+
 def needs_copy(src: str, dst: str) -> bool:
     """True when dst is missing or differs from src (size, or src is newer)."""
     try:
@@ -129,9 +138,12 @@ def sync_folder(src_dir: str, dst_dir: str, log: Log, prune: bool = False,
         src, dst = resolve_existing(src_dir, name), os.path.join(dst_dir, dst_name)
         try:
             if overwrite or needs_copy(src, dst):
+                existed = os.path.exists(dst)
                 shutil.copy2(src, dst)
                 stats.copied += 1
-                log(f"[{index}/{total}] Copied {dst_name}")
+                if existed:
+                    stats.updated += 1
+                log(f"[{index}/{total}] {'Replaced older version of' if existed else 'Copied'} {dst_name}")
             else:
                 stats.skipped += 1
         except OSError as e:

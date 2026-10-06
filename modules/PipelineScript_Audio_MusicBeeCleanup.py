@@ -17,9 +17,10 @@ import sys
 import threading
 import tkinter as tk
 from dataclasses import asdict, dataclass, field
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 from typing import Dict, List, Optional
 
+import shared_dialogs as dialogs
 import shared_musicbee_playlists as mb
 from shared_appdata import get_appdata_path
 from shared_logging import get_logger, setup_logging as setup_shared_logging
@@ -63,6 +64,33 @@ def _stamp(ts: float) -> str:
     return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
+def _plural(n: int, one: str, many: str = "") -> str:
+    return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def _describe_change(row: mb.FixRow) -> str:
+    """One plain line for what ticking this row will do to its playlist."""
+    if row.action == "replace":
+        return f"Replace dead entry {os.path.basename(row.path)}  with  {row.fix.replace('Replace with ', '', 1)}"
+    if row.action == "dedupe":
+        return f"Remove the extra copies of {row.entry} (the first stays)"
+    if row.group:
+        return f"Remove this copy of {row.label}:  {row.path}"
+    return f"Remove dead entry:  {row.path}"
+
+
+def _change_items(rows: List[mb.FixRow]) -> List[tuple]:
+    """List lines for the confirmation: every change, grouped under its playlist."""
+    by_playlist: Dict[str, List[mb.FixRow]] = {}
+    for row in rows:
+        by_playlist.setdefault(row.playlist, []).append(row)
+    items = []
+    for playlist in sorted(by_playlist, key=str.casefold):
+        items.append((f"{playlist}   ({_plural(len(by_playlist[playlist]), 'change')})", "head"))
+        items.extend((_describe_change(r), "line") for r in by_playlist[playlist])
+    return items
+
+
 class CleanupApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -72,7 +100,7 @@ class CleanupApp:
         self.scanning = False
 
         root.title(APP_NAME)
-        root.geometry("1150x740")
+        root.geometry("1380x740")
         root.minsize(900, 540)
         root.columnconfigure(0, weight=1)
         root.rowconfigure(2, weight=1)
@@ -145,13 +173,17 @@ class CleanupApp:
         frame.grid(row=1, column=0, sticky="nsew", padx=8)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
-        cols = ("check", "playlist", "problem", "entry", "fix")
+        cols = ("check", "playlist", "problem", "entry", "album", "format", "size", "date", "fix")
         self.tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
-        for col, text, width in (("check", "", 36), ("playlist", "Playlist", 170), ("problem", "Problem", 210),
-                                 ("entry", "Entry", 430), ("fix", "Fix", 260)):
+        for col, text, width in (("check", "", 36), ("playlist", "Playlist", 110), ("problem", "Problem", 150),
+                                 ("entry", "Entry (full path)", 400), ("album", "Album", 150),
+                                 ("format", "Format", 60), ("size", "Size", 70), ("date", "Date", 90),
+                                 ("fix", "Fix", 235)):
             self.tree.heading(col, text=text)
             self.tree.column(col, width=width, anchor=tk.CENTER if col == "check" else tk.W, stretch=col != "check")
         self.tree.tag_configure("dim", foreground="gray")
+        self.tree.tag_configure("header", background="#e8eef4", font=("", 9, "bold"))
+        self.tree.tag_configure("keep", foreground="#1e7e34")
         ys = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -160,14 +192,17 @@ class CleanupApp:
         xs.grid(row=1, column=0, sticky="ew")
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
+        for key in ("<Return>", "<KP_Enter>"):
+            self.tree.bind(key, self._on_tree_return)
 
         bar = ttk.Frame(tab)
         bar.grid(row=2, column=0, sticky="ew", padx=8, pady=8)
         ttk.Button(bar, text="Safe defaults", command=self._reset_defaults).pack(side=tk.LEFT)
         ttk.Button(bar, text="Tick all", command=lambda: self._set_all(True)).pack(side=tk.LEFT, padx=6)
         ttk.Button(bar, text="Untick all", command=lambda: self._set_all(False)).pack(side=tk.LEFT)
-        ttk.Label(bar, text="Double-click a row to show its playlist file", foreground="gray").pack(
-            side=tk.LEFT, padx=14)
+        ttk.Button(bar, text="Keep selected file", command=self._keep_selected).pack(side=tk.LEFT, padx=(14, 0))
+        ttk.Label(bar, text="Arrows + Enter tick a row. Several files of one song: select a copy, press Keep. Double-click a copy to show its file.",
+                  foreground="gray").pack(side=tk.LEFT, padx=10)
         self.fix_btn = ttk.Button(bar, text="Fix ticked...", command=self._fix_ticked, state=tk.DISABLED)
         self.fix_btn.pack(side=tk.RIGHT)
 
@@ -250,11 +285,19 @@ class CleanupApp:
             return
         xml = self.xml_var.get().strip()
         if not xml or not os.path.isfile(xml):
-            messagebox.showerror(APP_NAME, "Select MusicBee's iTunes XML file first.")
+            dialogs.show_error(
+                self.root, APP_NAME, "Choose MusicBee's iTunes XML first",
+                "The scan reads your library from the XML file MusicBee exports. Use Browse next to "
+                "\u201ciTunes XML\u201d to pick it.",
+                detail=xml or "(no file chosen)")
             return
         playlists_dir = self.pl_var.get().strip() or mb.default_playlists_dir(xml)
         if not os.path.isdir(playlists_dir):
-            messagebox.showerror(APP_NAME, f"Playlists folder not found:\n{playlists_dir}")
+            dialogs.show_error(
+                self.root, APP_NAME, "Playlists folder not found",
+                "MusicBee keeps its playlists in a \u201cPlaylists\u201d folder next to the XML file. "
+                "Use Browse next to \u201cPlaylists folder\u201d to point to it.",
+                detail=playlists_dir)
             return
         roots = [r.strip() for r in self.staging_var.get().split(";") if r.strip()]
         self._save_settings()
@@ -277,7 +320,8 @@ class CleanupApp:
         self.scanning = False
         self.scan_btn.config(state=tk.NORMAL)
         self.status_var.set("Scan failed")
-        messagebox.showerror(APP_NAME, f"Scan failed:\n{message}")
+        dialogs.show_error(self.root, APP_NAME, "The scan did not finish",
+                           "Nothing was changed. The technical reason is below.", detail=message)
 
     def _scan_done(self, data: mb.FullScan) -> None:
         self.scanning = False
@@ -294,20 +338,28 @@ class CleanupApp:
         for n, row in enumerate(mb.build_fix_rows(data.report, data.dupes)):
             iid = str(n)
             self.rows[iid] = row
-            self.tree.insert("", tk.END, iid=iid, tags=() if row.fixable else ("dim",),
+            info = row.detail or mb.FileInfo()
+            self.tree.insert("", tk.END, iid=iid, tags=self._row_tags(row),
                              values=(CHECKED if row.checked else UNCHECKED if row.fixable else "",
-                                     row.playlist, row.problem, row.entry, row.fix))
+                                     row.playlist, row.problem, row.entry, info.album, info.format, info.size,
+                                     info.date, row.fix_text))
         self._update_fix_button()
+        first = self.tree.get_children()
+        if first:
+            self.tree.selection_set(first[0])
+            self.tree.focus(first[0])
 
-        n_dead = sum(1 for r in self.rows.values() if r.problem.startswith("Dead"))
-        n_dupe = sum(1 for r in self.rows.values() if r.problem.startswith("Same"))
-        n_stage = sum(1 for r in self.rows.values() if r.problem.startswith("In staging"))
-        n_pl = len({r.playlist for r in self.rows.values()})
-        if self.rows:
+        findings = [r for r in self.rows.values() if not r.header]
+        n_dead = sum(1 for r in findings if r.problem.startswith("Dead"))
+        n_dupe = sum(1 for r in findings if r.problem.startswith("Same") or r.group)
+        n_stage = sum(1 for r in findings if r.problem.startswith("In staging"))
+        n_pl = len({r.playlist for r in findings})
+        if findings:
             self.summary_var.set(
-                f"{len(self.rows)} finding(s) in {n_pl} of {data.report.playlists_scanned} playlists: "
+                f"{len(findings)} finding(s) in {n_pl} of {data.report.playlists_scanned} playlists: "
                 f"{n_dead} dead entr{'y' if n_dead == 1 else 'ies'}, {n_dupe} duplicate row(s), "
-                f"{n_stage} still in staging. Ticked rows are fixed; entries that would drop a song start unticked.")
+                f"{n_stage} still in staging. Ticked rows are fixed. For a song in several files, the copy on the "
+                f"M: drive is recommended and the others start ticked; with no clear choice nothing is ticked.")
         else:
             self.summary_var.set(f"No playlist problems found in {data.report.playlists_scanned} playlists.")
 
@@ -337,16 +389,52 @@ class CleanupApp:
             self._set_checked(iid, not row.checked)
             self._update_fix_button()
 
+    def _on_tree_return(self, _event=None) -> str:
+        """Enter ticks / unticks the selected row (group headings have no box and are skipped)."""
+        selected = self.tree.selection()
+        row = self.rows.get(selected[0]) if selected else None
+        if row is not None and row.fixable:
+            self._set_checked(selected[0], not row.checked)
+            self._update_fix_button()
+        return "break"
+
     def _on_tree_double_click(self, event) -> None:
         if self.tree.identify_column(event.x) == "#1":
             return
         row = self.rows.get(self.tree.identify_row(event.y))
-        if row is not None:
-            reveal_path(row.file)
+        if row is None:
+            return
+        # One copy of a song in several files: show that music file (to compare it); anything else: the playlist.
+        target = row.path if row.group and os.path.exists(row.path) else row.file
+        reveal_path(target)
+
+    @staticmethod
+    def _row_tags(row: mb.FixRow):
+        if row.header:
+            return ("header",)
+        if not row.fixable:
+            return ("dim",)
+        return ("keep",) if row.group and not row.checked else ()
 
     def _set_checked(self, iid: str, value: bool) -> None:
-        self.rows[iid].checked = value
+        row = self.rows[iid]
+        row.checked = value
         self.tree.set(iid, "check", CHECKED if value else UNCHECKED)
+        self.tree.set(iid, "fix", row.fix_text)
+        self.tree.item(iid, tags=self._row_tags(row))
+
+    def _keep_selected(self) -> None:
+        """Keep the selected copy of a song and tick every other copy in that playlist for removal."""
+        selected = self.tree.selection()
+        row = self.rows.get(selected[0]) if selected else None
+        if row is None or not row.group:
+            self.status_var.set("Select one copy of a song that exists in several files, then press Keep.")
+            return
+        for iid, member in self.rows.items():
+            if member.group == row.group:
+                self._set_checked(iid, member is not row)
+        self._update_fix_button()
+        self.status_var.set(f"Keeping {os.path.basename(row.path)}; the other copies are ticked for removal.")
 
     def _set_all(self, value: bool) -> None:
         for iid, row in self.rows.items():
@@ -381,43 +469,71 @@ class CleanupApp:
                 groups.setdefault(r.group, []).append(r)
         for members in groups.values():
             if all(m.checked for m in members):
-                messagebox.showerror(
-                    APP_NAME, f"Every copy of '{members[0].entry.split('  |  ')[0]}' in playlist "
-                              f"'{members[0].playlist}' is ticked. Leave one file unticked so the song stays.")
+                dialogs.show_warning(
+                    self.root, APP_NAME, "Keep at least one copy of each song",
+                    f"Every copy of \u201c{members[0].label}\u201d in the playlist "
+                    f"\u201c{members[0].playlist}\u201d is ticked for removal, so the song would disappear from it.\n\n"
+                    f"Untick the file you want to keep, or select it and press \u201cKeep selected file\u201d.")
                 return
 
         if self._refresh_musicbee_status():
-            messagebox.showerror(APP_NAME, "MusicBee is running. Close it first - it would overwrite the changes.")
+            dialogs.show_warning(
+                self.root, APP_NAME, "Close MusicBee first",
+                "MusicBee rewrites its playlists when it closes, so a change made while it is open would be lost.\n\n"
+                "Close MusicBee, then press \u201cFix ticked\u201d again.")
             return
 
         counts = {"replace": 0, "remove": 0, "dedupe": 0}
         for r in ticked:
             counts[r.action] += 1
         files = len({r.file for r in ticked})
-        summary = (f"Apply {len(ticked)} fix(es) in {files} playlist(s)?\n\n"
-                   f"  Replace dead entries with the real track: {counts['replace']}\n"
-                   f"  Remove extra copies of the same file: {counts['dedupe']}\n"
-                   f"  Remove entries from playlists: {counts['remove']}\n\n"
-                   f"Every changed playlist is backed up first to:\n{mb.default_backup_root()}")
-        if not messagebox.askyesno(APP_NAME, summary):
+        facts = [(label, str(n)) for label, n in (
+            ("Replace dead entries with the real track", counts["replace"]),
+            ("Remove extra copies of the same file", counts["dedupe"]),
+            ("Remove entries from playlists", counts["remove"])) if n]
+        choice = dialogs.show_dialog(
+            self.root, APP_NAME, f"Apply {_plural(len(ticked), 'fix', 'fixes')} to {_plural(files, 'playlist')}?",
+            kind="question",
+            text="Only your MusicBee playlist files change. Music files and MusicBee's library are never touched.",
+            facts=facts, items=_change_items(ticked), items_title="What will change",
+            footnote=f"Every changed playlist is backed up first, to:  {mb.default_backup_root()}",
+            buttons=(("Cancel", "cancel"), (f"Apply {_plural(len(ticked), 'fix', 'fixes')}", "apply")),
+            default="apply", cancel="cancel", width=760)
+        if choice != "apply":
             return
 
         try:
             result = mb.apply_edits(mb.edits_from_rows(ticked), apply=True)
         except Exception as e:
             logger.exception("Fix failed")
-            messagebox.showerror(APP_NAME, f"Fix failed: {e}\n\nBackups (if any): {mb.default_backup_root()}")
+            dialogs.show_error(
+                self.root, APP_NAME, "The fix could not be completed",
+                "Check the playlists in MusicBee before running it again. A backup is made before every change, "
+                "so the originals are in the backup folder.",
+                detail=str(e), actions=(("Open backup folder", lambda: self._open_backups(mb.default_backup_root())),))
             return
 
-        lines = [f"Changed {len(result.files_changed)} playlist(s): {result.replaced} replaced, "
-                 f"{result.removed} removed, {result.dropped} duplicate copies dropped."]
-        if result.skipped:
-            lines.append(f"Skipped {len(result.skipped)} playlist(s) with an unrecognised layout.")
-        if result.backup_dir:
-            lines.append(f"Backups: {result.backup_dir}")
-        lines.append("MusicBee shows the changes the next time it starts.")
-        messagebox.showinfo(APP_NAME, "\n".join(lines))
+        facts = [(label, str(n)) for label, n in (
+            ("Dead entries replaced with the real track", result.replaced),
+            ("Entries removed from playlists", result.removed),
+            ("Duplicate copies dropped", result.dropped)) if n]
+        items = [("These playlists were left unchanged because MusicBee's file layout was not recognised:", "note")]
+        items += [(os.path.basename(f), "line") for f, _why in result.skipped]
+        backup = result.backup_dir
+        dialogs.show_dialog(
+            self.root, APP_NAME, f"Done: {_plural(len(result.files_changed), 'playlist')} changed",
+            kind="warning" if result.skipped else "success",
+            text="MusicBee shows the changes the next time it starts.",
+            facts=facts, items=items if result.skipped else (),
+            footnote=f"Backups of the changed playlists:  {backup}" if backup else "",
+            actions=(("Open backup folder", lambda: self._open_backups(backup)),) if backup else (),
+            buttons=(("Close", "close"),), default="close", cancel="close")
         self._start_scan()
+
+    @staticmethod
+    def _open_backups(folder: str) -> None:
+        if folder and os.path.isdir(folder):
+            reveal_path(folder)
 
     # -------------------------------------------------------------- library
 
@@ -428,7 +544,8 @@ class CleanupApp:
             if os.path.isdir(folder):
                 reveal_path(folder)
             else:
-                messagebox.showinfo(APP_NAME, f"The folder no longer exists:\n{folder}")
+                dialogs.show_info(self.root, APP_NAME, "That folder no longer exists",
+                                  "The track's file is missing and so is the folder that held it.", detail=folder)
 
     def _on_dups_double_click(self, event) -> None:
         iid = self.dups_tree.identify_row(event.y)
@@ -449,7 +566,8 @@ class CleanupApp:
             w = csv.writer(f)
             w.writerow(["Section", "Artist or playlist", "Title or problem", "Album or entry", "Path or fix"])
             for r in self.rows.values():
-                w.writerow(["Playlist", r.playlist, r.problem, r.entry, r.fix])
+                w.writerow(["Playlist", r.playlist, r.problem,
+                            f"{r.entry}  [{r.detail.as_text()}]" if r.detail else r.entry, r.fix_text])
             for t in data.missing:
                 w.writerow(["Missing file", t.artist, t.title, t.album, t.path])
             for group in data.dup_songs:

@@ -64,6 +64,8 @@ def _script_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     }
     if "module" in spec:
         out["path"] = os.path.join(SCRIPTS_DIR, f"{spec['module']}.py")
+        # The hub's out/in switch reads and writes this tool's saved mode by module name.
+        out["module"] = spec["module"]
     if "url" in spec:
         out["url"] = spec["url"]
     if "context" in spec:

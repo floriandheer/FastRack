@@ -32,6 +32,8 @@ from dataclasses import dataclass, asdict, field
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_appdata import get_appdata_path
 from shared_musicbee_playlists import merge_track_ids
+from shared_mode_lock import filter_mode_change, make_header_title, add_header_lock
+from shared_action_bar import ActionBar
 from shared_playlist_doctor_dialog import run_preflight as run_doctor_preflight, show_check as show_doctor_check
 from shared_traktor_keep import (
     KEEP_PLAYLIST_NAME, find_collection_nml, load_refs, match_to_library,
@@ -74,6 +76,7 @@ class SyncSettings:
     playlist_presets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_preset: str = ""
     last_mode: str = ""
+    mode_locked: bool = False   # keep the hub's out/in switch where it is
     import_source_dir: str = ""
     import_skip_existing: bool = True
     import_overwrite_all: bool = False
@@ -152,7 +155,7 @@ class ConfigManager:
 
     def update_settings(self, **kwargs) -> None:
         """Update specific settings."""
-        for key, value in kwargs.items():
+        for key, value in filter_mode_change(self.settings, kwargs).items():
             if hasattr(self.settings, key):
                 setattr(self.settings, key, value)
         self.save_settings()
@@ -161,6 +164,20 @@ class ConfigManager:
 # ============================================================================
 # IMPORT SOURCE DETECTION - pure function, no Tk dependency
 # ============================================================================
+
+# Copies keep the source's modified time (or are written later, when art/playlist info is added), so a source
+# file modified after its exported copy was written has been replaced or edited since the export.
+EXPORT_MTIME_TOLERANCE = 2.0   # seconds; exFAT stores times with 2 s resolution
+
+
+def source_changed_since_export(source_path: str, dest_path: str) -> bool:
+    """True when the source file was modified after the exported copy was written - for example a corrupt
+    conversion replaced by a good file. Two stat calls per track, no file contents are read."""
+    try:
+        return os.stat(source_path).st_mtime > os.stat(dest_path).st_mtime + EXPORT_MTIME_TOLERANCE
+    except OSError:
+        return False
+
 
 def detect_import_source(source_dir: str) -> "tuple[Optional[str], Optional[str]]":
     """Given a folder (e.g. a USB stick, or a shared/synced folder written by
@@ -217,15 +234,17 @@ class PlaylistSyncUI:
         self.root.minsize(900, 500)
 
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=1)
 
         header_frame = tk.Frame(self.root, bg="#2c3e50", height=60)
         header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         header_frame.grid_propagate(False)
 
-        title_label = tk.Label(header_frame, text="Traktor Sync",
-                             font=("Arial", 16, "bold"), fg="white", bg="#2c3e50")
-        title_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        header_title_box = make_header_title(header_frame, "Traktor Sync")
+
+        # Save Settings + the main buttons live under the header, outside the scrolling body.
+        self.action_bar = ActionBar(self.root)
+        self.action_bar.grid(row=1, column=0, sticky="ew")
 
         # Wrapped in a ScrollableFrame rather than gridded directly onto
         # root: this window's natural content height (config panel + the
@@ -233,7 +252,7 @@ class PlaylistSyncUI:
         # screen height, which would otherwise strand the sync buttons and
         # results off-screen with no way to reach them.
         scroll = ScrollableFrame(self.root)
-        scroll.grid(row=1, column=0, sticky="nsew")
+        scroll.grid(row=2, column=0, sticky="nsew")
         self._body_scroll = scroll
         # ScrollableFrame normally only activates its wheel binding while
         # the pointer is directly over its own background (<Enter>/<Leave>
@@ -251,6 +270,7 @@ class PlaylistSyncUI:
         main_frame.rowconfigure(0, weight=1)
 
         self.config_manager = ConfigManager()
+        self.mode_locked_var = add_header_lock(header_title_box, self.config_manager)
 
         notebook = ttk.Notebook(main_frame)
         notebook.grid(row=0, column=0, sticky="nsew")
@@ -274,6 +294,7 @@ class PlaylistSyncUI:
         import_tab = ttk.Frame(notebook)
         notebook.add(import_tab, text="Import")
         self.create_import_tab(import_tab)
+        self.action_bar.follow(notebook, ["export", "import"])
 
         self.root.bind_all("<MouseWheel>", self._on_body_mouse_wheel)
         self.root.bind_all("<Button-4>", self._on_body_mouse_wheel)
@@ -284,7 +305,7 @@ class PlaylistSyncUI:
         self.status_var.set("Ready")
         self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1,
                                  relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.grid(row=2, column=0, sticky="ew")
+        self.status_bar.grid(row=3, column=0, sticky="ew")
 
         self.syncing = False
         self.importing = False
@@ -632,17 +653,9 @@ class PlaylistSyncUI:
         ttk.Button(btn_frame, text="Preview Selection", command=self.preview_selection).grid(row=0, column=4, padx=5)
         ttk.Button(btn_frame, text="Check Playlists", command=self.check_playlists).grid(row=0, column=5, padx=5)
 
-        # Main action buttons
-        main_btn_frame = ttk.Frame(config_frame)
-        main_btn_frame.grid(row=current_row+1, column=0, columnspan=3, sticky="ew", pady=10)
-        main_btn_frame.columnconfigure(1, weight=1)
-
-        self.save_settings_btn = ttk.Button(main_btn_frame, text="Save Settings", command=self._save_settings, width=15)
-        self.save_settings_btn.grid(row=0, column=0, padx=10)
-
-        # Action buttons aligned together on the right
-        action_btns = ttk.Frame(main_btn_frame)
-        action_btns.grid(row=0, column=1, sticky="e", padx=10)
+        # Main action buttons - in the action bar under the header
+        self.save_settings_btn = self.action_bar.add_save_button(self._save_settings)
+        action_btns = self.action_bar.group("export")
 
         self.export_xml_btn = ColorButton(action_btns, text="Export XML", command=self.export_xml_only, width=15, bg="yellow", fg="black", font=('', 9, 'bold'))
         self.export_xml_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -757,17 +770,12 @@ class PlaylistSyncUI:
             command=on_import_overwrite_toggle,
         ).grid(row=0, column=1, sticky="w")
 
-        # --- Actions ---
-        action_frame = ttk.Frame(tab)
-        action_frame.grid(row=3, column=0, sticky="ew", pady=(5, 10))
-        action_frame.columnconfigure(0, weight=1)
+        # --- Actions (in the action bar under the header) ---
         tab.rowconfigure(4, weight=1)
 
-        ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).pack(side=tk.LEFT, padx=10, anchor="n")
-
-        self.import_btn = ColorButton(action_frame, text="Import", command=self.start_import, width=15,
-                                       bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
-        self.import_btn.pack(side=tk.RIGHT, padx=10, anchor="n")
+        self.import_btn = ColorButton(self.action_bar.group("import"), text="Import", command=self.start_import,
+                                       width=15, bg="#c0392b", fg="white", font=('', 9, 'bold'), state=tk.DISABLED)
+        self.import_btn.pack(side=tk.LEFT)
 
         # --- Log ---
         log_frame = ttk.LabelFrame(tab, text="Import Log")
@@ -1742,6 +1750,32 @@ class PlaylistSyncUI:
             return new_count, new_tracks_details
         return new_count
 
+    def find_changed_sources(self, track_locations):
+        """Tracks already exported whose source file was modified after the exported copy was written."""
+        dj_library = self.dj_library_var.get()
+        if not dj_library or not os.path.isdir(dj_library):
+            return []
+        convert_to_flac = self.convert_flac_var.get()
+        changed = []
+        for track_path in track_locations:
+            try:
+                if not os.path.exists(track_path):
+                    continue
+                file_ext = os.path.splitext(track_path)[1].lower()
+                base_name = self.get_track_title(track_path) or os.path.splitext(os.path.basename(track_path))[0]
+                dest_ext = ".flac" if convert_to_flac and file_ext != '.flac' else file_ext
+                dest_path = os.path.join(dj_library, base_name + dest_ext)
+                if os.path.exists(dest_path) and source_changed_since_export(track_path, dest_path):
+                    changed.append({
+                        'source_path': track_path,
+                        'dest_filename': os.path.basename(dest_path),
+                        'source_time': os.path.getmtime(track_path),
+                        'export_time': os.path.getmtime(dest_path),
+                    })
+            except Exception:
+                continue
+        return sorted(changed, key=lambda c: c['dest_filename'].casefold())
+
     def calculate_new_tracks_for_selected(self):
         """Calculate new track counts only for selected playlists (button handler)"""
         # Check if playlists are loaded
@@ -1874,6 +1908,23 @@ class PlaylistSyncUI:
                     self.analysis_text.insert(tk.END, f"    Source: {track['source_filename']}\n")
                     self.analysis_text.insert(tk.END, f"    Will be saved as: {track['dest_filename']}\n\n")
 
+        # Tracks whose source file was replaced or edited after they were exported
+        self.status_var.set("Checking for changed source files...")
+        self.root.update_idletasks()
+        changed_sources = self.find_changed_sources(sorted(all_selected_track_locations))
+        self.analysis_text.insert(tk.END, "\n" + "=" * 80 + "\n")
+        self.analysis_text.insert(tk.END, "CHANGED TRACKS (source file modified after it was exported)\n")
+        self.analysis_text.insert(tk.END, "=" * 80 + "\n\n")
+        if changed_sources:
+            stamp = lambda t: datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+            for track in changed_sources:
+                self.analysis_text.insert(tk.END, f"  \u2022 {track['dest_filename']}\n")
+                self.analysis_text.insert(tk.END, f"    Source: {track['source_path']}  (modified {stamp(track['source_time'])})\n")
+                self.analysis_text.insert(tk.END, f"    Exported copy written {stamp(track['export_time'])}\n\n")
+            self.analysis_text.insert(tk.END, "These are replaced in the DJ Library the next time you run the sync.\n")
+        else:
+            self.analysis_text.insert(tk.END, "None - every exported copy is newer than its source.\n")
+
         # Now check for removed tracks (orphaned files in DJ Library)
         self.analysis_text.insert(tk.END, "\n" + "=" * 80 + "\n")
         self.analysis_text.insert(tk.END, "REMOVED TRACKS (No longer in selected playlists)\n")
@@ -1933,6 +1984,7 @@ class PlaylistSyncUI:
         self.analysis_text.insert(tk.END, "\n" + "=" * 80 + "\n")
         self.analysis_text.insert(tk.END, f"SUMMARY:\n")
         self.analysis_text.insert(tk.END, f"  New tracks: {total_new_found}\n")
+        self.analysis_text.insert(tk.END, f"  Changed tracks (replaced on next sync): {len(changed_sources)}\n")
         self.analysis_text.insert(tk.END, f"  Removed tracks: {len(removed_tracks)}\n")
         self.analysis_text.insert(tk.END, "=" * 80 + "\n")
 
@@ -1942,7 +1994,9 @@ class PlaylistSyncUI:
 
         # Show a message box with the results and switch to the Library Analysis tab
         messagebox.showinfo("Calculation Complete",
-                          f"Checked {total_selected} playlist(s)\nFound {total_new_found} new tracks total\n\nSee 'Library Analysis' tab for full details")
+                          f"Checked {total_selected} playlist(s)\nFound {total_new_found} new tracks total\n"
+                          f"Found {len(changed_sources)} track(s) whose source changed since export\n\n"
+                          f"See 'Library Analysis' tab for full details")
 
         # Switch to the Library Analysis tab
         self.results_notebook.select(0)
@@ -3218,6 +3272,7 @@ class PlaylistSyncUI:
         copied_count = 0
         converted_count = 0
         skipped_count = 0
+        refreshed_count = 0
         skipped_flac_count = 0
         error_count = 0
         album_art_embedded_count = 0
@@ -3298,8 +3353,11 @@ class PlaylistSyncUI:
                             f"→ Numbered duplicate: {os.path.basename(dest_path)}\n"
                         )
 
-                    # NOW check if file already exists and we should skip it (from previous run)
-                    if os.path.exists(dest_path) and skip_existing:
+                    # NOW check if file already exists and we should skip it (from previous run) - unless the
+                    # source was modified after that copy was written: then it is exported again.
+                    source_changed = (skip_existing and os.path.exists(dest_path)
+                                      and source_changed_since_export(track_path, dest_path))
+                    if os.path.exists(dest_path) and skip_existing and not source_changed:
                         # File exists and we want to skip - use the existing file
                         file_mapping[track_path] = dest_path
                         synced_tracks.append(dest_path)
@@ -3343,7 +3401,12 @@ class PlaylistSyncUI:
                         progress_msg = f"Processing track {i+1}/{total_tracks} ({progress_pct:.1f}%): {os.path.basename(track_path)}\n"
                     self.status_var.set(f"Processing track {i+1}/{total_tracks} ({progress_pct:.1f}%)")
                     
-                    if os.path.exists(dest_path):
+                    if source_changed:
+                        refreshed_count += 1
+                        self.append_to_text_widget(
+                            self.sync_text,
+                            f"{progress_msg}\u21bb Source changed since the last export, replacing: {os.path.basename(dest_path)}\n")
+                    elif os.path.exists(dest_path):
                         # File exists but skip_existing is False - log and continue
                         self.append_to_text_widget(self.sync_text, f"{progress_msg}File already exists, will overwrite: {os.path.basename(dest_path)}\n")
                     
@@ -3433,6 +3496,7 @@ class PlaylistSyncUI:
         self.append_to_text_widget(self.sync_text, f"Files with album art embedded: {album_art_embedded_count}\n")
         self.append_to_text_widget(self.sync_text, f"Files with playlist info in comment: {comment_metadata_count}\n")
         self.append_to_text_widget(self.sync_text, f"Files skipped (already exist): {skipped_count}\n")
+        self.append_to_text_widget(self.sync_text, f"Files replaced (source changed since export): {refreshed_count}\n")
         self.append_to_text_widget(self.sync_text, f"FLAC files copied directly: {skipped_flac_count}\n")
         self.append_to_text_widget(self.sync_text, f"Errors encountered: {error_count}\n")
         self.append_to_text_widget(self.sync_text, f"Total files in DJ Library: {len(os.listdir(dj_library))}\n")

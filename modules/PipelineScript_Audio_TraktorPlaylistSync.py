@@ -41,6 +41,8 @@ from shared_open_path import open_path
 from shared_scrollable_frame import ScrollableFrame, safe_bind_touchpad_scroll
 from shared_color_button import ColorButton
 from shared_appdata import get_appdata_path
+from shared_mode_lock import filter_mode_change, make_header_title, add_header_lock
+from shared_action_bar import ActionBar
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -109,6 +111,7 @@ class SyncSettings:
     playlist_presets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_preset: str = ""
     last_mode: str = ""
+    mode_locked: bool = False   # keep the hub's out/in switch where it is
     import_file_path: str = ""
     import_source_dir: str = ""      # drive/folder searched for the newest export
     import_keep_both: bool = False   # import changed playlists as copies, don't replace
@@ -154,7 +157,7 @@ class ConfigManager:
             return False
 
     def update_settings(self, **kwargs) -> None:
-        for key, value in kwargs.items():
+        for key, value in filter_mode_change(self.settings, kwargs).items():
             if hasattr(self.settings, key):
                 setattr(self.settings, key, value)
         self.save_settings()
@@ -940,7 +943,7 @@ class TraktorPlaylistSyncUI:
         self.root.minsize(900, 500)
 
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=1)
 
         self.config_manager = ConfigManager()
 
@@ -962,11 +965,14 @@ class TraktorPlaylistSyncUI:
         self._import_src_profile: Optional[MachineProfile] = None
 
         self._create_header()
+        # Save Settings + the main buttons live under the header, outside the scrolling body.
+        self.action_bar = ActionBar(self.root)
+        self.action_bar.grid(row=1, column=0, sticky="ew")
         self._create_body()
 
         self.status_var = tk.StringVar(value="Ready")
         self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.grid(row=2, column=0, sticky="ew")
+        self.status_bar.grid(row=3, column=0, sticky="ew")
 
         self._initialize_default_paths()
 
@@ -980,9 +986,7 @@ class TraktorPlaylistSyncUI:
         header = tk.Frame(self.root, bg=HEADER_COLOR, height=60)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
-        tk.Label(header, text=APP_NAME, font=("Arial", 16, "bold"), fg="white", bg=HEADER_COLOR).place(
-            relx=0.5, rely=0.5, anchor=tk.CENTER
-        )
+        self.mode_locked_var = add_header_lock(make_header_title(header, APP_NAME), self.config_manager)
 
     def _create_body(self):
         # Wrapped in a ScrollableFrame rather than gridded directly onto
@@ -991,7 +995,7 @@ class TraktorPlaylistSyncUI:
         # height, which would otherwise strand Save Settings/Export/Import
         # and the Results tabs off-screen with no way to reach them.
         scroll = ScrollableFrame(self.root)
-        scroll.grid(row=1, column=0, sticky="nsew")
+        scroll.grid(row=2, column=0, sticky="nsew")
         self._body_scroll = scroll
         # ScrollableFrame normally only activates its wheel binding while
         # the pointer is directly over its own background (<Enter>/<Leave>
@@ -1037,6 +1041,7 @@ class TraktorPlaylistSyncUI:
         import_tab = ttk.Frame(notebook)
         notebook.add(import_tab, text="Import")
         self._create_import_tab(import_tab)
+        self.action_bar.follow(notebook, ["export", "import"])
 
         self._create_results_panel(main)
 
@@ -1192,16 +1197,9 @@ class TraktorPlaylistSyncUI:
         ttk.Button(btn_frame, text="Clear All", command=self._clear_all).grid(row=0, column=1, padx=5)
         ttk.Button(btn_frame, text="Auto Select", command=self._auto_select).grid(row=0, column=2, padx=5)
 
-        # --- Actions ---
-        action_frame = ttk.Frame(tab)
-        action_frame.grid(row=2, column=0, sticky="ew", pady=10)
-        action_frame.columnconfigure(1, weight=1)
-
-        ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).grid(row=0, column=0, padx=10)
-
-        right_btns = ttk.Frame(action_frame)
-        right_btns.grid(row=0, column=1, sticky="e", padx=10)
-        self.export_btn = ColorButton(right_btns, text="Export", command=self._export, width=15,
+        # --- Actions (in the action bar under the header) ---
+        self.action_bar.add_save_button(self._save_settings)
+        self.export_btn = ColorButton(self.action_bar.group("export"), text="Export", command=self._export, width=15,
                                        bg="green", fg="white", font=('', 9, 'bold'))
         self.export_btn.pack(side=tk.LEFT)
 
@@ -1276,16 +1274,11 @@ class TraktorPlaylistSyncUI:
         ttk.Button(import_btn_frame, text="Select All", command=self._select_all_import).grid(row=0, column=0, padx=5)
         ttk.Button(import_btn_frame, text="Clear All", command=self._clear_all_import).grid(row=0, column=1, padx=5)
 
-        # --- Actions ---
-        action_frame = ttk.Frame(tab)
-        action_frame.grid(row=2, column=0, sticky="ew", pady=10)
-        action_frame.columnconfigure(0, weight=1)
-
-        ttk.Button(action_frame, text="Save Settings", command=self._save_settings, width=15).pack(side=tk.LEFT, padx=10)
-
-        self.import_btn = ColorButton(action_frame, text="Import into Traktor", command=self._do_import, width=20,
+        # --- Actions (in the action bar under the header) ---
+        self.import_btn = ColorButton(self.action_bar.group("import"), text="Import into Traktor",
+                                       command=self._do_import, width=20,
                                        bg="#c0392b", fg="white", font=('', 9, 'bold'))
-        self.import_btn.pack(side=tk.RIGHT, padx=10)
+        self.import_btn.pack(side=tk.LEFT)
 
     def _create_results_panel(self, main):
         results_frame = ttk.LabelFrame(main, text="Results")

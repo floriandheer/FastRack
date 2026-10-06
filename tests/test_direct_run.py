@@ -33,6 +33,14 @@ def _direct_run_specs():
     return found
 
 
+def test_mode_switch_rows_know_their_module():
+    """The hub's out/in switch finds a tool's saved mode through entry['module']; without it the switch is inert."""
+    specs = [spec for spec in _direct_run_specs() if spec.get("mode_switch")]
+    assert specs
+    for spec in specs:
+        assert ui._script_entry(spec)["module"] == spec["module"]
+
+
 def test_traktor_tasks_are_one_click_tasks_with_existing_scripts():
     entries = {spec["module"]: ui._script_entry(spec) for spec in _direct_run_specs()}
     assert {"PipelineScript_Audio_TraktorSync", "PipelineScript_Audio_TraktorPlaylistSync",

@@ -1280,14 +1280,28 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             logger.warning(f"Could not read {module_name} mode: {e}")
             return "export"
 
-    def _set_traktor_mode(self, module_name, mode):
+    def _is_mode_locked(self, module_name):
+        """True when the tool's own settings lock its out/in switch."""
         if not module_name:
-            return
+            return False
+        try:
+            module = importlib.import_module(module_name)
+            return bool(getattr(module.ConfigManager().settings, "mode_locked", False))
+        except Exception as e:
+            logger.warning(f"Could not read {module_name} mode lock: {e}")
+            return False
+
+    def _set_traktor_mode(self, module_name, mode):
+        """Save the mode; False if the tool has it locked (or saving failed)."""
+        if not module_name or self._is_mode_locked(module_name):
+            return False
         try:
             module = importlib.import_module(module_name)
             module.ConfigManager().update_settings(last_mode=mode)
+            return True
         except Exception as e:
             logger.warning(f"Could not save {module_name} mode: {e}")
+            return False
 
     def _create_mode_switch(self, parent, module_name):
         """Two stacked half-height segments acting as a single switch (only
@@ -1311,16 +1325,35 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         in_label.pack(fill=tk.BOTH, expand=True, padx=8, pady=(1, 4))
 
         def refresh(mode):
+            # A locked tool keeps its mode: the option that isn't selected is greyed out.
+            locked = self._is_mode_locked(module_name)
+            idle_fg = "#484f58" if locked else COLORS["text_primary"]  # dim grey, still readable on the card
+            cursor = "arrow" if locked else "hand2"
+            for widget in (switch_frame, out_label, in_label):
+                widget.configure(cursor=cursor)
             if mode == "export":
                 out_label.configure(bg=out_color, fg=COLORS["bg_primary"])
-                in_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_primary"])
+                in_label.configure(bg=COLORS["bg_card"], fg=idle_fg)
             else:
-                out_label.configure(bg=COLORS["bg_card"], fg=COLORS["text_primary"])
+                out_label.configure(bg=COLORS["bg_card"], fg=idle_fg)
                 in_label.configure(bg=in_color, fg=COLORS["bg_primary"])
 
+        def flash_locked():
+            switch_frame.configure(highlightbackground=COLORS["error"], highlightcolor=COLORS["error"],
+                                   highlightthickness=2)
+            switch_frame.after(700, lambda: switch_frame.configure(
+                highlightbackground=COLORS["border"], highlightcolor=COLORS["border"], highlightthickness=1))
+
         def select(mode):
-            self._set_traktor_mode(module_name, mode)
-            refresh(mode)
+            # A locked tool keeps its saved mode (untick "lock out/in" in the tool's header to change it).
+            if self._is_mode_locked(module_name):
+                flash_locked()
+                logger.info(f"Mode switch {module_name}: click '{mode}' refused - mode is locked")
+            else:
+                saved = self._set_traktor_mode(module_name, mode)
+                logger.info(f"Mode switch {module_name}: click '{mode}' -> saved={saved}, "
+                            f"now '{self._get_traktor_mode(module_name)}'")
+            refresh(self._get_traktor_mode(module_name))
 
         refresh(self._get_traktor_mode(module_name))
         out_label.bind("<Button-1>", lambda e: select("export"))

@@ -1,6 +1,7 @@
 """Tests for shared_traktor_bundle (PC -> drive -> laptop transfer)."""
 
 import os
+from types import SimpleNamespace
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -232,3 +233,112 @@ def test_export_writes_composed_names_and_replaces_decomposed_copies(tmp_path):
 
     again = tb.export_bundle(str(library), str(xml), str(drive), lambda m: None)
     assert again.music.copied == 0 and again.music.skipped == 2
+
+
+def test_window_save_keeps_a_mode_changed_by_the_hub_switch(tmp_path, monkeypatch, tk_window):
+    monkeypatch.setattr(ds, "CONFIG_FILE", str(tmp_path / "cfg.json"))
+    monkeypatch.setattr(ds.ConfigManager.__init__, "__defaults__", (str(tmp_path / "cfg.json"),))
+    ds.ConfigManager().update_settings(last_mode="export")
+    root = tk_window
+    try:
+        ui = ds.DriveSyncUI(root)
+        ds.ConfigManager().update_settings(last_mode="import")  # hub switch flipped while the window is open
+        ui._save()                                              # what closing the window does
+        assert ds.ConfigManager().settings.last_mode == "import"
+        ui._save(last_mode="export")                            # running an export still sets the mode
+        assert ds.ConfigManager().settings.last_mode == "export"
+    finally:
+        pass
+
+
+# ---- a source file replaced after it was exported must reach the drive and the Mac
+
+def _touch(path, mtime):
+    os.utime(path, (mtime, mtime))
+
+
+def test_source_changed_since_export_compares_modified_dates(tmp_path):
+    import PipelineScript_Audio_TraktorSync as ts
+
+    src, dst = tmp_path / "src.flac", tmp_path / "dst.flac"
+    src.write_bytes(b"a")
+    dst.write_bytes(b"b")
+    _touch(src, 1_000_000)
+    _touch(dst, 1_000_000)
+    assert ts.source_changed_since_export(str(src), str(dst)) is False          # same time: nothing changed
+    _touch(src, 1_000_001)
+    assert ts.source_changed_since_export(str(src), str(dst)) is False          # within the 2 s file-system slack
+    _touch(src, 1_000_100)
+    assert ts.source_changed_since_export(str(src), str(dst)) is True           # source modified after the export
+    _touch(dst, 1_000_200)
+    assert ts.source_changed_since_export(str(src), str(dst)) is False          # export written after the edit
+    assert ts.source_changed_since_export(str(src), str(tmp_path / "missing.flac")) is False
+
+
+def test_export_replaces_a_track_whose_source_was_replaced(tmp_path):
+    import PipelineScript_Audio_TraktorSync as ts
+
+    log = []
+    stub = SimpleNamespace(append_to_text_widget=lambda widget, text: log.append(text), sync_text=None,
+                           status_var=SimpleNamespace(set=lambda s: None), get_track_title=lambda p: "Ghost Rockets")
+    source = tmp_path / "M" / "02 Ghost Rockets.flac"
+    source.parent.mkdir()
+    source.write_bytes(b"CORRUPT")
+    _touch(source, 1_000_000)
+    library = tmp_path / "DJ Library"
+
+    def sync():
+        log.clear()
+        ts.PlaylistSyncUI.update_dj_library(stub, [str(source)], str(library), skip_existing=True,
+                                            convert_to_flac=True, preserve_album_art=False)
+        return "".join(log)
+
+    sync()
+    exported = library / "Ghost Rockets.flac"
+    assert exported.read_bytes() == b"CORRUPT"
+
+    assert "Files skipped (already exist): 1" in sync() and exported.read_bytes() == b"CORRUPT"   # unchanged: skipped
+
+    source.write_bytes(b"GOOD-NEW")                    # the converted file is replaced on the M drive
+    _touch(source, 1_000_500)
+    text = sync()
+    assert exported.read_bytes() == b"GOOD-NEW"
+    assert "Source changed since the last export, replacing: Ghost Rockets.flac" in text
+    assert "Files replaced (source changed since export): 1" in text
+
+    assert "Files skipped (already exist): 1" in sync()                                            # and stable afterwards
+
+
+def test_replaced_file_with_the_same_size_still_reaches_the_drive_and_the_mac(tmp_path):
+    library = tmp_path / "DJ Library"
+    library.mkdir()
+    track = library / "Ghost Rockets.flac"
+    track.write_bytes(b"CORRUPT!")
+    _touch(track, 1_000_000)
+    xml = tmp_path / "DJ Library.xml"
+    xml.write_text(PC_XML, encoding="utf-8")
+    drive = tmp_path / "drive" / "DJ Transfer"
+    mac_library = tmp_path / "mac" / "DJ Library"
+    mac_xml = tmp_path / "mac" / "DJ Library.xml"
+    logs = []
+
+    tb.export_bundle(str(library), str(xml), str(drive), logs.append)
+    tb.import_bundle(str(drive), str(mac_library), str(mac_xml), logs.append, platform="darwin")
+    assert (mac_library / "Ghost Rockets.flac").read_bytes() == b"CORRUPT!"
+
+    track.write_bytes(b"GOODFILE")                                      # same size, newer modified date
+    _touch(track, 1_000_500)
+    logs.clear()
+    exp = tb.export_bundle(str(library), str(xml), str(drive), logs.append)
+    assert (drive / "DJ Library" / "Ghost Rockets.flac").read_bytes() == b"GOODFILE"
+    assert (exp.music.copied, exp.music.updated) == (1, 1)
+    assert any("Replaced older version of Ghost Rockets.flac" in m for m in logs)
+
+    logs.clear()
+    imp = tb.import_bundle(str(drive), str(mac_library), str(mac_xml), logs.append, platform="darwin")
+    assert (mac_library / "Ghost Rockets.flac").read_bytes() == b"GOODFILE"
+    assert (imp.music.copied, imp.music.updated) == (1, 1)
+    assert tb.copy_summary(imp.music) == "1 copied (1 replaced an older version), 0 unchanged"
+
+    again = tb.import_bundle(str(drive), str(mac_library), str(mac_xml), logs.append, platform="darwin")
+    assert (again.music.copied, again.music.skipped) == (0, 1)          # nothing is re-copied once it is current

@@ -304,7 +304,7 @@ def test_fix_rows_defaults_and_edits(dup_env, tmp_path):
     by = {(r.playlist, r.problem.split(" (")[0].split(" listed")[0]): r for r in rows}
     assert by[("WithDead", "Dead entry")].checked is True          # resolvable replace: safe default
     assert [r.checked for r in rows if r.problem.startswith("Same file")] == [True]
-    assert not any(r.checked for r in rows if r.problem.startswith("Same song"))
+    assert not any(r.checked for r in rows if r.label)           # same-song copies: no clear keeper here
     assert not any(r.checked for r in rows if r.action == "remove")  # dropping a song is always opt-in
 
     # tick one same-song file and the unresolved dead entry; the rest keeps its defaults
@@ -339,3 +339,153 @@ def test_run_preflight_without_window_resolves_in_memory(env, caplog):
     before = Path(env["pl_dir"], "A.mbp").read_bytes()
     assert Path(env["pl_dir"], "A.mbp").read_bytes() == before        # nothing written
     assert not os.path.exists(env["backup"])
+
+
+# ---------------------------------------------- same song in several files: grouped rows, M-drive hint
+
+def _same_song(paths, label="Avicii - Wake Me Up", details=None):
+    return mb.DuplicateIssue("Dupes", r"C:\pl\Dupes.mbp", "same_song", label, list(paths),
+                             details=details or [mb.FileInfo(f"album {n}", "FLAC", f"{n}0.0 MB", f"2024-0{n}-01")
+                                                 for n, _ in enumerate(paths, 1)])
+
+
+def test_same_song_group_lists_every_file_under_one_heading():
+    paths = [r"C:\Soulseek\Avicii - Wake Me Up.flac", r"M:\Avicii\True\Wake Me Up.flac", r"D:\x\Wake Me Up.mp3"]
+    rows = mb.build_fix_rows(mb.ScanReport(), [_same_song(paths)])
+    assert [r.header for r in rows] == [True, False, False, False]
+    head, files = rows[0], rows[1:]
+    assert head.problem == "Same song, 3 files" and head.entry == "Avicii - Wake Me Up" and not head.fixable
+    assert [r.path for r in files] == paths                       # full path of every copy, in order
+    assert [r.problem for r in files] == ["1 of 3", "2 of 3", "3 of 3"]
+    assert [r.detail.album for r in files] == ["album 1", "album 2", "album 3"]
+    assert {r.group for r in files} == {r"C:\pl\Dupes.mbp|Avicii - Wake Me Up"} and head.group == ""
+
+
+def test_exactly_one_copy_on_the_m_drive_is_recommended_and_the_rest_start_ticked():
+    paths = [r"C:\Soulseek\a.flac", r"m:\Avicii\a.flac"]          # drive letter case does not matter
+    files = [r for r in mb.build_fix_rows(mb.ScanReport(), [_same_song(paths)]) if r.group]
+    assert [(r.recommended, r.checked) for r in files] == [(False, True), (True, False)]
+    assert files[0].fix_text == "Remove from this playlist"
+    assert files[1].fix_text.startswith("Keep this file") and "M:" in files[1].fix_text
+    assert mb.edits_from_rows(files)[r"C:\pl\Dupes.mbp"].remove == {r"C:\Soulseek\a.flac"}
+
+
+@pytest.mark.parametrize("paths", [
+    [r"C:\a\x.flac", r"D:\b\x.flac"],                              # none on M
+    [r"M:\a\x.flac", r"M:\b\x.flac"],                              # both on M
+])
+def test_no_clear_keeper_means_nothing_is_ticked(paths):
+    files = [r for r in mb.build_fix_rows(mb.ScanReport(), [_same_song(paths)]) if r.group]
+    assert not any(r.checked or r.recommended for r in files)
+    assert all(r.fix_text == "Keep this file" for r in files)
+
+
+def test_groups_stay_together_when_sorted():
+    a = _same_song([r"C:\1.flac", r"C:\2.flac"], label="Zed - Last")
+    b = _same_song([r"C:\3.flac", r"C:\4.flac"], label="Abe - First")
+    rows = mb.build_fix_rows(mb.ScanReport(), [a, b])
+    assert [(r.label, r.header) for r in rows] == [("Abe - First", True), ("Abe - First", False),
+                                                   ("Abe - First", False), ("Zed - Last", True),
+                                                   ("Zed - Last", False), ("Zed - Last", False)]
+
+
+@windows_only
+def test_find_duplicates_describes_each_file(dup_env):
+    issue = next(i for i in mb.find_duplicates(dup_env["pl"], dup_env["index"]) if i.kind == "same_song")
+    assert len(issue.details) == len(issue.paths) == 2
+    assert [(d.album, d.format) for d in issue.details] == [("True", "FLAC"), ("Hits", "FLAC")]
+    assert all(d.size.endswith(" MB") and len(d.date) == 10 for d in issue.details)
+    assert mb.describe_file(r"C:\no\such\file.mp3", None) == mb.FileInfo("", "MP3", "not found", "")
+    assert mb.FileInfo("A", "FLAC", "1.0 MB", "2024-01-01").as_text() == "A | FLAC | 1.0 MB | 2024-01-01"
+
+
+def test_cleanup_window_keep_selected_ticks_the_other_copies(monkeypatch, tk_window):
+    import PipelineScript_Audio_MusicBeeCleanup as cleanup
+
+    monkeypatch.setattr(cleanup.CleanupApp, "_start_scan", lambda self: None)   # no scan, no dialogs
+    root = tk_window
+    try:
+        app = cleanup.CleanupApp(root)
+        paths = [r"C:\a\x.flac", r"D:\b\x.flac", r"E:\c\x.flac"]
+        issue = _same_song(paths)
+        app._scan_done(mb.FullScan("pl", 0.0, 0.0, mb.ScanReport(playlists_scanned=1), [issue], [], [], []))
+        iids = {r.path: iid for iid, r in app.rows.items() if r.group}
+        assert not any(r.checked for r in app.rows.values())
+        assert "1 finding(s)" not in app.summary_var.get() and "3 finding(s)" in app.summary_var.get()
+
+        # Enter ticks / unticks the selected copy; a group heading has no box and is left alone
+        assert app.tree.bind("<Return>") and app.tree.bind("<KP_Enter>")
+        app.tree.selection_set(iids[paths[2]])
+        assert app._on_tree_return() == "break" and app.rows[iids[paths[2]]].checked is True
+        assert app.tree.set(iids[paths[2]], "check") == cleanup.CHECKED
+        assert app.tree.set(iids[paths[2]], "fix") == "Remove from this playlist"
+        app._on_tree_return()
+        assert app.rows[iids[paths[2]]].checked is False
+        header = next(i for i, r in app.rows.items() if r.header)
+        app.tree.selection_set(header)
+        app._on_tree_return()
+        assert not any(r.checked for r in app.rows.values())
+
+        app.tree.selection_set(iids[paths[1]])
+        app._keep_selected()
+        assert [app.rows[iids[p]].checked for p in paths] == [True, False, True]
+        assert app.tree.set(iids[paths[1]], "fix").startswith("Keep this file")
+        assert app.tree.set(iids[paths[0]], "fix") == "Remove from this playlist"
+        assert app.tree.set(iids[paths[0]], "entry") == paths[0]                 # full path shown
+        assert [app.tree.set(iids[paths[0]], c) for c in ("album", "format", "size", "date")] == [
+            "album 1", "FLAC", "10.0 MB", "2024-01-01"]
+        assert app.tree.set(next(i for i, r in app.rows.items() if r.header), "album") == ""
+    finally:
+        pass
+
+
+def test_fix_flow_shows_a_readable_confirmation_and_result(monkeypatch, tk_window):
+    import PipelineScript_Audio_MusicBeeCleanup as cleanup
+
+    shown = []
+
+    def fake_dialog(parent, title, heading, **options):
+        shown.append((heading, options))
+        return "apply"
+
+    monkeypatch.setattr(cleanup.CleanupApp, "_start_scan", lambda self: None)
+    monkeypatch.setattr(cleanup.dialogs, "show_dialog", fake_dialog)
+    monkeypatch.setattr(cleanup.mb, "musicbee_running", lambda: False)
+    monkeypatch.setattr(cleanup.mb, "apply_edits", lambda edits, apply=False, **kw: mb.RepairResult(
+        files_changed=[r"C:\pl\Deep House.mbp"], removed=1, backup_dir=r"C:\backups\2026", applied=True))
+    root = tk_window
+    try:
+        app = cleanup.CleanupApp(root)
+        paths = [r"C:\Soulseek\x.flac", r"M:\Lib\x.flac"]
+        app._scan_done(mb.FullScan("pl", 0.0, 0.0, mb.ScanReport(playlists_scanned=1),
+                                   [_same_song(paths, label="A - B")], [], [], []))
+        app._fix_ticked()                                          # the M: copy is kept, the other is ticked
+
+        confirm, result = shown
+        assert confirm[0] == "Apply 1 fix to 1 playlist?"
+        assert confirm[1]["facts"] == [("Remove entries from playlists", "1")]
+        assert ("Dupes   (1 change)", "head") in confirm[1]["items"]
+        assert (r"Remove this copy of A - B:  C:\Soulseek\x.flac", "line") in confirm[1]["items"]
+        assert [b[1] for b in confirm[1]["buttons"]] == ["cancel", "apply"] and confirm[1]["default"] == "apply"
+        assert result[0] == "Done: 1 playlist changed" and result[1]["kind"] == "success"
+        assert result[1]["facts"] == [("Entries removed from playlists", "1")]
+    finally:
+        pass
+
+
+def test_ticking_every_copy_warns_by_song_name(monkeypatch, tk_window):
+    import PipelineScript_Audio_MusicBeeCleanup as cleanup
+
+    warned = []
+    monkeypatch.setattr(cleanup.CleanupApp, "_start_scan", lambda self: None)
+    monkeypatch.setattr(cleanup.dialogs, "show_warning", lambda parent, title, heading, text="", **kw: warned.append((heading, text)))
+    root = tk_window
+    try:
+        app = cleanup.CleanupApp(root)
+        app._scan_done(mb.FullScan("pl", 0.0, 0.0, mb.ScanReport(playlists_scanned=1),
+                                   [_same_song([r"C:\a.flac", r"D:\b.flac"], label="A - B")], [], [], []))
+        app._set_all(True)
+        app._fix_ticked()
+        assert warned and warned[0][0] == "Keep at least one copy of each song" and "A - B" in warned[0][1]
+    finally:
+        pass

@@ -31,6 +31,8 @@ from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_appdata import get_appdata_path
 from shared_color_button import ColorButton
+from shared_mode_lock import filter_mode_change, make_header_title, add_header_lock
+from shared_action_bar import ActionBar
 import shared_traktor_bundle as bundle
 
 logger = get_logger("traktor_drive_sync")
@@ -68,6 +70,7 @@ def _traktor_sync_defaults() -> tuple:
 class DriveSyncSettings:
     """Everything the window offers, saved between runs."""
     last_mode: str = ""              # "export" | "import" - what the one-click button replays
+    mode_locked: bool = False        # keep the hub's out/in switch where it is
     export_library: str = ""
     export_xml: str = ""
     export_bundle: str = ""
@@ -110,7 +113,7 @@ class ConfigManager:
             return False
 
     def update_settings(self, **kwargs) -> None:
-        for key, value in kwargs.items():
+        for key, value in filter_mode_change(self.settings, kwargs).items():
             if hasattr(self.settings, key):
                 setattr(self.settings, key, value)
         self.save_settings()
@@ -168,7 +171,7 @@ def run_export(settings: DriveSyncSettings, log: Log):
             playlist_file=playlist_file, machine_name=socket.gethostname(), prune=settings.export_prune,
         )
     m = result.music
-    log(f"\nDone: {m.copied} copied, {m.skipped} unchanged, {m.pruned} removed, {m.errors} error(s).")
+    log(f"\nDone: {bundle.copy_summary(m)}, {m.pruned} removed, {m.errors} error(s).")
     return result, playlist_file is not None
 
 
@@ -179,14 +182,14 @@ def run_import(settings: DriveSyncSettings, log: Log):
         overwrite=settings.import_overwrite,
     )
     m = result.music
-    log(f"\nDone: {m.copied} copied, {m.skipped} unchanged, {m.errors} error(s).")
+    log(f"\nDone: {bundle.copy_summary(m)}, {m.errors} error(s).")
     return result
 
 
 def open_playlist_review(playlist_file: str, bundle_dir: str) -> None:
     """Point Traktor Playlist Sync's Import tab at the bundle's playlist file and open it."""
     from PipelineScript_Audio_TraktorPlaylistSync import ConfigManager as PlaylistConfig
-    PlaylistConfig().update_settings(import_file_path=playlist_file, import_source_dir=bundle_dir, last_mode="import")
+    PlaylistConfig().update_settings(import_file_path=playlist_file, import_source_dir=bundle_dir)
     subprocess.Popen([sys.executable, PLAYLIST_SCRIPT], cwd=os.path.dirname(PLAYLIST_SCRIPT))
 
 
@@ -258,7 +261,7 @@ class DriveSyncUI:
         self.root.geometry("820x720")
         self.root.minsize(700, 520)
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=1)
         self.busy = False
 
         self.config_manager = ConfigManager()
@@ -266,10 +269,17 @@ class DriveSyncUI:
 
         header = tk.Frame(root, bg=HEADER_COLOR)
         header.grid(row=0, column=0, sticky="ew")
-        tk.Label(header, text=APP_NAME, bg=HEADER_COLOR, fg="white", font=("Arial", 16, "bold")).pack(pady=12)
+        header.configure(height=60)
+        header.grid_propagate(False)
+        self.mode_locked = add_header_lock(make_header_title(header, APP_NAME), self.config_manager)
+
+        # Save Settings + the main buttons live under the header.
+        self.action_bar = ActionBar(root)
+        self.action_bar.grid(row=1, column=0, sticky="ew")
+        self.action_bar.add_save_button(self._save_clicked)
 
         main = ttk.Frame(root)
-        main.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        main.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(1, weight=1)
 
@@ -295,9 +305,10 @@ class DriveSyncUI:
                         variable=self.exp_playlists).grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=2)
         ttk.Checkbutton(export_tab, text="Remove files from the drive that are no longer in my DJ Library",
                         variable=self.exp_prune).grid(row=4, column=0, columnspan=3, sticky="w", padx=10, pady=2)
-        self.export_btn = ColorButton(export_tab, text="Export everything to drive", command=self._start_export,
-                                      width=26, bg="#27ae60", fg="white", font=("", 9, "bold"))
-        self.export_btn.grid(row=5, column=0, columnspan=3, sticky="e", padx=10, pady=10)
+        self.export_btn = ColorButton(self.action_bar.group("export"), text="Export everything to drive",
+                                      command=self._start_export, width=26, bg="#27ae60", fg="white",
+                                      font=("", 9, "bold"))
+        self.export_btn.pack(side=tk.LEFT)
         export_tab.columnconfigure(1, weight=1)
 
         # --- Import tab ---
@@ -317,9 +328,11 @@ class DriveSyncUI:
                         variable=self.imp_overwrite).grid(row=4, column=0, columnspan=3, sticky="w", padx=10, pady=2)
         ttk.Checkbutton(import_tab, text="Then open Traktor Playlist Sync to review and merge the playlists",
                         variable=self.imp_review).grid(row=5, column=0, columnspan=3, sticky="w", padx=10, pady=2)
-        self.import_btn = ColorButton(import_tab, text="Import from drive", command=self._start_import,
-                                      width=26, bg="#c0392b", fg="white", font=("", 9, "bold"))
-        self.import_btn.grid(row=6, column=0, columnspan=3, sticky="e", padx=10, pady=10)
+        self.import_btn = ColorButton(self.action_bar.group("import"), text="Import from drive",
+                                      command=self._start_import, width=26, bg="#c0392b", fg="white",
+                                      font=("", 9, "bold"))
+        self.import_btn.pack(side=tk.LEFT)
+        self.action_bar.follow(self.notebook, ["export", "import"])
         import_tab.columnconfigure(1, weight=1)
         self.imp_bundle.trace_add("write", lambda *a: self._refresh_bundle_info())
         self._refresh_bundle_info()
@@ -370,10 +383,12 @@ class DriveSyncUI:
         self.root.after(0, lambda: (self.export_btn.config(state=state), self.import_btn.config(state=state)))
 
     def _collect(self) -> DriveSyncSettings:
-        """The window's current choices as settings (last_mode left as saved)."""
-        s = self.config_manager.settings
+        """The window's current choices as settings. last_mode is read fresh from
+        disk: the hub's out/in switch may have changed it while this window was
+        open, and saving a stale copy would undo that."""
         return DriveSyncSettings(
-            last_mode=s.last_mode,
+            last_mode=ConfigManager(self.config_manager.config_path).settings.last_mode,
+            mode_locked=self.mode_locked.get(),
             export_library=self.exp_library.get().strip(), export_xml=self.exp_xml.get().strip(),
             export_bundle=self.exp_bundle.get().strip(), export_playlists=self.exp_playlists.get(),
             export_prune=self.exp_prune.get(),
@@ -385,6 +400,10 @@ class DriveSyncUI:
     def _save(self, **extra):
         self.config_manager.settings = self._collect()
         self.config_manager.update_settings(**extra)
+
+    def _save_clicked(self):
+        self._save()
+        self._log("Settings saved.")
 
     def _on_close(self):
         self._save()
@@ -418,7 +437,7 @@ class DriveSyncUI:
             self.root.after(0, lambda: messagebox.showinfo(
                 "Export complete",
                 f"Everything is on the drive:\n{self.exp_bundle.get()}\n\n"
-                f"{m.copied} file(s) copied, {m.skipped} unchanged."
+                f"{bundle.copy_summary(m)}."
                 + ("" if with_playlists or not self.exp_playlists.get()
                    else "\n\nTraktor playlists were NOT included - see the log."),
             ))
@@ -462,7 +481,7 @@ class DriveSyncUI:
         review = self.imp_review.get() and result.playlist_file
         messagebox.showinfo(
             "Import complete",
-            f"{result.music.copied} file(s) copied, XML updated for this machine."
+            f"{bundle.copy_summary(result.music)}. XML updated for this machine."
             + ("\n\nTraktor Playlist Sync will open to review the playlists." if review else
                "\n\nThis bundle has no Traktor playlists." if not result.playlist_file else ""),
         )

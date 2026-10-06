@@ -572,6 +572,39 @@ def song_key(track: LibraryTrack) -> Optional[Tuple[Tuple[str, ...], Tuple[str, 
     return (artist, title) if artist and title else None
 
 
+# Music on the M drive is normally already in its proper place, so when one copy of a song is there
+# and the others are not, that copy is the one to keep.
+PREFERRED_DRIVES = ("m:",)
+
+
+def on_preferred_drive(path: str) -> bool:
+    return norm_path(path)[:2] in PREFERRED_DRIVES
+
+
+@dataclass
+class FileInfo:
+    """What tells copies of one song apart, one value per column."""
+    album: str = ""
+    format: str = ""
+    size: str = ""
+    date: str = ""
+
+    def as_text(self) -> str:
+        return " | ".join(p for p in (self.album, self.format, self.size, self.date) if p)
+
+
+def describe_file(path: str, track: Optional["LibraryTrack"]) -> FileInfo:
+    info = FileInfo(album=track.album if track is not None else "",
+                    format=os.path.splitext(path)[1].lstrip(".").upper())
+    try:
+        st = os.stat(path)
+        info.size = f"{st.st_size / 1048576:.1f} MB"
+        info.date = time.strftime("%Y-%m-%d", time.localtime(st.st_mtime))
+    except OSError:
+        info.size = "not found"
+    return info
+
+
 @dataclass
 class DuplicateIssue:
     playlist: str
@@ -580,6 +613,7 @@ class DuplicateIssue:
     label: str
     paths: List[str] = field(default_factory=list)   # stored entries involved (same_song: one per distinct file)
     extra: int = 0                # exact: number of redundant copies
+    details: List["FileInfo"] = field(default_factory=list)  # same_song: describe_file() for each path
 
 
 def find_duplicates(playlists_dir: str, index: LibraryIndex,
@@ -615,7 +649,9 @@ def find_duplicates(playlists_dir: str, index: LibraryIndex,
         for paths in songs.values():
             if len(paths) > 1:
                 t = index.track_for_path(paths[0])
-                out.append(DuplicateIssue(name, file, "same_song", f"{t.artist} - {t.title}", paths))
+                details = [describe_file(p, index.track_for_path(p)) for p in paths]
+                out.append(DuplicateIssue(name, file, "same_song", f"{t.artist} - {t.title}", paths,
+                                          details=details))
     return out
 
 
@@ -690,10 +726,23 @@ class FixRow:
     new_path: str = ""         # replace target
     checked: bool = False      # safe fixes start ticked; anything that drops a song starts unticked
     group: str = ""            # same-song group, so every copy of a song can't be removed at once
+    label: str = ""            # same-song rows: "Artist - Title"
+    detail: Optional["FileInfo"] = None   # same-song rows: album, format, size, date of this file
+    recommended: bool = False  # same-song rows: the copy to keep (on the preferred drive)
+    header: bool = False       # same-song group heading; carries no action of its own
 
     @property
     def fixable(self) -> bool:
         return self.action != "none"
+
+    @property
+    def fix_text(self) -> str:
+        """What the Fix column shows. Same-song copies follow their tick: ticked = removed, else kept."""
+        if not self.group:
+            return self.fix
+        if self.checked:
+            return "Remove from this playlist"
+        return "Keep this file" + (" (on M: - recommended)" if self.recommended else "")
 
 
 def build_fix_rows(report: ScanReport, dupes: Sequence[DuplicateIssue]) -> List[FixRow]:
@@ -722,16 +771,30 @@ def build_fix_rows(report: ScanReport, dupes: Sequence[DuplicateIssue]) -> List[
                                "dedupe", d.paths[0], checked=True))
         else:
             group = f"{d.file}|{d.label}"
-            for p in d.paths:
-                rows.append(FixRow(d.playlist, d.file, "Same song, several files", f"{d.label}  |  {p}",
-                                   "Remove this file from the playlist", "remove", p, group=group))
+            on_preferred = [p for p in d.paths if on_preferred_drive(p)]
+            keeper = on_preferred[0] if len(on_preferred) == 1 and len(d.paths) > 1 else None
+            hint = "Recommended: keep the M: copy" if keeper else "Tick the copies to remove"
+            rows.append(FixRow(d.playlist, d.file, f"Same song, {len(d.paths)} files", d.label, hint, "none",
+                               label=d.label, header=True))
+            details = list(d.details) + [FileInfo()] * (len(d.paths) - len(d.details))
+            for n, (p, detail) in enumerate(zip(d.paths, details), 1):
+                rows.append(FixRow(d.playlist, d.file, f"{n} of {len(d.paths)}", p, "", "remove", p,
+                                   checked=keeper is not None and p != keeper, group=group, label=d.label,
+                                   detail=detail, recommended=p == keeper))
+
     def rank(problem: str) -> int:
         for n, prefix in enumerate(("Dead entry", "Same file", "Same song", "In staging")):
             if problem.startswith(prefix):
                 return n
         return 4
 
-    rows.sort(key=lambda r: (r.playlist.casefold(), rank(r.problem), r.entry.casefold()))
+    def order(r: FixRow):
+        # A same-song group stays together: heading first, then its files in the order found.
+        if r.label:
+            return (r.playlist.casefold(), rank("Same song"), r.label.casefold(), 0 if r.header else 1)
+        return (r.playlist.casefold(), rank(r.problem), r.entry.casefold(), 0, "")
+
+    rows.sort(key=order)
     return rows
 
 
