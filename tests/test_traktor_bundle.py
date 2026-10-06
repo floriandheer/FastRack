@@ -126,3 +126,25 @@ def test_export_prune_removes_stale_drive_files(tmp_path):
 def test_import_rejects_non_bundle(tmp_path):
     with pytest.raises(FileNotFoundError):
         tb.import_bundle(str(tmp_path), str(tmp_path / "lib"), str(tmp_path / "x.xml"), lambda m: None)
+
+
+def test_accented_names_survive_unicode_form_differences(tmp_path):
+    nfd = "Sira\u0304t.flac"   # as stored on the PC: a + combining macron
+    nfc = "Sir\u0101t.flac"    # as a Mac may list it
+    library = tmp_path / "lib"
+    make_library(library, [nfd])
+    xml = tmp_path / "x.xml"
+    xml.write_text(PC_XML.replace("Gone.flac", nfd), encoding="utf-8")
+    drive = tmp_path / "drive"
+    tb.export_bundle(str(library), str(xml), str(drive), lambda m: None)
+
+    messages = []
+    imp = tb.import_bundle(str(drive), str(tmp_path / "mac" / "DJ Library"), str(tmp_path / "mac.xml"),
+                           messages.append, platform="darwin")
+    assert imp.music.copied == 1 and imp.music.errors == 0
+    assert not any("after the copy" in m for m in messages)
+
+    # Names that differ only in Unicode form count as the same track.
+    assert tb._nfc(nfd) == tb._nfc(nfc)
+    _, missing = tb.localize_itunes_xml(str(xml), str(tmp_path / "o.xml"), "/m", "darwin", available={tb._nfc(nfc)})
+    assert missing == 1  # only "One & Two.flac" is absent; the accented track is matched

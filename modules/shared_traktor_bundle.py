@@ -19,6 +19,7 @@ import os
 import posixpath
 import shutil
 import sys
+import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -65,14 +66,23 @@ class ImportResult:
 
 def _library_files(folder: str) -> List[str]:
     """Top-level files of a DJ Library folder; subfolders such as _Removed are not part of it."""
+    # scandir reports the type straight from the directory listing. Looking each
+    # name up again (os.path.isfile) can fail for names with accents when the
+    # drive and the OS disagree on Unicode form (macOS vs Windows), which would
+    # silently drop the track from the copy.
     try:
-        names = os.listdir(folder)
+        with os.scandir(folder) as entries:
+            return sorted(
+                e.name for e in entries
+                if e.name.lower() not in _IGNORED_FILES and not e.is_dir(follow_symlinks=False)
+            )
     except OSError:
         return []
-    return sorted(
-        n for n in names
-        if os.path.isfile(os.path.join(folder, n)) and n.lower() not in _IGNORED_FILES
-    )
+
+
+def _nfc(name: str) -> str:
+    """Canonical Unicode form for comparing names: 'a'+U+0304 and 'ā' are the same file name."""
+    return unicodedata.normalize("NFC", name)
 
 
 def needs_copy(src: str, dst: str) -> bool:
@@ -107,9 +117,9 @@ def sync_folder(src_dir: str, dst_dir: str, log: Log, prune: bool = False,
             log(f"ERROR copying {name}: {e}")
 
     if prune:
-        keep = set(source_names)
+        keep = {_nfc(n) for n in source_names}
         for name in _library_files(dst_dir):
-            if name in keep:
+            if _nfc(name) in keep:
                 continue
             try:
                 os.remove(os.path.join(dst_dir, name))
@@ -169,7 +179,7 @@ def localize_itunes_xml(src_xml: str, dst_xml: str, dest_dj_library: str,
                 name = _url_basename(nxt.text)
                 nxt.text = path_to_itunes_url(os.path.join(dest_dj_library, name), platform)
                 localized += 1
-                if available is not None and name not in available:
+                if available is not None and _nfc(name) not in available:
                     missing += 1
 
     with open(dst_xml, "w", encoding="utf-8") as f:
@@ -260,6 +270,14 @@ def import_bundle(bundle_dir: str, dest_dj_library: str, dest_xml: str, log: Log
     log(f"Copying music into {dest_dj_library} ...")
     result.music = sync_folder(src_music, dest_dj_library, log, overwrite=overwrite)
 
+    present = {_nfc(n) for n in _library_files(dest_dj_library)}
+    not_arrived = [n for n in _library_files(src_music) if _nfc(n) not in present]
+    if not_arrived:
+        result.music.errors += len(not_arrived)
+        log(f"WARNING: {len(not_arrived)} file(s) are in the bundle but not in {dest_dj_library} after the copy:")
+        for n in not_arrived[:50]:
+            log(f"  - {n}  (code points: {' '.join(f'{ord(c):04X}' for c in n)})")
+
     os.makedirs(os.path.dirname(os.path.abspath(dest_xml)), exist_ok=True)
     if os.path.exists(dest_xml):
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -267,7 +285,7 @@ def import_bundle(bundle_dir: str, dest_dj_library: str, dest_xml: str, log: Log
         shutil.copy2(dest_xml, result.xml_backup)
         log(f"Backed up existing XML to {result.xml_backup}")
 
-    available = set(_library_files(dest_dj_library))
+    available = {_nfc(n) for n in _library_files(dest_dj_library)}
     result.tracks_localized, result.tracks_missing = localize_itunes_xml(
         src_xml, dest_xml, dest_dj_library, platform=platform, available=available
     )
