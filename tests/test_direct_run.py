@@ -33,9 +33,11 @@ def _direct_run_specs():
     return found
 
 
-def test_both_traktor_tasks_are_one_click_tasks_with_existing_scripts():
+def test_traktor_tasks_are_one_click_tasks_with_existing_scripts():
     entries = {spec["module"]: ui._script_entry(spec) for spec in _direct_run_specs()}
-    assert {"PipelineScript_Audio_TraktorSync", "PipelineScript_Audio_TraktorPlaylistSync"} <= set(entries)
+    assert {"PipelineScript_Audio_TraktorSync", "PipelineScript_Audio_TraktorPlaylistSync",
+            "PipelineScript_Audio_TraktorDriveSync"} <= set(entries)
+    assert all(entries[m]["mode_switch"] for m in entries if m.startswith("PipelineScript_Audio_Traktor"))
     for entry in entries.values():
         assert entry["direct_run"] is True and os.path.isfile(entry["path"])
 
@@ -45,6 +47,8 @@ def test_both_traktor_tasks_are_one_click_tasks_with_existing_scripts():
     ("PipelineScript_Audio_TraktorPlaylistSync", "export", "EXPORT"),
     ("PipelineScript_Audio_TraktorSync", "import", "IMPORT"),
     ("PipelineScript_Audio_TraktorSync", "", "EXPORT"),
+    ("PipelineScript_Audio_TraktorDriveSync", "import", "IMPORT"),
+    ("PipelineScript_Audio_TraktorDriveSync", "", "EXPORT"),
 ])
 def test_direct_run_announces_the_mode_it_replays(monkeypatch, caplog, module, last_mode, expected):
     mod = __import__(module)

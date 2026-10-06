@@ -85,6 +85,22 @@ def _nfc(name: str) -> str:
     return unicodedata.normalize("NFC", name)
 
 
+def resolve_existing(folder: str, name: str) -> str:
+    """Path of `name` inside `folder`, tolerating Unicode form differences.
+
+    macOS can list a name from an exFAT drive (e.g. 'a' + combining macron, as
+    Windows stored it) and then fail to open that exact name. When the listed
+    name doesn't open, try its composed (NFC) and decomposed (NFD) forms."""
+    exact = os.path.join(folder, name)
+    if os.path.exists(exact):
+        return exact
+    for form in ("NFC", "NFD", "NFKC", "NFKD"):
+        candidate = os.path.join(folder, unicodedata.normalize(form, name))
+        if candidate != exact and os.path.exists(candidate):
+            return candidate
+    return exact  # let the caller's error report the original name
+
+
 def needs_copy(src: str, dst: str) -> bool:
     """True when dst is missing or differs from src (size, or src is newer)."""
     try:
@@ -96,25 +112,42 @@ def needs_copy(src: str, dst: str) -> bool:
 
 
 def sync_folder(src_dir: str, dst_dir: str, log: Log, prune: bool = False,
-                overwrite: bool = False) -> CopyStats:
+                overwrite: bool = False, compose_names: bool = False) -> CopyStats:
     """Copy new/changed top-level files from src_dir into dst_dir. With prune,
-    files in dst_dir that no longer exist in src_dir are deleted."""
+    files in dst_dir that no longer exist in src_dir are deleted.
+
+    compose_names writes every file under its composed (NFC) Unicode name and
+    removes older decomposed copies of the same file. Windows keeps names such
+    as 'a' + combining macron exactly as the library has them, and macOS cannot
+    open those on an exFAT drive; the composed spelling opens everywhere."""
     stats = CopyStats()
     os.makedirs(dst_dir, exist_ok=True)
     source_names = _library_files(src_dir)
     total = len(source_names)
     for index, name in enumerate(source_names, 1):
-        src, dst = os.path.join(src_dir, name), os.path.join(dst_dir, name)
+        dst_name = _nfc(name) if compose_names else name
+        src, dst = resolve_existing(src_dir, name), os.path.join(dst_dir, dst_name)
         try:
             if overwrite or needs_copy(src, dst):
                 shutil.copy2(src, dst)
                 stats.copied += 1
-                log(f"[{index}/{total}] Copied {name}")
+                log(f"[{index}/{total}] Copied {dst_name}")
             else:
                 stats.skipped += 1
         except OSError as e:
             stats.errors += 1
             log(f"ERROR copying {name}: {e}")
+
+    if compose_names:
+        composed = {_nfc(n) for n in source_names}
+        for name in _library_files(dst_dir):
+            if name != _nfc(name) and _nfc(name) in composed:
+                try:
+                    os.remove(os.path.join(dst_dir, name))
+                    log(f"Replaced older decomposed copy of {_nfc(name)}")
+                except OSError as e:
+                    stats.errors += 1
+                    log(f"ERROR removing old copy of {_nfc(name)}: {e}")
 
     if prune:
         keep = {_nfc(n) for n in source_names}
@@ -203,7 +236,8 @@ def export_bundle(dj_library_dir: str, itunes_xml: str, bundle_dir: str, log: Lo
 
     result = ExportResult()
     log(f"Copying music to {os.path.join(bundle_dir, MUSIC_SUBFOLDER)} ...")
-    result.music = sync_folder(dj_library_dir, os.path.join(bundle_dir, MUSIC_SUBFOLDER), log, prune=prune)
+    result.music = sync_folder(dj_library_dir, os.path.join(bundle_dir, MUSIC_SUBFOLDER), log, prune=prune,
+                               compose_names=True)
 
     shutil.copy2(itunes_xml, os.path.join(bundle_dir, XML_NAME))
     result.xml_copied = True

@@ -148,3 +148,87 @@ def test_accented_names_survive_unicode_form_differences(tmp_path):
     assert tb._nfc(nfd) == tb._nfc(nfc)
     _, missing = tb.localize_itunes_xml(str(xml), str(tmp_path / "o.xml"), "/m", "darwin", available={tb._nfc(nfc)})
     assert missing == 1  # only "One & Two.flac" is absent; the accented track is matched
+
+
+# ---- Traktor Drive Sync: remembered settings and one-click runs ----
+
+import PipelineScript_Audio_TraktorDriveSync as ds  # noqa: E402
+
+
+def test_settings_are_remembered(tmp_path):
+    path = str(tmp_path / "cfg.json")
+    first = ds.ConfigManager(path)
+    first.update_settings(last_mode="import", export_prune=True, import_bundle="G:/DJ Transfer", bogus=1)
+    again = ds.ConfigManager(path).settings
+    assert (again.last_mode, again.export_prune, again.import_bundle) == ("import", True, "G:/DJ Transfer")
+    assert again.export_playlists is True and again.import_review is True
+
+
+def test_locate_bundle_prefers_saved_folder(tmp_path):
+    assert ds.locate_bundle(str(tmp_path)) == str(tmp_path)
+
+
+def test_headless_export_then_import_use_saved_settings(tmp_path, monkeypatch):
+    library = tmp_path / "pc" / "DJ Library"
+    make_library(library, ["a.flac", "b.flac"])
+    xml = tmp_path / "pc" / "DJ Library.xml"
+    xml.write_text(PC_XML, encoding="utf-8")
+    drive = tmp_path / "drive" / "DJ Transfer"
+    monkeypatch.setattr(ds, "default_bundle_dir", lambda: "")
+
+    pc = ds.ConfigManager(str(tmp_path / "pc.json"))
+    pc.update_settings(export_library=str(library), export_xml=str(xml), export_bundle=str(drive),
+                       export_playlists=False)
+    assert ds.run_headless_export(pc) is True
+    assert pc.settings.last_mode == "export" and (drive / "bundle.json").exists()
+
+    opened = []
+    monkeypatch.setattr(ds, "open_playlist_review", lambda *a: opened.append(a))
+    laptop = ds.ConfigManager(str(tmp_path / "laptop.json"))
+    laptop.update_settings(import_bundle=str(drive), import_library=str(tmp_path / "lap" / "DJ Library"),
+                           import_xml=str(tmp_path / "lap" / "DJ Library.xml"))
+    assert ds.run_headless_import(laptop) is True
+    assert laptop.settings.last_mode == "import"
+    assert (tmp_path / "lap" / "DJ Library" / "a.flac").exists() and not opened  # no playlists in this bundle
+
+
+def test_headless_import_fails_cleanly_without_a_bundle(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "locate_bundle", lambda saved: saved)
+    cfg = ds.ConfigManager(str(tmp_path / "c.json"))
+    cfg.update_settings(import_bundle=str(tmp_path / "nothing"))
+    assert ds.run_headless_import(cfg) is False
+
+
+def test_copy_succeeds_when_listed_name_will_not_open(tmp_path, monkeypatch):
+    """macOS + exFAT: the listing gives the decomposed name but opening it fails; the composed form opens."""
+    nfc, nfd = "Sir\u0101t.flac", "Sira\u0304t.flac"
+    src = tmp_path / "drive" / "DJ Library"
+    make_library(src, [nfc])  # only the composed spelling exists on disk (NTFS keeps the forms apart)
+    if (src / nfd).exists():
+        pytest.skip("filesystem treats both Unicode forms as the same file")
+    real = tb._library_files
+    monkeypatch.setattr(tb, "_library_files", lambda folder: [nfd] if folder == str(src) else real(folder))
+
+    stats = tb.sync_folder(str(src), str(tmp_path / "mac" / "DJ Library"), lambda m: None)
+    assert (stats.copied, stats.errors) == (1, 0)
+    assert tb._nfc(nfc) in {tb._nfc(n) for n in real(str(tmp_path / "mac" / "DJ Library"))}
+
+
+def test_export_writes_composed_names_and_replaces_decomposed_copies(tmp_path):
+    nfd, nfc = "Sira\u0304t.flac", "Sir\u0101t.flac"
+    library = tmp_path / "lib"
+    make_library(library, [nfd, "plain.flac"])
+    if len(os.listdir(library)) != 2:
+        pytest.skip("filesystem merges Unicode forms")
+    xml = tmp_path / "x.xml"
+    xml.write_text(PC_XML, encoding="utf-8")
+    drive = tmp_path / "drive"
+    music = drive / "DJ Library"
+    make_library(music, [nfd])  # an older bundle that holds the decomposed spelling
+
+    result = tb.export_bundle(str(library), str(xml), str(drive), lambda m: None)
+    assert sorted(os.listdir(music)) == sorted([nfc, "plain.flac"])
+    assert result.music.errors == 0
+
+    again = tb.export_bundle(str(library), str(xml), str(drive), lambda m: None)
+    assert again.music.copied == 0 and again.music.skipped == 2
