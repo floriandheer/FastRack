@@ -102,6 +102,18 @@
       "brew_cask": true
     },
     {
+      "name": "Syncthing",
+      "category": "General",
+      "install_method": "winget",
+      "winget_id": "Syncthing.Syncthing",
+      "exe": "syncthing",
+      "why": "Continuous file sync between your machines (web UI at http://127.0.0.1:8384). Official package: published by The Syncthing Authors, downloaded from the project's own GitHub release",
+      "url": "https://syncthing.net/downloads/",
+      "detect_paths": [
+        "%LOCALAPPDATA%\\Microsoft\\WinGet\\Links\\syncthing.exe"
+      ]
+    },
+    {
       "name": "WizTree",
       "category": "General",
       "install_method": "winget",
