@@ -1,23 +1,27 @@
-+---00_Incoming
-+---01_Preproduction [CONDITIONAL:preproduction]
-+---02_Production
-|   +---3D
-|   |   +---Houdini [CONDITIONAL:houdini]
-|   |   +---Blender [CONDITIONAL:blender]
-|   |   +---FreeCAD [CONDITIONAL:freecad]
-|   |   \---Alibre [CONDITIONAL:alibre]
-|   +---2D
-|   |   \---Affinity [CONDITIONAL:affinity]
-|   +---Documentation
-|   |   +---Product_Photo
-|   |   |   +---RAW
-|   |   |   \---Publish
-|   |   \---Product_Video
-|   |       \---Footage
-+---03_Outgoing
-|   \---YYY-MM-DD
-+---_LIBRARY [CONDITIONAL:library]
-|   +---Documents [CONDITIONAL:library]
-|   +---Pipeline [CONDITIONAL:library]
-|   |   +---Plugins [CONDITIONAL:library]
-|   |   \---Scripts [CONDITIONAL:library]
+# Folder template: physical_3dprint_structure.txt
+# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.
+# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.
+
+00_Incoming
+01_Preproduction [CONDITIONAL:preproduction]
+02_Production
+    3D
+        Houdini [CONDITIONAL:houdini]
+        Blender [CONDITIONAL:blender]
+        FreeCAD [CONDITIONAL:freecad]
+        Alibre [CONDITIONAL:alibre]
+    2D
+        Affinity [CONDITIONAL:affinity]
+    Documentation
+        Product_Photo
+            RAW
+            Publish
+        Product_Video
+            Footage
+03_Outgoing
+    YYY-MM-DD
+_LIBRARY [CONDITIONAL:library]
+    Documents [CONDITIONAL:library]
+    Pipeline [CONDITIONAL:library]
+        Plugins [CONDITIONAL:library]
+        Scripts [CONDITIONAL:library]

@@ -1,1 +1,5 @@
-+---_export
+# Folder template: photo_structure.txt
+# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.
+# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.
+
+_export

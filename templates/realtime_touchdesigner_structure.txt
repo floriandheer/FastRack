@@ -1,45 +1,49 @@
-+---Production
-|   +---Projects
-|   +---Components
-|   +---Assets
-|   |   +---3D
-|   |   |   +---Source
-|   |   |   +---Optimized
-|   |   |   \---References
-|   |   +---Textures
-|   |   |   +---Source
-|   |   |   \---Optimized
-|   |   +---Images
-|   |   +---Videos
-|   |   +---Audio
-|   |   \---Fonts
-|   +---Preparation
-|   |   +---Blender
-|   |   +---Substance
-|   |   +---Houdini
-|   |   \---Tests
-|   +---Data
-|   |   +---JSON
-|   |   +---CSV
-|   |   \---XML
-|   +---Scripts
-|   |   +---Extensions
-|   |   \---Modules
-|   +---Shaders
-|   |   +---GLSL
-|   |   \---MAT
-|   +---Palettes
-|   +---MIDI
-|   +---OSC
-|   +---DMX
-|   \---Exports
-|       +---Movies
-|       +---Images
-|       \---TOE
-+---_Library
-|   +---Documents
-|   +---References
-|   \---Backup
-|       \---YYY-MM-DD
-\---_Delivery
-    \---YYY-MM-DD
+# Folder template: realtime_touchdesigner_structure.txt
+# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.
+# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.
+
+Production
+    Projects
+    Components
+    Assets
+        3D
+            Source
+            Optimized
+            References
+        Textures
+            Source
+            Optimized
+        Images
+        Videos
+        Audio
+        Fonts
+    Preparation
+        Blender
+        Substance
+        Houdini
+        Tests
+    Data
+        JSON
+        CSV
+        XML
+    Scripts
+        Extensions
+        Modules
+    Shaders
+        GLSL
+        MAT
+    Palettes
+    MIDI
+    OSC
+    DMX
+    Exports
+        Movies
+        Images
+        TOE
+_Library
+    Documents
+    References
+    Backup
+        YYY-MM-DD
+_Delivery
+    YYY-MM-DD

@@ -1,12 +1,16 @@
-+---00_Incoming
-|   +---01_Preproduction
-|   \---02_Production
-+---01_Preproduction
-+---02_Production
-+---03_Outgoing
-|   \---YYY-MM-DD
-\---_LIBRARY
-    +---Documents
-    +---Pipeline
-    |   +---Plugins
-    |   \---Scripts
+# Folder template: visual_gd_structure.txt
+# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.
+# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.
+
+00_Incoming
+    01_Preproduction
+    02_Production
+01_Preproduction
+02_Production
+03_Outgoing
+    YYY-MM-DD
+_LIBRARY
+    Documents
+    Pipeline
+        Plugins
+        Scripts

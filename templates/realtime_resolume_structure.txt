@@ -1,25 +1,27 @@
-+---00_Incoming
-+---01_Preproduction
-|   +---Moodboard
-|   |   +---_ASSETS
-|   |   \---_RENDER
-|   +---Storyboard
-|   |   +---_ASSETS
-|   |   \---_RENDER
-|   \---Surfaces
-+---02_Production
-|   +---Affinity
-|   +---Blender
-|   +---Houdini
-|   +---Shot
-|   |   \---Shot_01_010
-|   +---_ASSET
-|   \---_PREVIEW
-+---03_Setup
-+---04_Outgoing
-|   \---YYY-MM-DD
-\---_LIBRARY
-    +---Documents
-    \---Pipeline
-        +---Plugins
-        \---Scripts
+# Folder template: realtime_resolume_structure.txt
+# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.
+# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.
+
+00_Incoming
+01_Preproduction
+    Moodboard
+        _ASSETS
+        _RENDER
+    Storyboard
+        _ASSETS
+        _RENDER
+    Surfaces
+02_Production
+    Affinity
+    Blender
+    Houdini
+    Shot
+        Shot_01_010
+    _ASSET
+    _PREVIEW
+03_Setup
+_LIBRARY
+    Documents
+    Pipeline
+        Plugins
+        Scripts

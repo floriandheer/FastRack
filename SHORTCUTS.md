@@ -193,7 +193,7 @@ Note: Scope (1/2/3) and Status (4/5/6) filters are **not** in WASD navigation - 
 There's no keyboard shortcut for this — it's a settings tab. Open `Ctrl+,` → **Startup Apps**.
 
 - Picker pulls from the same `workstation_apps` registry the **Workstation Apps** tab uses; **Browse for file...** adds anything else (.exe, .lnk, .bat, .url).
-- Per app you set: enable toggle, monitor, virtual desktop, position mode (maximize / fullscreen / free), and launch order.
+- Per app you set: enable toggle, monitor, virtual desktop, position mode (maximize / fullscreen / minimized / free), and launch order.
 - **Install scheduled task** registers `FastRack_StartupLauncher` (logon-triggered, current-user privilege). **Test now** runs the launcher manually in a visible console.
 - **Import legacy Startup folder** pulls in shortcuts from `C:\Users\<you>\Startup\DesktopN\` — useful if you're migrating from the old `1_StartupScript_AppsToDesktop.ps1` workflow. The old script and its scheduled task are not touched; uninstall them yourself once you're happy.
 - Config sidecar: `%LOCALAPPDATA%\PipelineManager\startup_apps.json`. Logs: `%LOCALAPPDATA%\PipelineManager\logs\startup_launcher.log`.

@@ -135,6 +135,11 @@ class SettingsDialog:
         self.notebook.add(apps_tab, text="Workstation Apps")
         self._build_workstation_apps_tab(apps_tab)
 
+        # Folder Templates tab
+        templates_tab = tk.Frame(self.notebook, bg=COLORS["bg_primary"])
+        self.notebook.add(templates_tab, text="Folder Templates")
+        self._build_folder_templates_tab(templates_tab)
+
     def _build_general_tab(self, parent):
         """Build the General settings tab."""
         content_frame = tk.Frame(parent, bg=COLORS["bg_primary"])
@@ -1515,7 +1520,7 @@ class SettingsDialog:
     # tied to the Save button) because they're irreversible-ish operations
     # the user should opt into explicitly.
 
-    _STARTUP_POSITIONS = ("maximize", "fullscreen", "free")
+    _STARTUP_POSITIONS = ("maximize", "fullscreen", "minimized", "free")
     _STARTUP_DESKTOP_CHOICES = (1, 2, 3, 4, 5, 6)
 
     @staticmethod
@@ -2391,6 +2396,222 @@ class SettingsDialog:
     # Per-app install runs winget in a new console (so the dialog stays
     # responsive); "Install All Missing" hands off to install.py --step
     # apps so the user gets the full picker UI in a console.
+
+    # ------------------------------------------------------------------
+    # Folder Templates tab
+    # ------------------------------------------------------------------
+    # One row per creatable folder structure (category/subtype that has a
+    # tree_template in pipeline_categories). The tree itself is never shown
+    # here -- the button opens the plain-text template file in the default
+    # editor. Edits take effect the next time a project is created.
+
+    _TEMPLATE_SKELETON = (
+        "# Folder template: {name}\n"
+        "# One folder per line; indent (4 spaces) to nest. Lines starting with # are ignored.\n"
+        "# Append [CONDITIONAL:tag] to make a folder optional. YYY-MM-DD is replaced by the date.\n"
+        "\n"
+        "00_Incoming\n"
+        "01_Production\n"
+        "    Example_Subfolder\n"
+        "02_Outgoing\n"
+        "_LIBRARY\n"
+    )
+
+    @staticmethod
+    def _templates_dir():
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+
+    def _template_groups(self):
+        """[(key, header, colour, [(label, filename)])] -- one group per category,
+        then Business (bookkeeping) and any template files not linked yet."""
+        from pipeline_categories import CATEGORIES, all_creative_subtype_pairs
+        groups, seen = {}, set()
+        for cat, sub in all_creative_subtype_pairs():
+            c = CATEGORIES[cat]
+            s = c["subtypes"][sub]
+            header = f"{c.get('emoji', '')}  {c.get('display_name', cat)}"
+            grp = groups.setdefault(cat, (cat, header, c.get("color", COLORS["border"]), []))
+            grp[3].append((f"{s.get('emoji', '')} {s.get('display_name', sub)}", s["tree_template"]))
+            seen.add(s["tree_template"])
+        result = list(groups.values())
+        # Used outside the New Project flow (Invoice Manager bookkeeping folders)
+        extra = "bookkeeping_structure.txt"
+        if os.path.isfile(os.path.join(self._templates_dir(), extra)):
+            biz = CATEGORIES.get("Business", {})
+            result.append(("Business", f"{biz.get('emoji', '')}  {biz.get('display_name', 'Business')}",
+                           biz.get("color", COLORS["border"]),
+                           [("Bookkeeping (Invoice Manager)", extra)]))
+            seen.add(extra)
+        try:
+            names = sorted(os.listdir(self._templates_dir()))
+        except OSError:
+            names = []
+        unlinked = [(f, f) for f in names if f.endswith("_structure.txt") and f not in seen]
+        if unlinked:
+            result.append(("_unlinked", "⚠  Not linked to a project type yet",
+                           COLORS["border"], unlinked))
+        return result
+
+    def _template_folder_count(self, fname):
+        try:
+            from shared_folder_tree_parser import parse_tree_file
+            return len(parse_tree_file(os.path.join(self._templates_dir(), fname)))
+        except Exception:
+            return None
+
+    def _open_template_file(self, fname):
+        path = os.path.join(self._templates_dir(), fname)
+        if not os.path.isfile(path):
+            messagebox.showerror("Template missing", f"File not found:\n{path}", parent=self.dialog)
+            return
+        try:
+            os.startfile(path)
+        except OSError as e:
+            messagebox.showerror("Open failed", f"Could not open {fname}:\n{e}", parent=self.dialog)
+
+    def _open_templates_dir(self):
+        try:
+            os.startfile(self._templates_dir())
+        except OSError as e:
+            messagebox.showerror("Open failed", str(e), parent=self.dialog)
+
+    def _new_template(self):
+        import re
+        from tkinter import simpledialog
+        raw = simpledialog.askstring(
+            "New folder template",
+            "Name for the new template (e.g. 'podcast'):",
+            parent=self.dialog)
+        if not raw:
+            return
+        slug = re.sub(r"[^a-z0-9]+", "_", raw.strip().lower()).strip("_")
+        if not slug:
+            messagebox.showerror("Invalid name", "Use letters or digits.", parent=self.dialog)
+            return
+        fname = f"{slug}_structure.txt"
+        path = os.path.join(self._templates_dir(), fname)
+        if os.path.exists(path):
+            messagebox.showerror("Already exists", f"{fname} already exists.", parent=self.dialog)
+            return
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(self._TEMPLATE_SKELETON.format(name=fname))
+        except OSError as e:
+            messagebox.showerror("Create failed", str(e), parent=self.dialog)
+            return
+        self._templates_refresh()
+        self._open_template_file(fname)
+        messagebox.showinfo(
+            "Template created",
+            f"{fname} was created and opened for editing.\n\n"
+            "To make it selectable in the New Project flow, set its filename as "
+            "\"tree_template\" on a subtype in modules/pipeline_categories.py.",
+            parent=self.dialog)
+
+    def _templates_refresh(self):
+        for w in self._templates_list_frame.winfo_children():
+            w.destroy()
+        label_font = font.Font(family="Segoe UI", size=10)
+        small_font = font.Font(family="Segoe UI", size=9)
+        head_font = font.Font(family="Segoe UI", size=11, weight="bold")
+        collapsed = self._templates_collapsed
+        for key, header, color, items in self._template_groups():
+            section = tk.Frame(self._templates_list_frame, bg=COLORS["bg_primary"])
+            section.pack(fill=tk.X, pady=(0, 12))
+
+            # Header bar: accent stripe + chevron + category name + count
+            bar = tk.Frame(section, bg=COLORS["bg_secondary"], cursor="hand2")
+            bar.pack(fill=tk.X)
+            tk.Frame(bar, bg=color, width=5).pack(side=tk.LEFT, fill=tk.Y)
+            chevron = tk.Label(bar, font=head_font, fg=COLORS["text_secondary"],
+                               bg=COLORS["bg_secondary"], cursor="hand2", width=2)
+            chevron.pack(side=tk.LEFT, padx=(8, 0), pady=8)
+            title = tk.Label(bar, text=header, font=head_font, fg=COLORS["text_primary"],
+                             bg=COLORS["bg_secondary"], cursor="hand2")
+            title.pack(side=tk.LEFT)
+            n = len(items)
+            badge = tk.Label(bar, text=f"{n} template{'s' if n != 1 else ''}", font=small_font,
+                             fg=COLORS["text_secondary"], bg=COLORS["bg_secondary"], cursor="hand2")
+            badge.pack(side=tk.RIGHT, padx=12)
+
+            body = tk.Frame(section, bg=COLORS["bg_card"])
+            for label, fname in items:
+                row = tk.Frame(body, bg=COLORS["bg_card"])
+                row.pack(fill=tk.X, padx=(16, 10), pady=5)
+                row.columnconfigure(0, weight=1)
+                tk.Label(row, text=label, font=label_font, fg=COLORS["text_primary"],
+                         bg=COLORS["bg_card"], anchor="w").grid(row=0, column=0, sticky="w")
+                count = self._template_folder_count(fname)
+                detail = fname if count is None else (
+                    f"{fname}  ·  {count} folder{'s' if count != 1 else ''}")
+                tk.Label(row, text=detail, font=small_font, fg=COLORS["text_secondary"],
+                         bg=COLORS["bg_card"], anchor="w").grid(row=1, column=0, sticky="w")
+                tk.Button(
+                    row, text="Edit template", command=lambda f=fname: self._open_template_file(f),
+                    bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+                    activebackground=COLORS["bg_hover"], activeforeground=COLORS["text_primary"],
+                    font=small_font, relief=tk.FLAT, cursor="hand2", padx=12, pady=4,
+                ).grid(row=0, column=1, rowspan=2, padx=(10, 0))
+
+            def render(key=key, chevron=chevron, body=body):
+                if key in collapsed:
+                    body.pack_forget()
+                    chevron.config(text="▸")
+                else:
+                    body.pack(fill=tk.X)
+                    chevron.config(text="▾")
+
+            def toggle(_e=None, key=key, render=render):
+                collapsed.symmetric_difference_update({key})
+                render()
+
+            for w in (bar, chevron, title, badge):
+                w.bind("<Button-1>", toggle)
+            render()
+
+    def _build_folder_templates_tab(self, parent):
+        """Build the Folder Templates tab: one Edit button per folder structure."""
+        header = tk.Frame(parent, bg=COLORS["bg_primary"])
+        header.pack(fill=tk.X, padx=20, pady=(10, 5))
+        tk.Label(
+            header,
+            text=("Each project type creates its folders from a plain-text template.\n"
+                  "Click Edit to change it; changes apply to the next project created."),
+            font=font.Font(family="Segoe UI", size=10), fg=COLORS["text_secondary"],
+            bg=COLORS["bg_primary"], justify="left",
+        ).pack(anchor="w")
+
+        actions = tk.Frame(parent, bg=COLORS["bg_primary"])
+        actions.pack(fill=tk.X, padx=20, pady=(0, 10))
+        for text, cmd in (("New template...", self._new_template),
+                          ("Open templates folder", self._open_templates_dir),
+                          ("Refresh", lambda: self._templates_refresh())):
+            tk.Button(
+                actions, text=text, command=cmd,
+                bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+                font=font.Font(family="Segoe UI", size=10),
+                relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
+            ).pack(side=tk.LEFT, padx=(0, 10))
+
+        body = tk.Frame(parent, bg=COLORS["bg_primary"])
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+        canvas = tk.Canvas(body, bg=COLORS["bg_primary"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+        self._templates_collapsed = set()  # group keys currently folded; survives Refresh
+        self._templates_list_frame = tk.Frame(canvas, bg=COLORS["bg_primary"])
+        self._templates_list_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        win_id = canvas.create_window((0, 0), window=self._templates_list_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
+        canvas.bind("<Enter>", lambda e: canvas.bind_all(
+            "<MouseWheel>", lambda ev: canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._templates_refresh()
 
     def _build_workstation_apps_tab(self, parent):
         """Build the Workstation Apps tab: status overview + install actions."""

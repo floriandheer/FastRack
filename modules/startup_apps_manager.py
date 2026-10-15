@@ -135,7 +135,7 @@ APP_ENTRY_TEMPLATE: dict = {
     "args": "",
     "monitor": 1,
     "virtual_desktop": 1,
-    "position": "maximize",        # "maximize" | "fullscreen" | "free"
+    "position": "maximize",        # "maximize" | "fullscreen" | "minimized" | "free"
     "x_offset": 0,
     "y_offset": 0,
     "launch_order": 0,

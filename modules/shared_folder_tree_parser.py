@@ -1,9 +1,22 @@
 """
 Shared Folder Tree Parser
 
-Parses Windows `tree /a /f` ASCII-format text and creates folder structures.
+Parses folder-structure template text and creates folder structures.
 
-Tree format example:
+Two formats are accepted (auto-detected per file):
+
+Indented format (preferred, easy to hand-edit) -- one folder per line, children
+indented under their parent with spaces or tabs. Lines starting with "#" and
+blank lines are ignored:
+
+    # My template
+    00_Incoming
+    01_Production
+        Shot
+            Shot_01_010
+    _LIBRARY
+
+Windows `tree /a /f` ASCII format (still supported):
     +---FolderA
     |   +---SubFolder
     |   \\---AnotherSub
@@ -21,6 +34,28 @@ import os
 import re
 
 
+_TREE_LINE = re.compile(r'^((?:[| ] {3})*)[+\\]---(.+)$')
+_COND = re.compile(r'^(.+?)\s+\[CONDITIONAL:(\w+)\]$')
+
+
+def _parse_indented(lines):
+    """Parse the indentation-based format (see module docstring)."""
+    result = []
+    stack = []  # (indent_width, folder_name)
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        indent = len(line.expandtabs(4)) - len(line.expandtabs(4).lstrip())
+        name_part = line.strip()
+        cond = _COND.match(name_part)
+        name, conditional = (cond.group(1).strip(), cond.group(2)) if cond else (name_part, None)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, name))
+        result.append(('/'.join(n for _, n in stack), conditional))
+    return result
+
+
 def parse_tree(text):
     """Parse tree /a /f formatted text into a list of relative folder paths.
 
@@ -31,6 +66,8 @@ def parse_tree(text):
         List of (relative_path, conditional_tag_or_None) tuples.
     """
     lines = text.strip().splitlines()
+    if not any(_TREE_LINE.match(l.rstrip()) for l in lines):
+        return _parse_indented(lines)
     result = []
     # Stack of (indent_level, folder_name) for tracking hierarchy
     stack = []
@@ -38,7 +75,7 @@ def parse_tree(text):
     for line in lines:
         # Skip empty lines and lines that are just the tree connector
         stripped = line.rstrip()
-        if not stripped:
+        if not stripped or stripped.lstrip().startswith('#'):
             continue
 
         # Match tree branch lines: optional prefix of "|   " segments,
