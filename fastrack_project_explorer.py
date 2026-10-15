@@ -1139,7 +1139,7 @@ class ProjectTrackerApp:
     Use embedded=True when integrating into another application (like FastRack).
     """
 
-    def __init__(self, root_or_frame, embedded=False, status_callback=None, hint_callback=None, creation_start_callback=None, creation_done_callback=None, creation_cancel_callback=None, session=None):
+    def __init__(self, root_or_frame, embedded=False, status_callback=None, hint_callback=None, creation_start_callback=None, creation_done_callback=None, creation_cancel_callback=None, session=None, defer_initial_refresh=False):
         """
         Initialize the Project Tracker.
 
@@ -1260,8 +1260,13 @@ class ProjectTrackerApp:
         # Apply saved settings after UI is built
         self._apply_saved_settings()
 
-        # Load projects
-        self.refresh_project_list()
+        # Load projects. An embedding host that is about to apply its own
+        # saved category selection passes defer_initial_refresh=True and calls
+        # flush_initial_refresh() afterwards, so the (expensive) list is built
+        # once with the right filter instead of built, destroyed and rebuilt.
+        self._initial_refresh_pending = defer_initial_refresh
+        if not defer_initial_refresh:
+            self.refresh_project_list()
 
         logger.info("Project Tracker initialized")
 
@@ -2600,8 +2605,14 @@ class ProjectTrackerApp:
         self._update_physical_subtype_visibility()
         self.refresh_project_list()
 
+    def flush_initial_refresh(self):
+        """Build the project list now if the deferred first refresh never ran."""
+        if getattr(self, "_initial_refresh_pending", False):
+            self.refresh_project_list()
+
     def refresh_project_list(self):
         """Refresh the project list from database based on selected category."""
+        self._initial_refresh_pending = False
         # Clear tree
         for item in self.project_tree.get_children():
             self.project_tree.delete(item)

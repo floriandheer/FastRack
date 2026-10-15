@@ -4,9 +4,11 @@ UI Settings Dialog - Multi-tab settings window for FastRack.
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 
@@ -64,11 +66,119 @@ class SettingsDialog:
         self._original_work_drive = settings.get_work_drive()
         self._original_archive_base = settings.get_archive_base()
 
+        # Background-work plumbing (see _run_async) must exist before the
+        # tabs are built -- they start their slow system probes while building.
+        self._async_q = queue.Queue()
+        self._async_pending = 0
+        self._ws_probe_result = None      # [(app, resolved_path, installed)] or None
+        self._ws_probe_waiters = None     # callbacks while a probe is in flight
+
         # Build UI
         self._build_ui()
 
         # Validate on open
         self._validate_paths()
+
+    # ------------------------------------------------------------------
+    # Background work
+    # ------------------------------------------------------------------
+    # Slow system probes (PowerShell, PATH scans, registry) must never run
+    # on the Tk thread or the dialog freezes while it opens. Standard Tk
+    # pattern: a worker thread does the blocking call and puts the result on
+    # a queue; the Tk thread drains that queue with after() and runs the
+    # callback. Workers never touch widgets (Tk is not thread-safe).
+
+    def _run_async(self, work, done):
+        """Run ``work()`` on a daemon thread, then ``done(result, exc)`` on
+        the Tk thread. Exactly one of result/exc is meaningful."""
+        def runner():
+            try:
+                self._async_q.put((done, work(), None))
+            except Exception as exc:  # noqa: BLE001 - reported to the callback
+                self._async_q.put((done, None, exc))
+
+        self._async_pending += 1
+        if self._async_pending == 1:
+            self.dialog.after(40, self._drain_async)
+        threading.Thread(target=runner, daemon=True, name="settings-probe").start()
+
+    def _drain_async(self):
+        try:
+            if not self.dialog.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        while True:
+            try:
+                done, result, exc = self._async_q.get_nowait()
+            except queue.Empty:
+                break
+            self._async_pending -= 1
+            if exc is not None:
+                logger.warning("Settings background check failed: %s", exc)
+            try:
+                done(result, exc)
+            except tk.TclError:
+                pass  # widget destroyed while the check was running
+            except Exception:  # noqa: BLE001 - keep draining the queue
+                logger.exception("Settings background callback failed")
+        if self._async_pending > 0:
+            self.dialog.after(40, self._drain_async)
+
+    def _request_ws_probe(self, callback, fresh=False):
+        """Workstation-app status for the Startup Apps and Workstation Apps
+        tabs, computed once and shared. ``callback(rows)`` runs on the Tk
+        thread with ``[(app, resolved_path, installed)]`` (None on failure)."""
+        if self._ws_probe_waiters is not None:      # already running: join it
+            self._ws_probe_waiters.append(callback)
+            return
+        if not fresh and self._ws_probe_result is not None:
+            callback(self._ws_probe_result)
+            return
+        try:
+            import workstation_apps as wa  # noqa: WPS433
+        except ImportError:
+            callback(None)
+            return
+        self._ws_probe_waiters = [callback]
+
+        def work():
+            if hasattr(wa, "invalidate_program_cache"):
+                wa.invalidate_program_cache()
+            rows = []
+            for app in wa.load_apps():
+                path, installed = wa.probe_app(app)
+                rows.append((app, path, installed))
+            return rows
+
+        def done(rows, exc):
+            waiters, self._ws_probe_waiters = self._ws_probe_waiters, None
+            if exc is None:
+                self._ws_probe_result = rows
+            for cb in waiters:
+                cb(rows if exc is None else None)
+
+        self._run_async(work, done)
+
+    def _build_when_first_shown(self, tab, builder):
+        """Defer building a tab's widgets until the user first opens it.
+        Keeps dialog start-up cheap for tabs most visits never touch.
+        Nothing outside these tabs reads their widgets, so Save/Cancel
+        are unaffected."""
+        if not hasattr(self, "_lazy_tabs"):
+            self._lazy_tabs = {}
+            self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self._lazy_tabs[str(tab)] = (tab, builder)
+
+    def _on_tab_changed(self, _event=None):
+        try:
+            key = self.notebook.select()
+        except tk.TclError:
+            return
+        entry = self._lazy_tabs.pop(key, None)
+        if entry:
+            tab, builder = entry
+            builder(tab)
 
     def _build_ui(self):
         """Build the settings dialog UI."""
@@ -133,12 +243,12 @@ class SettingsDialog:
         # === WORKSTATION APPS TAB ===
         apps_tab = tk.Frame(self.notebook, bg=COLORS["bg_primary"])
         self.notebook.add(apps_tab, text="Workstation Apps")
-        self._build_workstation_apps_tab(apps_tab)
+        self._build_when_first_shown(apps_tab, self._build_workstation_apps_tab)
 
         # Folder Templates tab
         templates_tab = tk.Frame(self.notebook, bg=COLORS["bg_primary"])
         self.notebook.add(templates_tab, text="Folder Templates")
-        self._build_folder_templates_tab(templates_tab)
+        self._build_when_first_shown(templates_tab, self._build_folder_templates_tab)
 
     def _build_general_tab(self, parent):
         """Build the General settings tab."""
@@ -1686,7 +1796,8 @@ class SettingsDialog:
         self._startup_cfg = sam.load_config()
         self._startup_monitors = sam.detect_monitors()
         self._startup_row_vars = []  # parallel to cfg["apps"]
-        self._startup_workstation_choices = sam.list_workstation_choices()
+        # Filled in by the background workstation probe (see end of tab build).
+        self._startup_workstation_choices = []
 
         # ----- Top: master toggle -----
         top = tk.Frame(parent, bg=COLORS["bg_primary"])
@@ -1814,19 +1925,7 @@ class SettingsDialog:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Plain-text indicator (no icons): show the name as-is when the
-        # app resolves to a launchable exe, append "(not installed)"
-        # otherwise. Matches the pre-checkmark presentation.
-        choice_labels = []
         self._startup_choice_map = {}  # label -> workstation name
-        for choice in self._startup_workstation_choices:
-            name = choice["name"]
-            if choice["resolved_path"]:
-                label = name
-            else:
-                label = f"{name}  (not installed)"
-            choice_labels.append(label)
-            self._startup_choice_map[label] = name
 
         tk.Label(
             add_frame, text="Add app:",
@@ -1835,8 +1934,9 @@ class SettingsDialog:
         ).pack(side=tk.LEFT)
 
         self._startup_add_combo = ttk.Combobox(
-            add_frame, values=choice_labels, state="readonly", width=32,
+            add_frame, values=[], state="readonly", width=32,
         )
+        self._startup_add_combo.set("Checking installed apps...")
         self._startup_add_combo.pack(side=tk.LEFT, padx=(8, 6))
 
         _btn(add_frame, "Add", self._startup_add_workstation).pack(side=tk.LEFT)
@@ -1850,18 +1950,65 @@ class SettingsDialog:
         _btn(add_frame, "Browse for file...",
              self._startup_browse_custom).pack(side=tk.LEFT)
 
-        # Initial render
+        # Initial render. The slow probes (workstation apps, scheduled task,
+        # dependency check) finish in the background and fill their widgets in.
         self._startup_update_task_button()
         self._startup_render_list()
+        self._request_ws_probe(self._startup_apply_ws_probe)
+
+    def _startup_apply_ws_probe(self, rows):
+        """Populate the 'Add app' picker once the workstation probe is done."""
+        if rows is None:
+            self._startup_add_combo.set("")
+            return
+        # Plain-text indicator (no icons): show the name as-is when the
+        # app resolves to a launchable exe, append "(not installed)"
+        # otherwise. One entry per catalog name.
+        labels, seen = [], set()
+        self._startup_choice_map = {}
+        self._startup_workstation_choices = []
+        for app, path, installed in rows:
+            if app.name in seen:
+                continue
+            seen.add(app.name)
+            self._startup_workstation_choices.append(
+                {"name": app.name, "resolved_path": path, "installed": installed})
+            label = app.name if path else f"{app.name}  (not installed)"
+            labels.append(label)
+            self._startup_choice_map[label] = app.name
+        self._startup_add_combo.config(values=labels)
+        self._startup_add_combo.set("")
 
     # ---------- Dependencies panel ----------
 
     def _startup_render_deps(self):
-        """Re-run the dep check and rebuild the panel. Called on tab
-        build and from the Recheck button."""
+        """Re-run the dep check (in the background) and rebuild the panel.
+        Called on tab build and from the Recheck button."""
         for child in self._startup_deps_frame.winfo_children():
             child.destroy()
-        deps = self._sam.check_dependencies()
+        tk.Label(
+            self._startup_deps_frame, text="Checking dependencies...",
+            font=font.Font(family="Segoe UI", size=9),
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
+        ).pack(anchor="w")
+        self._startup_deps_gen = getattr(self, "_startup_deps_gen", 0) + 1
+        gen = self._startup_deps_gen
+        self._run_async(
+            self._sam.check_dependencies,
+            lambda deps, exc: self._startup_show_deps(gen, deps, exc))
+
+    def _startup_show_deps(self, gen, deps, exc):
+        if gen != self._startup_deps_gen:
+            return  # a newer Recheck superseded this result
+        for child in self._startup_deps_frame.winfo_children():
+            child.destroy()
+        if exc is not None:
+            tk.Label(
+                self._startup_deps_frame, text=f"Dependency check failed: {exc}",
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["warning"], bg=COLORS["bg_card"],
+            ).pack(anchor="w")
+            return
 
         # Header with Recheck button on the right
         hdr = tk.Frame(self._startup_deps_frame, bg=COLORS["bg_card"])
@@ -2331,7 +2478,15 @@ class SettingsDialog:
     # ---------- Scheduled task ----------
 
     def _startup_update_task_button(self):
-        installed = self._sam.is_task_installed()
+        """Show 'Checking...' now; the Task Scheduler query (a PowerShell
+        launch) runs in the background and sets the real label."""
+        self._startup_task_btn.config(text="Checking scheduled task...")
+        self._run_async(self._sam.is_task_installed, self._startup_apply_task_state)
+
+    def _startup_apply_task_state(self, installed, exc):
+        if exc is not None:
+            self._startup_task_btn.config(text="Scheduled task: check failed")
+            return
         # Green = safe/constructive (nothing installed yet); red = this
         # click removes the logon automation. Both dimmed to sit quietly.
         if installed:
@@ -2656,7 +2811,7 @@ class SettingsDialog:
 
         tk.Button(
             actions, text="Refresh",
-            command=self._apps_refresh,
+            command=lambda: self._apps_refresh(fresh=True),
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
             font=font.Font(family="Segoe UI", size=10),
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
@@ -2690,22 +2845,29 @@ class SettingsDialog:
 
         self._apps_refresh()
 
-    def _apps_refresh(self):
+    def _apps_refresh(self, fresh=False):
         """Re-read app status and rebuild the per-category rows.
 
-        Invalidates the workstation_apps install-detection cache first
-        so apps installed since the dialog opened (in a console window
-        or via the per-row Install button) actually show up as
-        installed instead of being remembered as missing."""
+        The probe (which also invalidates the install-detection cache, so
+        apps installed since the dialog opened show up) runs in the
+        background; the list shows 'Checking...' meanwhile. ``fresh``
+        forces a new probe instead of reusing the one from dialog open."""
         if not hasattr(self, "_apps_list_frame"):
             return
-        wa = self._wa
-        if hasattr(wa, "invalidate_program_cache"):
-            wa.invalidate_program_cache()
         for child in self._apps_list_frame.winfo_children():
             child.destroy()
+        self._apps_summary_var.set("Checking installed apps...")
+        self._request_ws_probe(self._apps_show, fresh=fresh)
 
-        apps = wa.load_apps()
+    def _apps_show(self, rows):
+        wa = self._wa
+        for child in self._apps_list_frame.winfo_children():
+            child.destroy()
+        if rows is None:
+            self._apps_summary_var.set("Could not check installed apps")
+            return
+        apps = [a for a, _path, _inst in rows]
+        installed_by_id = {id(a): inst for a, _path, inst in rows}
         if not apps:
             tk.Label(
                 self._apps_list_frame,
@@ -2716,10 +2878,10 @@ class SettingsDialog:
             self._apps_summary_var.set("No apps configured")
             return
 
-        counts = wa.status_counts(apps, set())
+        n_installed = sum(1 for inst in installed_by_id.values() if inst)
         self._apps_summary_var.set(
-            f"{counts.installed}/{counts.total} installed, "
-            f"{counts.missing} missing"
+            f"{n_installed}/{len(apps)} installed, "
+            f"{len(apps) - n_installed} missing"
         )
 
         grouped = wa.apps_by_category(apps)
@@ -2734,14 +2896,14 @@ class SettingsDialog:
             section.pack(fill=tk.X, pady=(0, 8), anchor="nw")
 
             for a in cat_apps:
-                self._build_app_row(section, a, wa)
+                self._build_app_row(section, a, wa, installed_by_id.get(id(a), False))
 
-    def _build_app_row(self, parent, app, wa):
+    def _build_app_row(self, parent, app, wa, installed):
         """One row per app: status icon, name, description, download button."""
         row = tk.Frame(parent, bg=COLORS["bg_card"])
         row.pack(fill=tk.X, pady=2)
 
-        if wa.is_installed(app):
+        if installed:
             icon, icon_color = "✓", "#22c55e"
             status_text = app.why
         else:

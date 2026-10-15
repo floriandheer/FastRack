@@ -522,18 +522,27 @@ def is_installed(app: App) -> bool:
       4. Registry DisplayName substring match — catches GUI apps with
          no detect_paths configured (Windows only).
     """
-    if resolve_exe_path(app) is not None:
-        return True
-    if _detect_paths_present(app):
-        return True
-    if _mac_app_bundle_present(app):
-        return True
+    return probe_app(app)[1]
+
+
+def probe_app(app: App) -> tuple[Optional[str], bool]:
+    """Resolve and detect in one pass: ``(resolved_exe_path, installed)``.
+
+    Same checks as :func:`is_installed`, but the (slow, PATH-scanning)
+    ``resolve_exe_path`` runs once so callers that need both values
+    don't pay for it twice.
+    """
+    path = resolve_exe_path(app)
+    if path is not None:
+        return path, True
+    if _detect_paths_present(app) or _mac_app_bundle_present(app):
+        return None, True
     needle = (app.detect_name or app.name).lower().strip()
     if needle:
         for display in installed_programs():
             if needle in display:
-                return True
-    return False
+                return None, True
+    return None, False
 
 
 def winget_available() -> bool:

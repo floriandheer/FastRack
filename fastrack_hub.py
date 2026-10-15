@@ -67,8 +67,13 @@ logger = get_logger("pipeline")
 # Import Project Tracker for embedded use (from top-level file)
 from fastrack_project_explorer import ProjectTrackerApp
 # Invoice Manager is embedded in the right panel when the Business
-# category is selected (in place of the project tracker).
-from invoice_manager.app import InvoiceManager
+# category is selected (in place of the project tracker). Imported on first
+# use -- it pulls in invoice2data/yaml/PIL and costs ~0.3 s of startup that
+# most launches never need.
+def _invoice_manager_class():
+    from invoice_manager.app import InvoiceManager
+    return InvoiceManager
+
 # Sandbox Browser is embedded in the right panel when the Sandbox
 # category is selected (in place of the project tracker).
 from ui_sandbox_browser import SandboxBrowserPanel
@@ -427,6 +432,15 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         name_font = font.Font(family="Segoe UI", size=10)
         icon_font = font.Font(family="Segoe UI Emoji", size=14)
 
+        # Measuring every distinct emoji icon costs ~0.5 s the first time a
+        # process touches each glyph, and the answer only changes when the
+        # tool list, fonts, display scaling or row layout change. So cache
+        # it, keyed on exactly those inputs.
+        signature = self._sidebar_width_signature(name_font, icon_font)
+        cached = self.config_manager.config.get("sidebar_width_cache") or {}
+        if cached.get("signature") == signature and isinstance(cached.get("width"), int):
+            return cached["width"]
+
         probe_parent = tk.Frame(self.root)
         saved_tool_buttons, self.tool_buttons = self.tool_buttons, []
 
@@ -469,7 +483,31 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # padx=10*2 - none of which the probe row sees. Plus a small margin
         # for font-metric rounding across platforms.
         outer_chrome = 16 + 30 + 2 + 20
-        return max(MIN_SIDEBAR_WIDTH, min(440, widest + outer_chrome + 10))
+        width = max(MIN_SIDEBAR_WIDTH, min(440, widest + outer_chrome + 10))
+        self.config_manager.config["sidebar_width_cache"] = {"signature": signature, "width": int(width)}
+        self.config_manager._save_config()
+        return width
+
+    def _sidebar_width_signature(self, name_font, icon_font):
+        """Fingerprint of everything _compute_sidebar_width depends on."""
+        import hashlib
+        import inspect
+        rows = []
+        for key, cat in PIPELINE_CATEGORIES.items():
+            scripts = list(cat.get("scripts", {}).values())
+            for sub in cat.get("subcategories", {}).values():
+                scripts.extend(sub.get("scripts", {}).values())
+            rows.append((key, [(sc.get("icon", ""), sc.get("name", ""),
+                                bool(sc.get("direct_run")), bool(sc.get("mode_switch")))
+                               for sc in scripts]))
+        parts = (
+            rows,
+            str(self.root.tk.call("tk", "scaling")),
+            name_font.actual(), icon_font.actual(),
+            # The row layout lives in code; editing it must invalidate the cache.
+            inspect.getsource(self._create_tool_button),
+        )
+        return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()
 
     def setup_project_manager(self, parent_frame):
         """Setup the unified Project Manager with categories, operations, and tools."""
@@ -481,8 +519,17 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # every category (capped) so names are never clipped, rather than a
         # fixed width.
         left_panel_container = tk.Frame(main_container, bg=COLORS["bg_card"], width=self._compute_sidebar_width())
-        left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 15), pady=0)
+        left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12), pady=0)
         left_panel_container.pack_propagate(False)
+
+        # Keyboard-focus indicator for the right-hand area (project tracker /
+        # sandbox browser). A real layout slot between the two columns rather
+        # than an overlay on the panel: those panels are created lazily and
+        # fill their frame, so an overlay gets buried under them. Must be
+        # packed before any right-hand panel so it always keeps its width.
+        # (12 + 3 = the 15px gap this column used to have on its own.)
+        self.right_focus_strip = tk.Frame(main_container, bg=COLORS["bg_primary"], width=3)
+        self.right_focus_strip.pack(side=tk.LEFT, fill=tk.Y)
 
         # Scrollable left panel. The scrollbar stays visible (rather than
         # relying on mouse-wheel/trackpad scrolling alone) so the Tools
@@ -658,6 +705,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             creation_done_callback=self._on_project_creation_done,
             creation_cancel_callback=self._return_to_last_panel,
             session=self.session,
+            defer_initial_refresh=True,  # flushed after _restore_session_state
         )
 
         # Invoice Manager panel — created here but built lazily on
@@ -700,7 +748,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         if self.invoice_manager is not None or self._invoice_manager_failed:
             return
         try:
-            self.invoice_manager = InvoiceManager(
+            self.invoice_manager = _invoice_manager_class()(
                 self.invoice_manager_panel, embedded=True,
                 on_detach=self._detach_invoice_manager,
             )
@@ -813,7 +861,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         win = tk.Toplevel(self.root)
         self._detached_invoice_window = win
         win.protocol("WM_DELETE_WINDOW", self._on_detached_invoice_closed)
-        self._detached_invoice_manager = InvoiceManager(win)
+        self._detached_invoice_manager = _invoice_manager_class()(win)
         win.lift()
         win.focus_set()
 
@@ -894,6 +942,11 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         else:
             # Show all by default (no category selected)
             self._clear_category_selection()
+
+        # Restoring the category usually refreshed the tracker already; if it
+        # didn't (Business/Sandbox/none selected), build the list once now.
+        if getattr(self, 'project_tracker', None) is not None:
+            self.project_tracker.flush_initial_refresh()
 
         # Ensure categories panel is focused by default
         self.focused_panel = "categories"
@@ -1136,6 +1189,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 # Operations-only (e.g. Global) or empty — hide all.
                 self._hide_right_panels()
 
+        # The right-hand panel may have just changed (tracker/sandbox/invoices);
+        # keep the keyboard-focus indicator in step with it.
+        self._update_panel_indicator()
+
     def _clear_category_selection(self):
         """Clear category selection to show all projects.
 
@@ -1151,6 +1208,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         if hasattr(self, 'category_panel_outer'):
             self.category_panel_outer.pack_forget()
         self._show_tracker_panel()
+        self._update_panel_indicator()
 
     def _set_scope(self, scope: str):
         """Keyboard/shortcut entry point: select a single scope."""
@@ -2384,13 +2442,18 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             ("yaml", "PyYAML", "invoice template parsing"),
         ]
         if sys.platform == "win32":
-            deps.append(("win32com.client", "pywin32", "Outlook integration, shortcut creation"))
+            deps.append(("win32com", "pywin32", "Outlook integration, shortcut creation"))
 
+        # find_spec answers "is it installed?" without importing the package
+        # (importing requests/win32com just to check costs startup time).
+        import importlib.util
         missing = []
         for module_name, pip_name, purpose in deps:
             try:
-                __import__(module_name)
-            except ImportError:
+                found = importlib.util.find_spec(module_name) is not None
+            except (ImportError, ValueError):
+                found = False
+            if not found:
                 missing.append((pip_name, purpose))
 
         if not missing:

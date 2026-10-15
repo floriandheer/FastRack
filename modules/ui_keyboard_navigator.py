@@ -33,6 +33,8 @@ class KeyboardNavigatorMixin:
         - self.cat_grid, self.ops_grid: tk.Frame
         - self.tools_section: tk.Frame
         - self.tracker_panel: tk.Frame
+        - self.right_focus_strip: tk.Frame (optional; layout slot lit while the
+          right-hand area has focus -- see _update_panel_indicator)
         - self._folder_category, self._folder_path, self._notes_category: str
         - self.current_scopes: set[str]
         - self.settings: RackSettings
@@ -546,48 +548,62 @@ class KeyboardNavigatorMixin:
         # Update status bar hint
         self._update_keyboard_hint()
 
-    def _update_panel_indicator(self):
-        """Update subtle focus indicator for panels (left accent bar on grids only)."""
-        # Create/update focus indicator bars if they don't exist
-        if not hasattr(self, '_panel_indicators'):
-            self._panel_indicators = {}
+    _INDICATOR_WIDTH = 3
 
-        # Only show indicators on the actual grids/sections
-        grids = [
-            ("cat_grid", self.cat_grid, "categories", COLORS["bg_card"]),
-            ("ops_grid", self.ops_grid, "operations", COLORS["bg_card"]),
-            ("tools_section", self.category_panel_outer if hasattr(self, 'category_panel_outer') else None, "tools", COLORS["border"]),
-            ("tracker_panel", self.tracker_panel if hasattr(self, 'tracker_panel') else None, "tracker", COLORS["bg_primary"]),
-            ("sandbox_panel", getattr(self, 'sandbox_browser_panel', None), "tracker", COLORS["bg_primary"]),
+    def _left_indicator_hosts(self):
+        """(focus-panel name, host widget, resting colour) for each left-hand
+        panel that carries an overlay bar. The resting colour matches the host's
+        own background so an inactive bar is invisible."""
+        return [
+            ("categories", getattr(self, "cat_grid", None), COLORS["bg_card"]),
+            ("operations", getattr(self, "ops_grid", None), COLORS["bg_card"]),
+            ("tools", getattr(self, "category_panel_outer", None), COLORS["border"]),
         ]
 
-        for grid_name, grid_widget, panel_name, bg_color in grids:
-            if grid_widget is None:
+    def _invoice_panel_showing(self):
+        """True while the Invoice Manager fills the right-hand slot. It has no
+        keyboard-navigable content, so it never shows the focus indicator."""
+        panel = getattr(self, "invoice_manager_panel", None)
+        try:
+            return panel is not None and bool(panel.winfo_manager())
+        except tk.TclError:
+            return False
+
+    def _update_panel_indicator(self):
+        """Show the accent bar beside whichever panel has keyboard focus.
+
+        Left-hand panels: a thin frame placed over the host's left edge, raised
+        on every update so content created after it can never cover it.
+        Right-hand area (tracker / sandbox browser): one persistent strip that
+        the hub reserves in the layout (``right_focus_strip``). It is a layout
+        slot, not an overlay, so it cannot be buried by lazily created panels
+        and stays correct whichever panel is showing.
+        """
+        focused = self.focused_panel
+        accent = COLORS["accent"]
+        bars = self.__dict__.setdefault("_panel_indicators", {})
+
+        for panel, host, resting in self._left_indicator_hosts():
+            if host is None:
                 continue
-
-            # Check if indicator exists and is still valid
-            indicator_valid = (
-                grid_name in self._panel_indicators and
-                self._panel_indicators[grid_name].winfo_exists()
-            )
-
-            # Create indicator if it doesn't exist or was destroyed
-            if not indicator_valid:
-                indicator = tk.Frame(grid_widget, bg=bg_color, width=3)
-                indicator.place(x=0, y=0, relheight=1.0)
-                self._panel_indicators[grid_name] = indicator
-
-            # Update indicator color based on focus
-            indicator = self._panel_indicators[grid_name]
             try:
-                if panel_name == self.focused_panel:
-                    indicator.configure(bg=COLORS["accent"])
-                else:
-                    # Hide by matching background
-                    indicator.configure(bg=bg_color)
+                bar = bars.get(panel)
+                if bar is None or not bar.winfo_exists():
+                    bar = tk.Frame(host, width=self._INDICATOR_WIDTH)
+                    bar.place(x=0, y=0, relheight=1.0)
+                    bars[panel] = bar
+                bar.configure(bg=accent if panel == focused else resting)
+                bar.lift()
             except tk.TclError:
-                # Widget was destroyed, remove from cache
-                del self._panel_indicators[grid_name]
+                bars.pop(panel, None)  # host destroyed; rebuilt on next update
+
+        strip = getattr(self, "right_focus_strip", None)
+        if strip is not None:
+            lit = focused == "tracker" and not self._invoice_panel_showing()
+            try:
+                strip.configure(bg=accent if lit else COLORS["bg_primary"])
+            except tk.TclError:
+                pass
 
     def _clear_all_item_focus(self):
         """Clear focus highlighting from all items (reset to normal background)."""
