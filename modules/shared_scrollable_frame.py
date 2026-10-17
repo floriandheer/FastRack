@@ -5,6 +5,7 @@ grow taller than the window (or the screen).
 """
 
 import tkinter as tk
+from tkinter import ttk
 
 
 def safe_bind_touchpad_scroll(binder, *args):
@@ -24,18 +25,29 @@ def safe_bind_touchpad_scroll(binder, *args):
 class ScrollableFrame(tk.Frame):
     """A scrollable frame widget with smooth mouse wheel scrolling."""
 
-    def __init__(self, parent, bg=None, show_scrollbar=True):
+    def __init__(self, parent, bg=None, show_scrollbar=True, scrollbar_style=None):
+        """`scrollbar_style` names a ttk scrollbar style (e.g. the app's
+        themed "Vertical.TScrollbar") so the bar matches the app's other
+        scrollbars. Left unset, a plain tk.Scrollbar is used."""
         super().__init__(parent, bg=bg)
 
-        # Plain tk.Scrollbar, not ttk: ttk's is a native NSScroller on
-        # macOS, which per that OS's own "Show scroll bars" preference
-        # stays hidden except during an active scroll gesture.
+        # Plain tk.Scrollbar by default, not ttk: ttk's is a native
+        # NSScroller on macOS, which per that OS's own "Show scroll bars"
+        # preference stays hidden except during an active scroll gesture.
+        # Callers that force a non-native ttk theme (clam) can opt into the
+        # themed ttk bar via scrollbar_style instead.
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
         self.scrollbar = None
         if show_scrollbar:
-            self.scrollbar = tk.Scrollbar(
-                self, orient="vertical", command=self.canvas.yview, width=16,
-            )
+            if scrollbar_style:
+                self.scrollbar = ttk.Scrollbar(
+                    self, orient="vertical", command=self.canvas.yview,
+                    style=scrollbar_style,
+                )
+            else:
+                self.scrollbar = tk.Scrollbar(
+                    self, orient="vertical", command=self.canvas.yview, width=16,
+                )
         self.scrollable_frame = tk.Frame(self.canvas, bg=bg)
 
         # Never itemconfig the embedded window's height explicitly — leave

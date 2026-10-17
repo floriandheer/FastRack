@@ -1567,11 +1567,8 @@ class ProjectTrackerApp:
         # Update initial button styling
         self._update_filter_button_styles()
 
-        # Project count
-        self.count_label = tk.Label(controls_frame, text="Projects (0)", bg="#0d1117", fg="#8b949e",
-                                    font=("Arial", 9))
-        self.count_label.grid(row=0, column=4, sticky=tk.E, padx=(15, 0), pady=5)
-
+        # Spacer column that keeps the controls left-aligned (the project
+        # count that used to fill it now lives above the details panel).
         controls_frame.columnconfigure(4, weight=1)
 
         # Physical subtype filter pills (row 2, hidden by default)
@@ -1833,6 +1830,15 @@ class ProjectTrackerApp:
 
         # Show list view by default
         self.list_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Project count: bottom-left of the list, directly above the details
+        # panel. Packed between view_container and details_frame, so every
+        # place that hides/re-shows those two must handle this bar too.
+        self.count_bar = tk.Frame(right_frame, bg="#0d1117", highlightthickness=0, bd=0)
+        self.count_bar.pack(fill=tk.X, padx=10)
+        self.count_label = tk.Label(self.count_bar, text="0", bg="#0d1117", fg="#8b949e",
+                                    font=("Arial", 13, "bold"))
+        self.count_label.pack(side=tk.LEFT, padx=(4, 0), pady=(0, 2))
 
         # Bottom: Project details (store reference for hiding during creation)
         self.details_frame = tk.Frame(right_frame, bg="#1c2128")
@@ -2230,8 +2236,9 @@ class ProjectTrackerApp:
         self.view_state = "SUBTYPE_SELECTION"
         self._update_fab_visibility()
 
-        # Hide the view container (list/grid views) and details panel
+        # Hide the view container (list/grid views), count bar and details panel
         self.view_container.pack_forget()
+        self.count_bar.pack_forget()
         self.details_frame.pack_forget()
 
         # Create selection panel
@@ -2331,8 +2338,9 @@ class ProjectTrackerApp:
             self.creation_panel.destroy()
             self.creation_panel = None
 
-        # Hide the view container (list/grid views) and details panel
+        # Hide the view container (list/grid views), count bar and details panel
         self.view_container.pack_forget()
+        self.count_bar.pack_forget()
         self.details_frame.pack_forget()
 
         # Create form panel
@@ -2478,8 +2486,9 @@ class ProjectTrackerApp:
         # Reset state
         self.view_state = "PROJECT_LIST"
 
-        # Show the view container and details panel again (in correct order)
+        # Show the view container, count bar and details panel again (in correct order)
         self.view_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.count_bar.pack(fill=tk.X, padx=10)
         self.details_frame.pack(fill=tk.X, padx=10, pady=10)
 
         # Update FAB visibility

@@ -240,8 +240,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                        arrowcolor=COLORS["text_secondary"],
                        troughcolor=COLORS["bg_primary"])
 
+        # clam paints a disabled (nothing-to-scroll) bar light grey otherwise
         style.map("Vertical.TScrollbar",
-                 background=[("active", COLORS["bg_hover"])])
+                 background=[("disabled", COLORS["bg_secondary"]),
+                             ("active", COLORS["bg_hover"])])
 
     def create_layout(self):
         """Create the main layout."""
@@ -535,7 +537,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # relying on mouse-wheel/trackpad scrolling alone) so the Tools
         # section is always reachable even when the sidebar's content is
         # taller than the window — mouse-wheel scroll still works too.
-        self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"], show_scrollbar=False)
+        self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"],
+                                           scrollbar_style="Vertical.TScrollbar")
         self.left_scroll.pack(fill=tk.BOTH, expand=True)
         left_panel = self.left_scroll.get_frame()
 
