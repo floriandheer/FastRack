@@ -15,6 +15,7 @@ from tkinter import ttk, messagebox, filedialog, font
 from shared_logging import get_logger
 from rack_settings import RackSettings
 from ui_theme import COLORS, CATEGORY_COLORS
+from shared_color_button import make_button
 
 logger = get_logger("pipeline")
 
@@ -312,7 +313,7 @@ class SettingsDialog:
         setup_row = tk.Frame(setup_section, bg=COLORS["bg_card"])
         setup_row.pack(fill=tk.X, pady=5)
 
-        tk.Button(
+        make_button(
             setup_row,
             text="Install Dependencies",
             command=self._install_dependencies,
@@ -325,7 +326,7 @@ class SettingsDialog:
             pady=6
         ).pack(side=tk.LEFT)
 
-        tk.Button(
+        make_button(
             setup_row,
             text="Create Shortcut",
             command=self._create_shortcut,
@@ -365,7 +366,7 @@ class SettingsDialog:
             ("Startup",  "startup"),
         )
         for label, step in env_steps:
-            tk.Button(
+            make_button(
                 env_row,
                 text=label,
                 command=lambda s=step: self._run_environment_setup(s),
@@ -755,7 +756,7 @@ class SettingsDialog:
         active_entry.pack(side=tk.LEFT, padx=(0, 10))
         active_entry.bind('<KeyRelease>', lambda e: self._validate_paths())
 
-        browse_active_btn = tk.Button(
+        browse_active_btn = make_button(
             active_frame,
             text="Browse",
             command=self._browse_active,
@@ -813,7 +814,7 @@ class SettingsDialog:
         archive_entry.pack(side=tk.LEFT, padx=(0, 10))
         archive_entry.bind('<KeyRelease>', lambda e: self._validate_paths())
 
-        browse_btn = tk.Button(
+        browse_btn = make_button(
             archive_frame,
             text="Browse",
             command=self._browse_archive,
@@ -882,7 +883,7 @@ class SettingsDialog:
         )
         mapped_sw_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        tk.Button(
+        make_button(
             mapped_sw_frame,
             text="Browse",
             command=lambda: self._browse_to_var(self.mapped_sw_var, "Select Software Sync Directory"),
@@ -938,7 +939,7 @@ class SettingsDialog:
         )
         launchers_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        tk.Button(
+        make_button(
             launchers_frame,
             text="Browse",
             command=lambda: self._browse_to_var(self.launchers_var, "Select Launchers Directory"),
@@ -1007,7 +1008,7 @@ class SettingsDialog:
         boek_entry.pack(side=tk.LEFT, padx=(0, 10))
         boek_entry.bind('<KeyRelease>', lambda e: self._validate_paths())
 
-        tk.Button(
+        make_button(
             boek_frame,
             text="Browse",
             command=lambda: self._browse_to_var(self.boekhouding_base_var, "Select Boekhouding/Invoices Directory"),
@@ -1019,7 +1020,7 @@ class SettingsDialog:
             padx=10
         ).pack(side=tk.LEFT, padx=(0, 10))
 
-        tk.Button(
+        make_button(
             boek_frame,
             text="Use default",
             command=self._clear_boekhouding_base,
@@ -1216,7 +1217,7 @@ class SettingsDialog:
         actions = tk.Frame(parent, bg=COLORS["bg_primary"])
         actions.pack(fill=tk.X, padx=20, pady=(0, 6))
 
-        tk.Button(
+        make_button(
             actions, text="+ Add mapping",
             command=self._drives_add_mapping,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -1224,7 +1225,7 @@ class SettingsDialog:
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
         ).pack(side=tk.LEFT)
 
-        tk.Button(
+        make_button(
             actions, text="Run Drives step now",
             command=lambda: self._run_environment_setup("drives"),
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -1232,7 +1233,7 @@ class SettingsDialog:
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
         ).pack(side=tk.LEFT, padx=(10, 0))
 
-        tk.Button(
+        make_button(
             actions, text="Reload from disk",
             command=self._drives_reload,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -1394,7 +1395,7 @@ class SettingsDialog:
             insertbackground=COLORS["text_primary"],
         ).pack(side=tk.LEFT, padx=(0, 2))
 
-        tk.Button(
+        make_button(
             row, text="...",
             command=lambda v=target_var: self._drives_browse_target(v),
             bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
@@ -1423,7 +1424,7 @@ class SettingsDialog:
         )
         status_lbl.pack(side=tk.LEFT)
 
-        tk.Button(
+        make_button(
             row, text="×",
             command=lambda i=idx: self._drives_remove(i),
             bg=COLORS["bg_card"], fg="#ef4444",
@@ -1640,7 +1641,7 @@ class SettingsDialog:
         green (on) and muted grey (off) so state is obvious at a glance.
         Tracks the BooleanVar two-way so programmatic changes update the
         visual."""
-        btn = tk.Button(
+        btn = make_button(
             parent,
             font=font.Font(family="Segoe UI", size=8, weight="bold"),
             relief=tk.FLAT, cursor="hand2", width=3, padx=4, pady=2,
@@ -1680,7 +1681,7 @@ class SettingsDialog:
         meaning (green/red task toggle, blue test, amber import), neutral
         grey for plain utilities."""
         base = color or COLORS["bg_hover"]
-        return tk.Button(
+        return make_button(
             parent, text=text, command=command,
             bg=self._startup_dim(base), fg=COLORS["text_primary"],
             activebackground=self._startup_dim(base, 0.8),
@@ -2052,7 +2053,7 @@ class SettingsDialog:
         elif dep.get("install_label") and dep.get("install_action") and ok:
             # Already installed but offer a Reinstall path (useful for the
             # VirtualDesktop module after a Windows update breaks it).
-            tk.Button(
+            make_button(
                 row, text=dep["install_label"],
                 command=lambda a=dep["install_action"]: self._startup_run_install(a),
                 bg=COLORS["bg_card"], fg=COLORS["text_secondary"],
@@ -2221,7 +2222,7 @@ class SettingsDialog:
             ("↓", COLORS["text_secondary"], lambda i=idx: self._startup_move(i, +1), 10),
             ("×", "#ef4444", lambda i=idx: self._startup_remove(i), 11),
         ):
-            tk.Button(
+            make_button(
                 actions, text=text, command=cmd,
                 bg=COLORS["bg_card"], fg=fg,
                 activebackground=COLORS["bg_card"], activeforeground=fg,
@@ -2702,7 +2703,7 @@ class SettingsDialog:
                     f"{fname}  ·  {count} folder{'s' if count != 1 else ''}")
                 tk.Label(row, text=detail, font=small_font, fg=COLORS["text_secondary"],
                          bg=COLORS["bg_card"], anchor="w").grid(row=1, column=0, sticky="w")
-                tk.Button(
+                make_button(
                     row, text="Edit template", command=lambda f=fname: self._open_template_file(f),
                     bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
                     activebackground=COLORS["bg_hover"], activeforeground=COLORS["text_primary"],
@@ -2742,7 +2743,7 @@ class SettingsDialog:
         for text, cmd in (("New template...", self._new_template),
                           ("Open templates folder", self._open_templates_dir),
                           ("Refresh", lambda: self._templates_refresh())):
-            tk.Button(
+            make_button(
                 actions, text=text, command=cmd,
                 bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
                 font=font.Font(family="Segoe UI", size=10),
@@ -2801,7 +2802,7 @@ class SettingsDialog:
         actions = tk.Frame(parent, bg=COLORS["bg_primary"])
         actions.pack(fill=tk.X, padx=20, pady=(0, 10))
 
-        tk.Button(
+        make_button(
             actions, text="Install Missing...",
             command=self._apps_install_missing_console,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -2809,7 +2810,7 @@ class SettingsDialog:
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
         ).pack(side=tk.LEFT)
 
-        tk.Button(
+        make_button(
             actions, text="Refresh",
             command=lambda: self._apps_refresh(fresh=True),
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -2914,7 +2915,7 @@ class SettingsDialog:
         # Pack the download button first (side=RIGHT) so it is always
         # visible; the status label fills whatever space remains and wraps.
         if app.url:
-            tk.Button(
+            make_button(
                 row, text="Download",
                 command=lambda a=app: self._wa.open_download_page(a),
                 bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -3065,7 +3066,7 @@ class SettingsDialog:
         button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=15)
 
         # Reset button (left side)
-        reset_btn = tk.Button(
+        reset_btn = make_button(
             button_frame,
             text="Reset Defaults",
             command=self._reset_defaults,
@@ -3080,7 +3081,7 @@ class SettingsDialog:
         reset_btn.pack(side=tk.LEFT)
 
         # Cancel button (right side)
-        cancel_btn = tk.Button(
+        cancel_btn = make_button(
             button_frame,
             text="Cancel",
             command=self._cancel,
@@ -3095,7 +3096,7 @@ class SettingsDialog:
         cancel_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
         # Save button (right side)
-        save_btn = self._save_btn = tk.Button(
+        save_btn = self._save_btn = make_button(
             button_frame,
             text="Save",
             command=self._save,

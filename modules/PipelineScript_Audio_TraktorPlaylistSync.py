@@ -43,6 +43,7 @@ from shared_color_button import ColorButton
 from shared_appdata import get_appdata_path
 from shared_mode_lock import filter_mode_change, make_header_title, add_header_lock
 from shared_action_bar import ActionBar
+from shared_traktor_stems import clear_stem_flag
 
 logger = get_logger("traktor_playlist_sync")
 
@@ -201,6 +202,7 @@ class ImportStats:
     tracks_merged: int = 0
     tracks_skipped_outside_library: int = 0
     tracks_missing_from_export: int = 0
+    stem_links_removed: int = 0   # copied tracks whose stem flag was cleared (stem files don't travel)
 
 
 def load_nml(path: str) -> ET.ElementTree:
@@ -572,6 +574,9 @@ def _merge_playlist_entries(new_node: ET.Element, export_entry_index: Dict[str, 
         if new_key not in dst_entry_index:
             entry_copy = copy.deepcopy(export_entry_index[key])
             rewrite_entry_location(entry_copy, src, dst)
+            # The other machine's stem files aren't here, and Traktor won't load a track that claims stems it can't find.
+            if clear_stem_flag(entry_copy):
+                stats.stem_links_removed += 1
             dst_collection_el.append(entry_copy)
             dst_collection_el.set("ENTRIES", str(len(dst_collection_el.findall("ENTRY"))))
             dst_entry_index[new_key] = entry_copy
@@ -1995,6 +2000,8 @@ class TraktorPlaylistSyncUI:
         self._log(f"Playlists: {stats.playlists_added} added, {stats.playlists_replaced} replaced")
         self._log(f"Smart lists: {stats.smartlists_added} added, {stats.smartlists_replaced} replaced")
         self._log(f"Tracks merged: {stats.tracks_merged}")
+        if stats.stem_links_removed:
+            self._log(f"Stem link cleared on {stats.stem_links_removed} new track(s) - stem files stay on the machine that made them.")
         if stats.tracks_skipped_outside_library:
             self._log(
                 f"WARNING: {stats.tracks_skipped_outside_library} track(s) skipped - outside "

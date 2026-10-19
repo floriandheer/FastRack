@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from rack_settings import get_rack_settings, join_native_path
 from shared_appdata import get_appdata_path
+from shared_color_button import make_button
 
 logger = get_logger("laragon_workspace")
 
@@ -365,20 +366,20 @@ class LaragonSettingsDialog:
                              font=("Consolas", 9), relief=tk.FLAT)
         www_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        tk.Button(inner, text="Browse", command=self._browse_www,
-                  bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
+        make_button(inner, text="Browse", command=self._browse_www,
+                    bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
 
         # --- Buttons ---
         btn_frame = tk.Frame(self.dialog, bg=colors["bg"])
         btn_frame.pack(fill=tk.X, padx=15, pady=(5, 15))
 
-        tk.Button(btn_frame, text="Cancel", command=self.dialog.destroy,
-                  bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
-                  padx=15).pack(side=tk.RIGHT, padx=5)
+        make_button(btn_frame, text="Cancel", command=self.dialog.destroy,
+                    bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
+                    padx=15).pack(side=tk.RIGHT, padx=5)
 
-        tk.Button(btn_frame, text="Save", command=self._on_save,
-                  bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                  relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
+        make_button(btn_frame, text="Save", command=self._on_save,
+                    bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                    relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
 
     def _browse_www(self):
         from tkinter import filedialog
@@ -470,13 +471,13 @@ class LinkProjectDialog:
         btn_frame = tk.Frame(self.dialog, bg=colors["bg"])
         btn_frame.pack(fill=tk.X, padx=15, pady=(5, 15))
 
-        tk.Button(btn_frame, text="Cancel", command=self.dialog.destroy,
-                  bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
-                  padx=15).pack(side=tk.RIGHT, padx=5)
+        make_button(btn_frame, text="Cancel", command=self.dialog.destroy,
+                    bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
+                    padx=15).pack(side=tk.RIGHT, padx=5)
 
-        tk.Button(btn_frame, text="Link", command=self._on_link,
-                  bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                  relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
+        make_button(btn_frame, text="Link", command=self._on_link,
+                    bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                    relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
 
     def _update_preview(self):
         category = self.category_var.get()
@@ -536,12 +537,12 @@ class LaragonManagerUI:
                                   padx=6, pady=2)
         self.www_label.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
 
-        tk.Button(path_frame, text="Settings", command=self._open_settings,
-                  bg=colors["highlight"], fg=colors["fg"], relief=tk.FLAT,
-                  padx=10).pack(side=tk.LEFT)
+        make_button(path_frame, text="Settings", command=self._open_settings,
+                    bg=colors["highlight"], fg=colors["fg"], relief=tk.FLAT,
+                    padx=10).pack(side=tk.LEFT)
 
-        tk.Button(path_frame, text="Refresh", command=self._refresh_project_list,
-                  bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT).pack(side=tk.LEFT, padx=(5, 0))
+        make_button(path_frame, text="Refresh", command=self._refresh_project_list,
+                    bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT).pack(side=tk.LEFT, padx=(5, 0))
 
         # Project list
         list_frame = tk.LabelFrame(self.root, text="Projects in Laragon www", bg=colors["bg"],
@@ -595,19 +596,19 @@ class LaragonManagerUI:
         btn_frame = tk.Frame(self.root, bg=colors["bg"])
         btn_frame.pack(fill=tk.X, padx=12, pady=(0, 5))
 
-        self.link_btn = tk.Button(btn_frame, text="Link Project", command=self._link_project,
-                                  bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                                  relief=tk.FLAT, padx=15)
+        self.link_btn = make_button(btn_frame, text="Link Project", command=self._link_project,
+                                    bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                                    relief=tk.FLAT, padx=15)
         self.link_btn.pack(side=tk.LEFT)
 
-        self.verify_btn = tk.Button(btn_frame, text="Verify All", command=self._verify_all,
-                                    bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
-                                    padx=15)
+        self.verify_btn = make_button(btn_frame, text="Verify All", command=self._verify_all,
+                                      bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
+                                      padx=15)
         self.verify_btn.pack(side=tk.LEFT, padx=8)
 
-        self.newpc_btn = tk.Button(btn_frame, text="Setup New PC", command=self._setup_new_pc,
-                                   bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
-                                   padx=15)
+        self.newpc_btn = make_button(btn_frame, text="Setup New PC", command=self._setup_new_pc,
+                                     bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT,
+                                     padx=15)
         self.newpc_btn.pack(side=tk.LEFT)
 
         # Output log

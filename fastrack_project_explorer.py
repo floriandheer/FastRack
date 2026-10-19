@@ -49,6 +49,7 @@ from invoice_manager.order_project_linker import (
     resolve_or_migrate_project_details, resolve_or_fetch_order_details, resolve_or_fetch_invoice,
     project_details_exists, get_website_url, set_website_url,
 )
+from shared_color_button import make_toggle_button
 
 # Module name for logging (must match setup_logging call)
 MODULE_NAME = "project_tracker"
@@ -1635,20 +1636,20 @@ class ProjectTrackerApp:
         # Toggle uses accent blue (#58a6ff) as the selected background so the
         # active view is unmistakable; unselected sits on a slightly raised
         # surface (#1c2128) so both buttons still read as clickable.
-        grid_btn = tk.Radiobutton(list_header, text="⊞", variable=self.view_mode, value="grid",
-                                  bg="#1c2128", fg="#8b949e", selectcolor="#58a6ff",
-                                  activebackground="#2d333b", activeforeground="white",
-                                  indicatoron=False, padx=10, pady=3, font=("Arial", 12, "bold"),
-                                  borderwidth=0, highlightthickness=0,
-                                  command=self._switch_view)
+        grid_btn = make_toggle_button(list_header, text="⊞", variable=self.view_mode, value="grid",
+                                      bg="#1c2128", fg="#8b949e", selectcolor="#58a6ff",
+                                      activebackground="#2d333b", activeforeground="white",
+                                      indicatoron=False, padx=10, pady=3, font=("Arial", 12, "bold"),
+                                      borderwidth=0, highlightthickness=0,
+                                      command=self._switch_view)
         grid_btn.pack(side=tk.RIGHT, padx=2)
 
-        list_btn = tk.Radiobutton(list_header, text="≡", variable=self.view_mode, value="list",
-                                  bg="#1c2128", fg="#8b949e", selectcolor="#58a6ff",
-                                  activebackground="#2d333b", activeforeground="white",
-                                  indicatoron=False, padx=10, pady=3, font=("Arial", 12, "bold"),
-                                  borderwidth=0, highlightthickness=0,
-                                  command=self._switch_view)
+        list_btn = make_toggle_button(list_header, text="≡", variable=self.view_mode, value="list",
+                                      bg="#1c2128", fg="#8b949e", selectcolor="#58a6ff",
+                                      activebackground="#2d333b", activeforeground="white",
+                                      indicatoron=False, padx=10, pady=3, font=("Arial", 12, "bold"),
+                                      borderwidth=0, highlightthickness=0,
+                                      command=self._switch_view)
         list_btn.pack(side=tk.RIGHT, padx=2)
 
         # Track the buttons so _switch_view can refresh fg colour on the

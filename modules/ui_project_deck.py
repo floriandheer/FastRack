@@ -8,6 +8,7 @@ from typing import Callable, Dict, Optional
 
 from shared_logging import get_logger
 from pipeline_categories import category_color, category_emoji, project_type_info
+from shared_color_button import make_button
 
 logger = get_logger("pipeline")
 
@@ -76,7 +77,7 @@ class ProjectDeckWindow(tk.Toplevel):
         separator.pack(fill=tk.X, pady=10)
         self._register_draggable(separator)
 
-        open_btn = tk.Button(
+        open_btn = make_button(
             container,
             text="📂 Open Folder",
             command=lambda: self._tracker_app._open_project_folder(self._project),
@@ -100,7 +101,7 @@ class ProjectDeckWindow(tk.Toplevel):
             for category_key, script_key, subcat_key, script_data in actions:
                 color = category_color(category_key.capitalize()) or "#238636"
                 label = f"{script_data.get('icon', '')} {script_data.get('name', script_key)}".strip()
-                btn = tk.Button(
+                btn = make_button(
                     container,
                     text=label,
                     command=lambda sd=script_data: self._run_action(sd),

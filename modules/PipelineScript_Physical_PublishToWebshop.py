@@ -30,6 +30,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from shared_logging import get_logger, setup_logging
 from rack_settings import get_rack_settings
 from shared_open_path import open_path
+from shared_color_button import make_button
 
 MODULE_NAME = "publish_to_webshop"
 logger = get_logger(MODULE_NAME)
@@ -175,13 +176,13 @@ def _show_summary(project_folder: Path, dest_dir: Path,
 
     btns = tk.Frame(root, bg="#0d1117")
     btns.pack(fill=tk.X, padx=16, pady=(0, 14))
-    tk.Button(btns, text="Open destination",
-              command=lambda: open_path(str(dest_dir)),
-              bg="#238636", fg="white", relief=tk.FLAT, padx=12, pady=6,
-              cursor="hand2").pack(side=tk.LEFT)
-    tk.Button(btns, text="Close", command=root.destroy,
-              bg="#1c2128", fg="white", relief=tk.FLAT, padx=12, pady=6,
-              cursor="hand2").pack(side=tk.RIGHT)
+    make_button(btns, text="Open destination",
+                command=lambda: open_path(str(dest_dir)),
+                bg="#238636", fg="white", relief=tk.FLAT, padx=12, pady=6,
+                cursor="hand2").pack(side=tk.LEFT)
+    make_button(btns, text="Close", command=root.destroy,
+                bg="#1c2128", fg="white", relief=tk.FLAT, padx=12, pady=6,
+                cursor="hand2").pack(side=tk.RIGHT)
 
     root.mainloop()
 

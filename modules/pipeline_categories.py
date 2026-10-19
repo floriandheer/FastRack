@@ -351,6 +351,13 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "mode_switch": True,
                     },
                     {
+                        "key": "traktor_stems",
+                        "name": "Traktor Stems",
+                        "module": "PipelineScript_Audio_TraktorStems",
+                        "description": "Create stems for a playlist, re-link stems to their tracks, or clean up stem links and stem files - all in one place",
+                        "icon": "🎚️",
+                    },
+                    {
                         "key": "poweramp_sync",
                         "name": "Sync to PowerAmp",
                         "module": "PipelineScript_Audio_PowerAmpSync",

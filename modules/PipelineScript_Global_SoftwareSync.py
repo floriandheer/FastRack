@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_form_keyboard import FormKeyboardMixin, FORM_COLORS
 from rack_settings import RackSettings
+from shared_color_button import make_button
 
 logger = get_logger("software_sync")
 
@@ -256,12 +257,12 @@ class SoftwareSyncManager(FormKeyboardMixin):
                          fg=FORM_COLORS["text"], activebackground=FORM_COLORS["bg_hover"],
                          activeforeground=FORM_COLORS["text"], bd=0, padx=10, pady=4)
 
-        tk.Button(btn_bar, text="Refresh", command=self._scan_status, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Push Selected", command=self._backup_selected, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Pull Selected", command=self._restore_selected, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Push All to NAS", command=self._backup_all, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Pull All from NAS", command=self._restore_all, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Migrate", command=self._migrate_new, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Refresh", command=self._scan_status, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Push Selected", command=self._backup_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Pull Selected", command=self._restore_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Push All to NAS", command=self._backup_all, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Pull All from NAS", command=self._restore_all, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Migrate", command=self._migrate_new, **btn_style).pack(side=tk.LEFT, padx=2)
 
         # Treeview
         tree_frame = tk.Frame(container, bg=FORM_COLORS["bg"])

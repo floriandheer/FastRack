@@ -31,6 +31,7 @@ from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import parse_wp_config as _shared_parse_wp_config
 from rack_settings import get_rack_settings
 from shared_appdata import get_appdata_path
+from shared_color_button import make_button
 
 logger = get_logger("web_devbackup")
 
@@ -733,8 +734,8 @@ class SettingsDialog:
                  bg=c["bg_card"], fg=c["fg"], insertbackground=c["fg"],
                  font=("Consolas", 9), relief=tk.FLAT).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        tk.Button(row, text="Browse", command=self._browse_laragon,
-                  bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
+        make_button(row, text="Browse", command=self._browse_laragon,
+                    bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
 
         # Backup root
         bf = tk.LabelFrame(self.dialog, text="Backup Root Directory",
@@ -747,8 +748,8 @@ class SettingsDialog:
                  bg=c["bg_card"], fg=c["fg"], insertbackground=c["fg"],
                  font=("Consolas", 9), relief=tk.FLAT).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        tk.Button(row, text="Browse", command=self._browse_root,
-                  bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
+        make_button(row, text="Browse", command=self._browse_root,
+                    bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
 
         # Retention
         rf = tk.LabelFrame(self.dialog, text="Retention",
@@ -789,12 +790,12 @@ class SettingsDialog:
         # Buttons
         btn = tk.Frame(self.dialog, bg=c["bg"])
         btn.pack(fill=tk.X, padx=15, pady=(5, 15))
-        tk.Button(btn, text="Cancel", command=self.dialog.destroy,
-                  bg=c["accent"], fg=c["fg"], relief=tk.FLAT,
-                  padx=15).pack(side=tk.RIGHT, padx=5)
-        tk.Button(btn, text="Save", command=self._on_save,
-                  bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                  relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
+        make_button(btn, text="Cancel", command=self.dialog.destroy,
+                    bg=c["accent"], fg=c["fg"], relief=tk.FLAT,
+                    padx=15).pack(side=tk.RIGHT, padx=5)
+        make_button(btn, text="Save", command=self._on_save,
+                    bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                    relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
 
     def _browse_laragon(self):
         d = filedialog.askdirectory(title="Select Laragon Install Folder")
@@ -877,12 +878,12 @@ class RestorePickerDialog:
 
         btn = tk.Frame(self.dialog, bg=c["bg"])
         btn.pack(fill=tk.X, padx=12, pady=(4, 12))
-        tk.Button(btn, text="Cancel", command=self.dialog.destroy,
-                  bg=c["accent"], fg=c["fg"], relief=tk.FLAT,
-                  padx=15).pack(side=tk.RIGHT, padx=5)
-        tk.Button(btn, text="Restore", command=self._on_pick,
-                  bg="#c0392b", fg="white", font=("Arial", 10, "bold"),
-                  relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
+        make_button(btn, text="Cancel", command=self.dialog.destroy,
+                    bg=c["accent"], fg=c["fg"], relief=tk.FLAT,
+                    padx=15).pack(side=tk.RIGHT, padx=5)
+        make_button(btn, text="Restore", command=self._on_pick,
+                    bg="#c0392b", fg="white", font=("Arial", 10, "bold"),
+                    relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
 
     def _on_pick(self):
         sel = self.listbox.curselection()
@@ -931,11 +932,11 @@ class DevBackupUI:
                                   font=("Consolas", 9), relief=tk.FLAT,
                                   anchor=tk.W, padx=6, pady=2)
         self.www_label.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
-        tk.Button(top, text="Settings", command=self._open_settings,
-                  bg=c["highlight"], fg=c["fg"], relief=tk.FLAT,
-                  padx=10).pack(side=tk.LEFT)
-        tk.Button(top, text="Refresh", command=self._refresh_sites,
-                  bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(
+        make_button(top, text="Settings", command=self._open_settings,
+                    bg=c["highlight"], fg=c["fg"], relief=tk.FLAT,
+                    padx=10).pack(side=tk.LEFT)
+        make_button(top, text="Refresh", command=self._refresh_sites,
+                    bg=c["accent"], fg=c["fg"], relief=tk.FLAT).pack(
             side=tk.LEFT, padx=(5, 0))
 
         # Backup root display
@@ -991,24 +992,24 @@ class DevBackupUI:
         br = tk.Frame(self.root, bg=c["bg"])
         br.pack(fill=tk.X, padx=12, pady=(0, 4))
 
-        self.backup_sel_btn = tk.Button(br, text="Backup Selected",
-                                        command=self._backup_selected,
-                                        bg="#2980b9", fg="white",
-                                        font=("Arial", 10, "bold"),
-                                        relief=tk.FLAT, padx=15)
+        self.backup_sel_btn = make_button(br, text="Backup Selected",
+                                          command=self._backup_selected,
+                                          bg="#2980b9", fg="white",
+                                          font=("Arial", 10, "bold"),
+                                          relief=tk.FLAT, padx=15)
         self.backup_sel_btn.pack(side=tk.LEFT)
 
-        self.backup_all_btn = tk.Button(br, text="Backup All",
-                                        command=self._backup_all,
-                                        bg="#2980b9", fg="white",
-                                        relief=tk.FLAT, padx=15)
+        self.backup_all_btn = make_button(br, text="Backup All",
+                                          command=self._backup_all,
+                                          bg="#2980b9", fg="white",
+                                          relief=tk.FLAT, padx=15)
         self.backup_all_btn.pack(side=tk.LEFT, padx=8)
 
-        self.restore_btn = tk.Button(br, text="Restore Selected",
-                                     command=self._restore_selected,
-                                     bg="#c0392b", fg="white",
-                                     font=("Arial", 10, "bold"),
-                                     relief=tk.FLAT, padx=15)
+        self.restore_btn = make_button(br, text="Restore Selected",
+                                       command=self._restore_selected,
+                                       bg="#c0392b", fg="white",
+                                       font=("Arial", 10, "bold"),
+                                       relief=tk.FLAT, padx=15)
         self.restore_btn.pack(side=tk.LEFT, padx=(20, 0))
 
         # Buttons row 2: env
@@ -1017,15 +1018,15 @@ class DevBackupUI:
 
         tk.Label(br2, text="Laragon environment:",
                  bg=c["bg"], fg=c["fg_dim"], font=("Arial", 9)).pack(side=tk.LEFT)
-        self.env_backup_btn = tk.Button(br2, text="Backup Environment",
-                                        command=self._backup_env,
-                                        bg=c["accent"], fg=c["fg"],
-                                        relief=tk.FLAT, padx=15)
+        self.env_backup_btn = make_button(br2, text="Backup Environment",
+                                          command=self._backup_env,
+                                          bg=c["accent"], fg=c["fg"],
+                                          relief=tk.FLAT, padx=15)
         self.env_backup_btn.pack(side=tk.LEFT, padx=8)
-        self.env_restore_btn = tk.Button(br2, text="Restore Environment",
-                                         command=self._restore_env,
-                                         bg=c["accent"], fg=c["fg"],
-                                         relief=tk.FLAT, padx=15)
+        self.env_restore_btn = make_button(br2, text="Restore Environment",
+                                           command=self._restore_env,
+                                           bg=c["accent"], fg=c["fg"],
+                                           relief=tk.FLAT, padx=15)
         self.env_restore_btn.pack(side=tk.LEFT)
 
         # Output log

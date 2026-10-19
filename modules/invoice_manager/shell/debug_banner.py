@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 from invoice_manager.state import AppState
 from invoice_manager.theme import PALETTE, FONTS
+from shared_color_button import make_button
 
 
 class DebugBanner(tk.Frame):
@@ -27,7 +28,7 @@ class DebugBanner(tk.Frame):
         ).pack(side="left", padx=16, pady=4)
 
         # Right-side action buttons (pack right-to-left).
-        tk.Button(
+        make_button(
             self, text="Exit debug mode", command=on_exit_debug,
             bg="white", fg=C["danger_bg"],
             activebackground="#fee2e2", activeforeground=C["danger_bg"],
@@ -36,7 +37,7 @@ class DebugBanner(tk.Frame):
         ).pack(side="right", padx=(6, 14), pady=4)
 
         if on_open_folder is not None:
-            tk.Button(
+            make_button(
                 self, text="📂  Open _DEBUG folder", command=on_open_folder,
                 bg="white", fg=C["danger_bg"],
                 activebackground="#fee2e2", activeforeground=C["danger_bg"],

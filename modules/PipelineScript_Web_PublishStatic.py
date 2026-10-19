@@ -30,6 +30,7 @@ from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_wordpress import is_wordpress_folder
 from rack_settings import get_rack_settings, join_native_path
 from shared_appdata import get_appdata_path
+from shared_color_button import make_button
 
 # Get logger reference (configured in main())
 logger = get_logger("web_publish_static")
@@ -1164,13 +1165,13 @@ class PublishStaticUI:
         self.site_combo.pack(side=tk.LEFT, padx=8)
         self.site_combo.bind("<<ComboboxSelected>>", lambda e: self._on_site_changed())
 
-        self.settings_btn = tk.Button(ctrl, text="Settings", command=self._open_settings,
-                                      bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT)
+        self.settings_btn = make_button(ctrl, text="Settings", command=self._open_settings,
+                                        bg=colors["accent"], fg=colors["fg"], relief=tk.FLAT)
         self.settings_btn.pack(side=tk.RIGHT)
 
-        self.start_btn = tk.Button(ctrl, text="Start Publish", command=self._start_publish,
-                                   bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                                   relief=tk.FLAT, padx=15)
+        self.start_btn = make_button(ctrl, text="Start Publish", command=self._start_publish,
+                                     bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                                     relief=tk.FLAT, padx=15)
         self.start_btn.pack(side=tk.RIGHT, padx=8)
 
         # Path info

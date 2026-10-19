@@ -10,13 +10,14 @@ import tkinter as tk
 from typing import Callable, Optional
 
 from invoice_manager.theme import PALETTE, FONTS
+from shared_color_button import make_button
 
 
 def secondary_button(parent: tk.Widget, text: str, command: Callable,
                      **kwargs) -> tk.Button:
     """Default flat button — bg_input fill, text foreground."""
     C = PALETTE
-    btn = tk.Button(
+    btn = make_button(
         parent, text=text, command=command,
         bg=C["bg_input"], fg=C["text"],
         activebackground=C["bg_hover"], activeforeground=C["text"],
@@ -32,7 +33,7 @@ def primary_button(parent: tk.Widget, text: str, command: Callable,
                    **kwargs) -> tk.Button:
     """Accent-coloured button for the dominant action on a screen."""
     C = PALETTE
-    btn = tk.Button(
+    btn = make_button(
         parent, text=text, command=command,
         bg=C["sidebar_active"], fg="white",
         activebackground=C["accent_hover"], activeforeground="white",
@@ -47,7 +48,7 @@ def primary_button(parent: tk.Widget, text: str, command: Callable,
 def danger_button(parent: tk.Widget, text: str, command: Callable,
                   **kwargs) -> tk.Button:
     C = PALETTE
-    btn = tk.Button(
+    btn = make_button(
         parent, text=text, command=command,
         bg=C["danger_bg"], fg="white",
         activebackground="#dc2626", activeforeground="white",

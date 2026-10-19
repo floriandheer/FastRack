@@ -22,6 +22,7 @@ from urllib.error import URLError
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_form_keyboard import FormKeyboardMixin, FORM_COLORS
 from rack_settings import RackSettings
+from shared_color_button import make_button
 
 logger = get_logger("software_launcher")
 
@@ -195,10 +196,10 @@ class SoftwareLauncherManager(FormKeyboardMixin):
                          fg=FORM_COLORS["text"], activebackground=FORM_COLORS["bg_hover"],
                          activeforeground=FORM_COLORS["text"], bd=0, padx=10, pady=4)
 
-        tk.Button(btn_bar, text="Check Updates", command=self._check_versions, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Install / Update Selected", command=self._install_selected, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Launch Selected", command=self._launch_selected, **btn_style).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_bar, text="Open Folder", command=self._open_folder_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Check Updates", command=self._check_versions, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Install / Update Selected", command=self._install_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Launch Selected", command=self._launch_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+        make_button(btn_bar, text="Open Folder", command=self._open_folder_selected, **btn_style).pack(side=tk.LEFT, padx=2)
 
         # Library path row
         self.lib_path_frame = tk.Frame(container, bg=FORM_COLORS["bg"])
@@ -210,7 +211,7 @@ class SoftwareLauncherManager(FormKeyboardMixin):
                                        state="readonly", readonlybackground=FORM_COLORS["bg_input"],
                                        fg=FORM_COLORS["text"], font=("Consolas", 9), bd=0)
         self.lib_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-        tk.Button(self.lib_path_frame, text="Copy", command=self._copy_library_path, **btn_style).pack(side=tk.LEFT)
+        make_button(self.lib_path_frame, text="Copy", command=self._copy_library_path, **btn_style).pack(side=tk.LEFT)
         self.lib_path_frame.pack_forget()
 
         # Treeview

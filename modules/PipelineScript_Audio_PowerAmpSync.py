@@ -75,6 +75,7 @@ DEFAULT_PRESET_NAME = "Default (Auto)"
 # ============================================================================
 
 from shared_logging import get_logger, setup_logging as setup_shared_logging
+from shared_color_button import make_button
 
 logger = get_logger("poweramp_sync")
 
@@ -867,17 +868,17 @@ class PowerAmpSyncApp:
         action_btns = ttk.Frame(main_btn_frame)
         action_btns.grid(row=0, column=1, sticky="e", padx=10)
 
-        self.sync_playlists_btn = tk.Button(action_btns, text="Sync Playlists", command=self._start_sync_playlists_only,
+        self.sync_playlists_btn = make_button(action_btns, text="Sync Playlists", command=self._start_sync_playlists_only,
                                              width=15, bg="yellow", fg="black", font=('', 9, 'bold'))
         self.sync_playlists_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.sync_btn = tk.Button(action_btns, text="Start Sync", command=self._start_sync,
-                                  width=15, bg="green", fg="white", font=('', 9, 'bold'))
+        self.sync_btn = make_button(action_btns, text="Start Sync", command=self._start_sync,
+                                    width=15, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.cancel_btn = tk.Button(action_btns, text="Cancel", command=self._cancel_sync,
-                                    width=15, bg="red", fg="white", font=('', 9, 'bold'),
-                                    state=tk.DISABLED)
+        self.cancel_btn = make_button(action_btns, text="Cancel", command=self._cancel_sync,
+                                      width=15, bg="red", fg="white", font=('', 9, 'bold'),
+                                      state=tk.DISABLED)
         self.cancel_btn.pack(side=tk.LEFT)
 
         # === AUDIOBOOKS & PODCASTS TAB ===
@@ -1046,7 +1047,7 @@ class PowerAmpSyncApp:
             row=0, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(self.extras_local_frame, text="Browse", command=self._browse_audiobooks_dest).grid(
             row=0, column=2, padx=5, pady=10)
-        self.sync_audiobooks_btn = tk.Button(self.extras_local_frame, text="Sync", command=self._start_sync_audiobooks,
+        self.sync_audiobooks_btn = make_button(self.extras_local_frame, text="Sync", command=self._start_sync_audiobooks,
                                               width=10, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_audiobooks_btn.grid(row=0, column=3, padx=(0, 10), pady=10)
 
@@ -1057,7 +1058,7 @@ class PowerAmpSyncApp:
             row=1, column=1, sticky="ew", padx=5, pady=10)
         ttk.Button(self.extras_local_frame, text="Browse", command=self._browse_podcasts_dest).grid(
             row=1, column=2, padx=5, pady=10)
-        self.sync_podcasts_btn = tk.Button(self.extras_local_frame, text="Sync", command=self._start_sync_podcasts,
+        self.sync_podcasts_btn = make_button(self.extras_local_frame, text="Sync", command=self._start_sync_podcasts,
                                             width=10, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_podcasts_btn.grid(row=1, column=3, padx=(0, 10), pady=10)
 
@@ -1079,7 +1080,7 @@ class PowerAmpSyncApp:
         self.adb_audiobooks_path_var = tk.StringVar(value="/storage/emulated/0/Audiobooks/")
         ttk.Entry(self.extras_adb_frame, textvariable=self.adb_audiobooks_path_var, width=ENTRY_WIDTH).grid(
             row=0, column=1, sticky="ew", padx=5, pady=10)
-        self.sync_audiobooks_adb_btn = tk.Button(
+        self.sync_audiobooks_adb_btn = make_button(
             self.extras_adb_frame, text="Sync", command=self._start_sync_audiobooks,
             width=10, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_audiobooks_adb_btn.grid(row=0, column=2, padx=5, pady=10)
@@ -1089,7 +1090,7 @@ class PowerAmpSyncApp:
         self.adb_podcasts_path_var = tk.StringVar(value="/storage/emulated/0/Podcasts/")
         ttk.Entry(self.extras_adb_frame, textvariable=self.adb_podcasts_path_var, width=ENTRY_WIDTH).grid(
             row=1, column=1, sticky="ew", padx=5, pady=10)
-        self.sync_podcasts_adb_btn = tk.Button(
+        self.sync_podcasts_adb_btn = make_button(
             self.extras_adb_frame, text="Sync", command=self._start_sync_podcasts,
             width=10, bg="green", fg="white", font=('', 9, 'bold'))
         self.sync_podcasts_adb_btn.grid(row=1, column=2, padx=5, pady=10)
@@ -1112,7 +1113,7 @@ class PowerAmpSyncApp:
         action_frame = ttk.Frame(parent)
         action_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=10)
 
-        self.extras_cancel_btn = tk.Button(action_frame, text="Cancel", command=self._cancel_sync,
+        self.extras_cancel_btn = make_button(action_frame, text="Cancel", command=self._cancel_sync,
                                             width=15, bg="red", fg="white", font=('', 9, 'bold'),
                                             state=tk.DISABLED)
         self.extras_cancel_btn.pack(side=tk.LEFT)

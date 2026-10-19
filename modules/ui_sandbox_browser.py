@@ -24,6 +24,7 @@ from ui_theme import COLORS
 from sandbox_tag_store import SandboxTagStore
 import sandbox_versioning as versioning
 from shared_open_path import open_path, reveal_path
+from shared_color_button import make_button, make_toggle_button
 
 logger = get_logger(__name__)
 
@@ -213,14 +214,14 @@ class SandboxBrowserPanel(tk.Frame):
         self.filter_entry = filter_entry
         self._set_placeholder(filter_entry, "Filter by name or tag...")
 
-        refresh_btn = tk.Button(
+        refresh_btn = make_button(
             top_bar, text="Refresh", command=self.refresh,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
             activebackground=COLORS["bg_hover"], relief=tk.FLAT, cursor="hand2"
         )
         refresh_btn.grid(row=0, column=1, padx=(8, 0))
 
-        explorer_btn = tk.Button(
+        explorer_btn = make_button(
             top_bar, text="Open in Explorer", command=self._open_in_explorer,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
             activebackground=COLORS["bg_hover"], relief=tk.FLAT, cursor="hand2"
@@ -248,7 +249,7 @@ class SandboxBrowserPanel(tk.Frame):
         toggle.grid(row=0, column=4, padx=(10, 0))
         self._view_mode_buttons = {}
         for mode, glyph in (("list", "≡"), ("grid", "⊞")):
-            btn = tk.Radiobutton(
+            btn = make_toggle_button(
                 toggle, text=glyph, variable=self.view_mode, value=mode,
                 bg=_CARD_BG, fg=_MUTED, selectcolor=_ACCENT,
                 activebackground=_CARD_BG_SELECTED, activeforeground="white",
@@ -345,7 +346,7 @@ class SandboxBrowserPanel(tk.Frame):
             sel_header, text="Selected item", font=font.Font(family="Segoe UI", size=9, weight="bold"),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
         ).grid(row=0, column=0, sticky="w")
-        self.reveal_btn = tk.Button(
+        self.reveal_btn = make_button(
             sel_header, text="Show in Explorer", command=self._reveal_selected,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
             activebackground=COLORS["bg_hover"], activeforeground=COLORS["text_primary"],
@@ -375,7 +376,7 @@ class SandboxBrowserPanel(tk.Frame):
         self.tags_entry.grid(row=3, column=0, sticky="ew", padx=12, ipady=4)
         self.tags_entry.bind("<Return>", lambda e: self._save_tags())
 
-        self.save_tags_btn = tk.Button(
+        self.save_tags_btn = make_button(
             editor, text="Save Tags", command=self._save_tags,
             bg=COLORS["accent"], fg="#ffffff",
             activebackground=COLORS["accent_hover"], relief=tk.FLAT, cursor="hand2",
@@ -406,7 +407,7 @@ class SandboxBrowserPanel(tk.Frame):
             header, text="Versions", font=font.Font(family="Segoe UI", size=9, weight="bold"),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
         ).grid(row=0, column=0, sticky="w")
-        self.version_up_btn = tk.Button(
+        self.version_up_btn = make_button(
             header, text="Version up", command=self._version_up,
             bg=COLORS["accent"], fg="#ffffff",
             activebackground=COLORS["accent_hover"], activeforeground="#ffffff",
@@ -1271,7 +1272,7 @@ class SandboxBrowserPanel(tk.Frame):
         # Counted per document: all versions of a file are one item.
         counts = self.tag_store.all_tags(by_document=True)
         for tag in sorted(counts, key=lambda t: (-counts[t], t.lower()))[:20]:
-            btn = tk.Button(
+            btn = make_button(
                 self.existing_tags_frame, text=f"{tag} ({counts[tag]})",
                 command=lambda t=tag: self._append_tag(t),
                 bg=COLORS["bg_secondary"], fg=COLORS["text_secondary"],

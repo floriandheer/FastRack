@@ -21,6 +21,7 @@ from shared_colors import (
     ACCENT, ACCENT_DARK, ACCENT_HOVER,
     BORDER, SUCCESS, WARNING, ERROR,
 )
+from shared_color_button import ColorButton, make_button
 
 
 # ==================== COLOR SCHEME ====================
@@ -419,7 +420,7 @@ def create_styled_button(parent, text, command=None, primary=False, **kwargs) ->
         fg = FORM_COLORS["text"]
         hover_bg = FORM_COLORS["bg_hover"]
 
-    btn = tk.Button(
+    btn = make_button(
         parent,
         text=text,
         command=command,
@@ -437,6 +438,10 @@ def create_styled_button(parent, text, command=None, primary=False, **kwargs) ->
         pady=8,
         **kwargs
     )
+    if isinstance(btn, ColorButton):
+        # A Label-based button (macOS) isn't a Tab stop unless asked; the
+        # native Windows Button already is.
+        btn.configure(takefocus=True)
 
     # Hover effects
     btn.bind("<Enter>", lambda e: e.widget.configure(bg=hover_bg))

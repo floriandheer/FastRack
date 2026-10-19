@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Traktor Stems** (DJ Tools) — everything about Traktor's stems in one window. A status panel
+  compares the "has stems" link on each track in `collection.nml` (bit `0x40` of `INFO FLAGS`)
+  with the stem files actually on disk, and the tabs follow the life of a stem:
+  - **Create stems** (macOS) — pick a playlist; it presses Traktor's Shift+S for each track
+    (Down arrow in between) and waits for the "Finalized stem separation process" line in
+    Traktor's log instead of a fixed delay. Tracks that already have stems, or got them in a
+    recent run, are stepped over, so an interrupted run resumes. It stops if Traktor reports a
+    different track than expected (browser not in playlist order), if no result arrives in
+    time, or if Traktor loses focus or quits; failed tracks are listed. Keeps the Mac awake.
+  - **Re-link** — sets the link again on tracks whose stem file still exists. Traktor's logs say
+    which track each stem file was made for, a collection backup says which tracks had the link;
+    titles shared by several tracks or no longer in the collection are skipped and listed.
+  - **Clean up** — remove the links (only those without a stem file, or all), delete the stem
+    files (to the Trash through Finder on a Mac, or permanently), or both at once in the safe
+    order (links first). Only `*.stem.mp4` files of the exact shape Traktor writes are ever listed.
+  Every change to `collection.nml` makes a timestamped backup first and needs Traktor closed;
+  the command line (`status`, `playlists`, `create`, `relink`, `unlink`, `delete`, `clean`)
+  only previews unless `--apply` is given.
 - **One-click tasks run in their own console window** — on Windows, a hub
   button that runs a task directly (Sync to Traktor, Sync Traktor Playlists)
   now opens a dedicated, titled console window with that task's live
@@ -81,6 +99,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `install_dependencies.py` now installs `pyexiv2` (previously listed in
   the README but missing from the installer) and uses
   `requirements.txt` when present.
+
+### Fixed
+- **Traktor Playlist Sync import no longer copies stem links to the other machine** — tracks
+  it adds to the destination's collection now have the stem bit cleared, since the stem files
+  stay behind on the machine that generated them.
+- **Coloured buttons are no longer plain white boxes on macOS** — on a Mac, a classic `tk.Button`
+  is drawn as a native control that ignores its background and text colour, so a green or blue
+  button showed up as a white rectangle. Every coloured button now goes through
+  `make_button()` (new, in `shared_color_button.py`), which gives the stock Tk button on Windows
+  and Linux exactly as before and a `ColorButton` on macOS. Fixed in the Rack Settings dialog,
+  Sandbox browser, Project deck, Invoice Manager (primary/secondary/danger buttons and the debug
+  banner), Dev Backup, Laragon Workspace, Resolume Sync, Publish Static, Publish to Webshop,
+  PowerAmp Sync, Software Launcher, Software Config Sync, Format Genres, Format Titles and the
+  shared styled form button. The list/grid view toggles in Project Tracker and the Sandbox
+  browser (`make_toggle_button()`) show their blue selected state again on a Mac.
+  `ColorButton` now also supports `relief`, `borderwidth`, `activebackground`/`activeforeground`
+  hover colours, `disabledforeground`, `invoke()`, `flash()`, `config(command=...)` and a
+  keyboard focus ring. A new test (`tests/test_color_button.py`) fails if a coloured raw
+  `tk.Button` is added again.
 
 ### Changed
 - Renamed the project from FastRak to **FastRack** throughout code, docs,

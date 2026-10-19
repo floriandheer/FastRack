@@ -36,6 +36,7 @@ from typing import Dict, List, Optional, Tuple, Callable
 from shared_window_icon import apply_category_icon
 from shared_logging import get_logger, setup_logging as setup_shared_logging
 from shared_appdata import get_appdata_path
+from shared_color_button import make_button
 
 logger = get_logger("resolume_sync")
 
@@ -300,12 +301,12 @@ class ResolumeSettingsDialog:
 
         btn_frame = tk.Frame(self.dialog, bg=COLORS["bg"])
         btn_frame.pack(fill=tk.X, padx=15, pady=(5, 15))
-        tk.Button(btn_frame, text="Cancel", command=self.dialog.destroy,
-                  bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT,
-                  padx=15).pack(side=tk.RIGHT, padx=5)
-        tk.Button(btn_frame, text="Save", command=self._on_save,
-                  bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
-                  relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
+        make_button(btn_frame, text="Cancel", command=self.dialog.destroy,
+                    bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT,
+                    padx=15).pack(side=tk.RIGHT, padx=5)
+        make_button(btn_frame, text="Save", command=self._on_save,
+                    bg="#27ae60", fg="white", font=("Arial", 10, "bold"),
+                    relief=tk.FLAT, padx=15).pack(side=tk.RIGHT)
 
     def _path_row(self, label: str, var: tk.StringVar, **pad):
         frame = tk.LabelFrame(self.dialog, text=label, bg=COLORS["bg"],
@@ -323,8 +324,8 @@ class ResolumeSettingsDialog:
             if d:
                 var.set(d.replace("/", "\\"))
 
-        tk.Button(inner, text="Browse", command=browse,
-                  bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
+        make_button(inner, text="Browse", command=browse,
+                    bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT).pack(side=tk.LEFT)
 
     def _on_save(self):
         local = self.local_var.get().strip()
@@ -388,26 +389,26 @@ class ResolumeSyncUI:
             font=("Arial", 10),
         ).pack(side=tk.LEFT)
 
-        tk.Button(controls, text="Settings", command=self._open_settings,
-                  bg=COLORS["highlight"], fg=COLORS["fg"], relief=tk.FLAT,
-                  padx=10).pack(side=tk.RIGHT)
+        make_button(controls, text="Settings", command=self._open_settings,
+                    bg=COLORS["highlight"], fg=COLORS["fg"], relief=tk.FLAT,
+                    padx=10).pack(side=tk.RIGHT)
 
-        tk.Button(controls, text="Check Resolume", command=self._check_resolume,
-                  bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT,
-                  padx=10).pack(side=tk.RIGHT, padx=(0, 6))
+        make_button(controls, text="Check Resolume", command=self._check_resolume,
+                    bg=COLORS["accent"], fg=COLORS["fg"], relief=tk.FLAT,
+                    padx=10).pack(side=tk.RIGHT, padx=(0, 6))
 
         # Action buttons
         actions = tk.Frame(self.root, bg=COLORS["bg"])
         actions.pack(fill=tk.X, padx=12, pady=(4, 6))
 
-        self.push_btn = tk.Button(
+        self.push_btn = make_button(
             actions, text="⬆  Push  Local → NAS", command=self._on_push,
             bg=COLORS["push"], fg="white", font=("Arial", 11, "bold"),
             relief=tk.FLAT, padx=18, pady=10,
         )
         self.push_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 6))
 
-        self.pull_btn = tk.Button(
+        self.pull_btn = make_button(
             actions, text="⬇  Pull  NAS → Local", command=self._on_pull,
             bg=COLORS["pull"], fg="white", font=("Arial", 11, "bold"),
             relief=tk.FLAT, padx=18, pady=10,

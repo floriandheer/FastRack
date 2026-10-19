@@ -17,6 +17,7 @@ import tkinter as tk
 from typing import Optional
 
 from shared_window_icon import apply_category_icon
+from shared_color_button import make_button
 
 APP_NAME = "Format Titles"
 APP_VERSION = "1.0.0"
@@ -190,7 +191,7 @@ class FormatTitlesApp:
         )
         hint.pack(anchor="w", pady=(0, 10))
 
-        btn = tk.Button(
+        btn = make_button(
             outer, text="Format Clipboard Now",
             bg=ACCENT, fg="#ffffff",
             activebackground=ACCENT_HOVER, activeforeground="#ffffff",
