@@ -120,6 +120,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   General > Environment Setup started `setup_environment.py` as a background process on a Mac, where
   it has no usable stdin, so its yes/no questions ("Create these directories?") could not be answered.
   They now open a Terminal window, like the Workstation Apps installer does. Windows is unchanged.
+- **Project Finder no longer freezes when you drag the grid-size slider on macOS** — the slider's
+  command rebuilt the whole grid from inside the slider's own redraw; the rebuild ends in
+  `update_idletasks()`, which redraws the slider, which ran the command again, without end. The grid is
+  now rebuilt from the event loop, once per burst of slider movement (the setting is saved once too),
+  and a rebuild that is requested while another one is running waits for it instead of starting inside
+  it. Tests: `tests/test_project_explorer_grid.py`.
+- **Project Finder finds and keeps projects on macOS** — its import scan built every folder as
+  `<active base>\Visual` with a literal backslash, so none of its 18 active and 16 archive folders
+  existed on a Mac and a refresh imported nothing; and the project database turned every `/` of a
+  stored path into `\`, so even a found project would have been saved as a path that exists nowhere.
+  Folders are now built with the system's separators and native macOS/Linux paths are stored as they
+  are. WSL (`/mnt/d/...`) and Windows paths are handled exactly as before. Tests:
+  `tests/test_project_paths_platform.py`.
+- **Software and Launchers paths on macOS follow the Windows layout** — on Windows `P:` is
+  `D:\_work\_PIPELINE` and the NAS "work" sync brings that folder to `~/_work`, so the Mac defaults are
+  now `~/_work/_PIPELINE/Software` and `~/_work/_PIPELINE/Launchers` instead of the folders
+  `~/_work/Software` and `~/_work/Launchers` that nothing created (which made the status log report two
+  unreachable paths at every start). A config that still holds those old defaults is moved over once
+  when it is loaded (logged, backup kept next to it), unless the old folder really exists.
 - **Drive and path settings now work on macOS/Linux** — `subst` drive letters (`I:`, `M:`, `P:`, `F:`)
   only exist on Windows, but a new `rack_config.json` on a Mac was seeded from `setup_config.json`'s
   Windows values (`I:`, `D:\_work\Active`, `P:\Software`, ...). Every path then came out relative to the

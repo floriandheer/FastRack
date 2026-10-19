@@ -100,6 +100,8 @@ def _get_platform_path(windows_path: str) -> Path:
     """
     Convert Windows path to appropriate platform path.
     On WSL/Linux, converts 'D:\\folder' to '/mnt/d/folder'.
+    A path without a drive letter (a native macOS/Linux path, possibly with
+    Windows separators from a hard-coded subpath) gets forward slashes.
     On Windows, returns the path unchanged.
     """
     if sys.platform == "win32":
@@ -117,7 +119,7 @@ def _get_platform_path(windows_path: str) -> Path:
             rest_of_path = rest_of_path[1:]
         return Path(f"/mnt/{drive_letter}/{rest_of_path}")
 
-    return Path(windows_path)
+    return Path(path_str)
 
 
 def _resolve_top_segment(base: str, subpath: str) -> str:
@@ -1208,6 +1210,9 @@ class ProjectTrackerApp:
         self.grid_cards = []  # List of card frames for keyboard navigation
         self.grid_projects = []  # List of projects in grid order
         self.grid_cols = 1  # Current number of columns
+        self._grid_scale_job = None  # pending after() that applies the size slider (see _on_grid_scale_changed)
+        self._grid_populating = False  # a _populate_grid pass is running (see _populate_grid)
+        self._grid_populate_again = False  # a rebuild was asked for while one was running
 
         # Filter status (load from settings)
         # Status filter toggles — multiple can be active at once
@@ -2843,11 +2848,28 @@ class ProjectTrackerApp:
         self.settings.set("list_scale", int(value))
 
     def _on_grid_scale_changed(self, value):
-        """Handle grid scale slider change - repopulate grid."""
-        # Save scale preference
-        self.settings.set("grid_scale", int(value))
-        if self.view_mode.get() == "grid":
-            self._populate_grid()
+        """Handle grid scale slider change - repopulate grid.
+
+        This runs inside the Scale widget's own redraw. Rebuilding the grid
+        right here ends in update_idletasks() (_scroll_to_grid_card), which
+        redraws the Scale, which calls this command again, and so on without
+        end - on macOS that froze the whole app. So only note the value here
+        and rebuild from the event loop, once per burst of slider movement
+        (which also saves the settings file once instead of on every step).
+        """
+        self._grid_scale_value_pending = int(value)
+        if self._grid_scale_job is None:
+            self._grid_scale_job = self.grid_canvas.after(40, self._apply_grid_scale)
+
+    def _apply_grid_scale(self):
+        """Save the slider's last value and rebuild the grid with it."""
+        self._grid_scale_job = None
+        try:
+            self.settings.set("grid_scale", self._grid_scale_value_pending)
+            if self.view_mode.get() == "grid":
+                self._populate_grid()
+        except tk.TclError:
+            pass  # window closed while the update was waiting
 
     def _get_scaled_card_size(self) -> int:
         """Get card size based on current grid scale value."""
@@ -2894,7 +2916,29 @@ class ProjectTrackerApp:
             return "break"
 
     def _populate_grid(self):
-        """Populate the grid view with project cards."""
+        """Populate the grid view with project cards.
+
+        A rebuild that is asked for while another one is running (events
+        processed by update_idletasks() halfway through it) must not start
+        inside it - the inner one would destroy the cards the outer one is
+        still creating. It is run once more after the current one instead.
+        """
+        if self._grid_populating:
+            self._grid_populate_again = True
+            return
+        self._grid_populating = True
+        try:
+            self._populate_grid_now()
+        finally:
+            self._grid_populating = False
+        if self._grid_populate_again:
+            self._grid_populate_again = False
+            try:
+                self.grid_canvas.after_idle(self._populate_grid)
+            except tk.TclError:
+                pass
+
+    def _populate_grid_now(self):
         # Reset grid tracking BEFORE destroying widgets
         self.grid_cards = []
         self.grid_projects = []

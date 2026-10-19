@@ -174,7 +174,7 @@ def test_existing_windows_config_is_repaired_with_a_backup_and_a_log_line(mac, c
     assert backup.read_bytes() == original_bytes
     assert json.loads(config_path.read_text(encoding="utf-8"))["drives"] == settings.config["drives"]
     messages = " ".join(r.getMessage() for r in caplog.records)
-    assert "Windows paths found" in messages and "D:\\\\_work\\\\Active" in messages and backup.name in messages
+    assert "falling back to platform defaults" in messages and "D:\\\\_work\\\\Active" in messages and backup.name in messages
 
 
 @posix_only
@@ -385,3 +385,56 @@ def test_drives_tab_on_windows_is_unchanged(tk_window, tmp_path, monkeypatch):
     assert stub._drives_run_btn.cget("state") == tk.NORMAL
     assert stub._drives_platform_note is None
     assert not any("Windows only" in str(label.cget("text")) for label in _labels(tk_window))
+
+
+# ---- software paths: the _PIPELINE layout -------------------------------------------------------------------------
+
+
+@posix_only
+def test_software_defaults_off_windows_mirror_the_windows_pipeline_folder(mac, fake_home):
+    assert rack_settings._default_software_sync() == {
+        "nas_software_path": "",
+        "mapped_software_path": f"{fake_home}/_work/_PIPELINE/Software",
+        "launchers_base_path": f"{fake_home}/_work/_PIPELINE/Launchers",
+    }
+
+
+def test_software_defaults_on_windows_are_unchanged(windows):
+    assert rack_settings._default_software_sync() == {
+        "nas_software_path": "D:\\_work\\_PIPELINE\\Software",
+        "mapped_software_path": "P:\\Software",
+        "launchers_base_path": "P:\\Launchers",
+    }
+
+
+@posix_only
+def test_the_old_software_defaults_move_to_the_pipeline_folder_with_a_backup(mac, config_path, fake_home):
+    old = {"version": "1.1.0", "software_sync": {"nas_software_path": "",
+                                                 "mapped_software_path": f"{fake_home}/_work/Software",
+                                                 "launchers_base_path": f"{fake_home}/_work/Launchers"}}
+    write_config(config_path, old)
+    original_bytes = config_path.read_bytes()
+
+    settings = RackSettings(config_path=str(config_path))
+
+    assert settings.get_mapped_software_path() == f"{fake_home}/_work/_PIPELINE/Software"
+    assert settings.get_launchers_base_path() == f"{fake_home}/_work/_PIPELINE/Launchers"
+    (backup,) = backups(config_path)
+    assert backup.read_bytes() == original_bytes
+    assert not (fake_home / "_work").exists()                       # nothing is created
+
+
+@posix_only
+def test_old_software_folders_that_exist_or_custom_values_are_left_alone(mac, config_path, fake_home):
+    (fake_home / "_work" / "Software").mkdir(parents=True)          # set up on purpose
+    config = {"version": "1.1.0", "software_sync": {"nas_software_path": "",
+                                                    "mapped_software_path": f"{fake_home}/_work/Software",
+                                                    "launchers_base_path": "/Volumes/Tools/Launchers"}}
+    write_config(config_path, config)
+    before = config_path.read_bytes()
+
+    settings = RackSettings(config_path=str(config_path))
+
+    assert settings.get_mapped_software_path() == f"{fake_home}/_work/Software"
+    assert settings.get_launchers_base_path() == "/Volumes/Tools/Launchers"
+    assert config_path.read_bytes() == before and backups(config_path) == []

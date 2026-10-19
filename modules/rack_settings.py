@@ -107,9 +107,21 @@ def _default_software_sync() -> Dict[str, str]:
             "mapped_software_path": "P:\\Software",
             "launchers_base_path": "P:\\Launchers",
         }
-    home = Path.home()
+    # On Windows P: is D:\_work\_PIPELINE, and the NAS "work" folder that syncs
+    # to ~/_work brings that _PIPELINE folder along, so mirror the same layout.
+    pipeline = Path.home() / "_work" / "_PIPELINE"
     return {
         "nas_software_path": "",
+        "mapped_software_path": str(pipeline / "Software"),
+        "launchers_base_path": str(pipeline / "Launchers"),
+    }
+
+
+def _legacy_software_defaults() -> Dict[str, str]:
+    """The off-Windows software_sync defaults used before the _PIPELINE layout:
+    plain ~/_work/Software and ~/_work/Launchers."""
+    home = Path.home()
+    return {
         "mapped_software_path": str(home / "_work" / "Software"),
         "launchers_base_path": str(home / "_work" / "Launchers"),
     }
@@ -391,7 +403,8 @@ class RackSettings:
             return self.DEFAULT_CONFIG.copy()
 
     def _migrate_windows_paths(self, loaded: Dict) -> Dict:
-        """One-time repair of a rack_config.json written with Windows paths.
+        """One-time repair of a rack_config.json holding paths that cannot work
+        here: Windows paths, or the old off-Windows software defaults.
 
         An older RackSettings seeded a brand-new config on macOS/Linux from
         setup_config.json's Windows values ('I:', 'D:\\_work\\Active',
@@ -426,6 +439,17 @@ class RackSettings:
                 fixes.append((section, key, values[key], new))
                 values[key] = new
 
+        # The old off-Windows default (~/_work/Software, ~/_work/Launchers) points at
+        # folders nothing ever creates: move it to the _PIPELINE default, unless
+        # that old folder actually exists (then it was set up on purpose).
+        sync = repaired.get("software_sync")
+        if isinstance(sync, dict):
+            new_sync = _default_software_sync()
+            for key, old_default in _legacy_software_defaults().items():
+                if sync.get(key) == old_default and not os.path.isdir(old_default):
+                    fixes.append(("software_sync", key, old_default, new_sync[key]))
+                    sync[key] = new_sync[key]
+
         drives = repaired.get("drives")
         if isinstance(drives, dict) and _is_windows_shaped(drives.get("work")):
             new = drives.get("active_base")
@@ -438,7 +462,7 @@ class RackSettings:
             return loaded
 
         summary = "; ".join(f"{s}.{k}: {old!r} -> {new!r}" for s, k, old, new in fixes)
-        logger.warning(f"Windows paths found in {self.config_path} on a non-Windows "
+        logger.warning(f"{self.config_path} holds paths that do not work on this "
                        f"system; falling back to platform defaults ({summary})")
 
         backup = self._backup_config_file()

@@ -158,6 +158,12 @@ class ProjectDatabase:
         if not path:
             return path
 
+        # A native POSIX path (macOS / Linux, not a WSL /mnt/<drive> path) is
+        # stored as it is. Turning its slashes into backslashes would give a
+        # path ("\\Users\\me\\_work\\...") that exists nowhere.
+        if sys.platform != "win32" and path.startswith('/') and not path.startswith('/mnt/'):
+            return path
+
         # Handle WSL paths first (e.g., /mnt/d/_work/...)
         if path.startswith('/mnt/'):
             # Extract drive letter and rest of path
