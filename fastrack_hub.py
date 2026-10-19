@@ -31,6 +31,12 @@ ICON_PATH = os.path.join(
     "assets",
     "Favicon_FlorianDheer.ico",
 )
+# macOS has no .ico support; the Dock icon comes from this PNG instead.
+MAC_ICON_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "assets",
+    "Fastrack_AppIcon.png",
+)
 
 # ====================================
 # CONSTANTS AND CONFIGURATION
@@ -100,7 +106,17 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.root = root
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
 
-        if os.path.exists(ICON_PATH):
+        if sys.platform == "darwin":
+            # The .app launcher exec()s into Python, so the Dock shows
+            # Python's own rocket icon unless we set ours at runtime.
+            if os.path.exists(MAC_ICON_PATH):
+                try:
+                    # Kept on self: Tk drops the icon if the image is GC'd.
+                    self.app_icon = tk.PhotoImage(file=MAC_ICON_PATH)
+                    self.root.iconphoto(True, self.app_icon)
+                except tk.TclError as e:
+                    logger.warning("Could not set Dock icon from %s: %s", MAC_ICON_PATH, e)
+        elif os.path.exists(ICON_PATH):
             try:
                 self.root.iconbitmap(default=ICON_PATH)
             except tk.TclError:
@@ -288,14 +304,15 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             image = image.resize((new_width, new_height), Image.LANCZOS)
             return ImageTk.PhotoImage(image)
 
-        except ImportError:
+        except ImportError as e:
             # print() alone is invisible when launched from a double-clicked
             # .app (no attached terminal), so this also goes to the log file
             # the Logs button opens.
             logger.warning(
-                "PIL/Pillow not installed for interpreter %s — logo image "
-                "disabled, falling back to text. Install with: pip install pillow",
-                sys.executable,
+                "Could not import PIL/ImageTk for interpreter %s (%s) — logo "
+                "image disabled, falling back to text. Install with: "
+                "pip install pillow",
+                sys.executable, e,
             )
             return None
         except Exception as e:

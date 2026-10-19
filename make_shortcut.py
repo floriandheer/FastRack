@@ -12,12 +12,15 @@ result to the taskbar/Dock.
 import os
 import sys
 import shutil
+import platform
 import subprocess
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGET_SCRIPT = os.path.join(SCRIPT_DIR, "fastrack_hub.py")
 ICON_PATH = os.path.join(SCRIPT_DIR, "assets", "Favicon_FlorianDheer.ico")
+MAC_ICON_PNG = os.path.join(SCRIPT_DIR, "assets", "Fastrack_AppIcon.png")
+MAC_ICON_NAME = "Fastrack"
 SHORTCUT_PATH = os.path.join(SCRIPT_DIR, "Fastrack.lnk")
 APP_BUNDLE_PATH = os.path.join(SCRIPT_DIR, "Fastrack.app")
 APP_USER_MODEL_ID = "floriandheer.fastrack"
@@ -88,6 +91,31 @@ def build_shortcut(pythonw_exe: str) -> None:
     # (Pinning still works without it; AppUserModelID is set inside fastrack_hub.py.)
 
 
+def build_mac_icon(resources_dir: str):
+    """Write Resources/Fastrack.icns from the app-icon PNG.
+
+    Returns the icon file name for CFBundleIconFile, or None (generic icon)
+    if the PNG or Pillow is missing - the launcher still works without it.
+    """
+    if not os.path.exists(MAC_ICON_PNG):
+        print(f"Warning: {MAC_ICON_PNG} missing, app will use the generic icon "
+              "(run make_app_icon.py).", file=sys.stderr)
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        print("Warning: Pillow not installed, app will use the generic icon.",
+              file=sys.stderr)
+        return None
+
+    os.makedirs(resources_dir, exist_ok=True)
+    with Image.open(MAC_ICON_PNG) as image:
+        image.convert("RGBA").save(
+            os.path.join(resources_dir, f"{MAC_ICON_NAME}.icns"), format="ICNS"
+        )
+    return MAC_ICON_NAME
+
+
 def build_mac_app() -> None:
     """Build a minimal .app bundle that launches fastrack_hub.py.
 
@@ -105,14 +133,31 @@ def build_mac_app() -> None:
     # sys.executable — the interpreter actually running this script — not a
     # fresh `which python3` lookup, so the launcher uses the exact
     # environment the user already installed requirements.txt into.
+    #
+    # `arch -<machine>` pins the architecture that environment was installed
+    # for. The python.org interpreter is a universal binary, and when the
+    # bundle's shell-script launcher is started by Finder/Dock, macOS can run
+    # it under Rosetta (x86_64) - after which every arm64-only compiled
+    # package (Pillow, ...) fails to import with "incompatible architecture".
+    # That is what silently dropped the header logo for double-clicked
+    # launches while terminal launches worked.
+    machine = platform.machine()
+    arch_prefix = f"arch -{machine} " if machine in ("arm64", "x86_64") else ""
     launcher_path = os.path.join(macos_dir, "Fastrack")
     with open(launcher_path, "w", encoding="utf-8") as f:
         f.write(
             "#!/bin/bash\n"
             f'cd "{SCRIPT_DIR}"\n'
-            f'exec "{sys.executable}" "{TARGET_SCRIPT}"\n'
+            f'exec {arch_prefix}"{sys.executable}" "{TARGET_SCRIPT}"\n'
         )
     os.chmod(launcher_path, 0o755)
+
+    icon_file = build_mac_icon(os.path.join(contents_dir, "Resources"))
+    icon_plist = (
+        '    <key>CFBundleIconFile</key>\n'
+        f'    <string>{icon_file}</string>\n'
+        if icon_file else ""
+    )
 
     plist_path = os.path.join(contents_dir, "Info.plist")
     with open(plist_path, "w", encoding="utf-8") as f:
@@ -132,14 +177,16 @@ def build_mac_app() -> None:
             '    <string>APPL</string>\n'
             '    <key>CFBundleShortVersionString</key>\n'
             '    <string>1.0</string>\n'
+            f'{icon_plist}'
             '    <key>NSHighResolutionCapable</key>\n'
             '    <true/>\n'
             '</dict>\n'
             '</plist>\n'
         )
-    # No .icns yet — Pillow can't write that format and there's no macOS
-    # box handy to run iconutil, so this ships with the generic app icon
-    # for now. A real icon is a follow-up, not a blocker.
+
+    # Finder/Dock cache bundle icons by modification time; bump it so a
+    # regenerated bundle shows the new icon without a manual cache clear.
+    os.utime(APP_BUNDLE_PATH)
 
 
 def main() -> int:
