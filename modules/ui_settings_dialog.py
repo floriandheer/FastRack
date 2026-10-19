@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 
@@ -16,6 +17,7 @@ from shared_logging import get_logger
 from rack_settings import RackSettings
 from ui_theme import COLORS, CATEGORY_COLORS
 from shared_color_button import make_button
+import environment_status as env_status
 
 logger = get_logger("pipeline")
 
@@ -344,13 +346,27 @@ class SettingsDialog:
         # launch the script with --step <name> so you can re-test or
         # re-apply a single piece (e.g. just remap drives) on a PC that
         # is already partially set up.
+        env_header = tk.Frame(setup_section, bg=COLORS["bg_card"])
+        env_header.pack(fill=tk.X, pady=(10, 2))
         tk.Label(
-            setup_section,
+            env_header,
             text="Environment Setup:",
             font=font.Font(family="Segoe UI", size=10, weight="bold"),
             fg=COLORS["text_primary"],
             bg=COLORS["bg_card"],
-        ).pack(anchor="w", pady=(10, 2))
+        ).pack(side=tk.LEFT)
+        make_button(
+            env_header,
+            text="Refresh",
+            command=self._refresh_environment_status,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+            font=font.Font(family="Segoe UI", size=9),
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=10,
+            pady=2,
+        ).pack(side=tk.RIGHT)
 
         env_row = tk.Frame(setup_section, bg=COLORS["bg_card"])
         env_row.pack(fill=tk.X, pady=2)
@@ -365,6 +381,7 @@ class SettingsDialog:
             ("Config",   "config"),
             ("Startup",  "startup"),
         )
+        self._env_step_labels = dict((step, label) for label, step in env_steps)
         for label, step in env_steps:
             make_button(
                 env_row,
@@ -378,6 +395,29 @@ class SettingsDialog:
                 padx=12,
                 pady=6,
             ).pack(side=tk.LEFT, padx=(0, 6))
+
+        # One line per step: what still needs action, what is done, what
+        # does not apply on this system. Filled in by the background check.
+        env_status_frame = tk.Frame(setup_section, bg=COLORS["bg_card"])
+        env_status_frame.pack(fill=tk.X, pady=(8, 0))
+        self._env_status_rows = {}
+        for step in env_status.STEPS:
+            row = tk.Label(
+                env_status_frame,
+                text=f"…  {self._env_step_labels[step]}",
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["text_secondary"],
+                bg=COLORS["bg_card"],
+                justify="left", anchor="w", wraplength=700,
+            )
+            row.pack(fill=tk.X, anchor="w")
+            self._env_status_rows[step] = row
+        self._env_statuses = None
+        self._env_status_running = False
+        self._env_status_again = False
+        self._env_refresh_until = 0.0
+        self.dialog.bind("<FocusIn>", self._on_dialog_focus_in, add="+")
+        self._refresh_environment_status()
 
         tk.Label(
             setup_section,
@@ -397,6 +437,58 @@ class SettingsDialog:
             bg=COLORS["bg_card"],
             justify="left"
         ).pack(anchor="w", pady=(6, 0))
+
+    # ------------------------------------------------------------------
+    # Environment Setup status (which steps still need action)
+    # ------------------------------------------------------------------
+
+    _ENV_MARKS = {env_status.TODO: "●", env_status.DONE: "✓",
+                  env_status.SKIPPED: "–", env_status.UNKNOWN: "?"}
+
+    def _refresh_environment_status(self):
+        """Re-check every Environment Setup step in the background and
+        update the status lines. Overlapping requests are merged."""
+        if self._env_status_running:
+            self._env_status_again = True
+            return
+        self._env_status_running = True
+        project_root = self._project_root()
+        self._run_async(
+            lambda: env_status.check_environment(project_root, settings=self.settings),
+            self._environment_status_done,
+        )
+
+    def _environment_status_done(self, statuses, exc):
+        self._env_status_running = False
+        if exc is None and statuses:
+            self._apply_environment_status(statuses)
+        if self._env_status_again:
+            self._env_status_again = False
+            self._refresh_environment_status()
+
+    def _apply_environment_status(self, statuses):
+        """Colour each step's status line by its state: amber with a dot =
+        still needs action, green tick = done, dim = not applicable here. The
+        buttons themselves are left alone."""
+        self._env_statuses = statuses
+        for step in env_status.STEPS:
+            status = statuses.get(step)
+            if status is None:
+                continue
+            line = f"{self._ENV_MARKS.get(status.state, '?')}  {self._env_step_labels[step]}"
+            if status.detail:
+                line += f"  —  {status.detail}"
+            self._env_status_rows[step].config(text=line, fg=self._env_state_color(status.state))
+
+    @staticmethod
+    def _env_state_color(state):
+        return {env_status.TODO: COLORS["warning"],
+                env_status.DONE: COLORS["success"]}.get(state, COLORS["text_secondary"])
+
+    def _on_dialog_focus_in(self, event):
+        """Back from the setup console: re-check, for a while after a step was started."""
+        if event.widget is self.dialog and time.time() < self._env_refresh_until:
+            self._refresh_environment_status()
 
     def _project_root(self):
         """Return the directory containing fastrack_hub.py."""
@@ -454,11 +546,15 @@ class SettingsDialog:
     _ENV_STEP_BLURBS = {
         "all":      "create folders, configure drive mappings, check Synology "
                     "Drive status, generate the pipeline config, and deploy the "
-                    "startup-apps launcher",
+                    "startup-apps launcher (afterwards it opens the Synology "
+                    "Drive download page if Synology Drive Client is not installed)",
         "folders":  "create the Active/Archive/category folder structure defined "
-                    "in setup_config.json",
+                    "in setup_config.json (afterwards it opens the Synology Drive "
+                    "download page if Synology Drive Client is not installed)",
         "drives":   "set up subst drive mappings, persist them via HKCU autorun, "
-                    "and write Explorer drive labels",
+                    "and write Explorer drive labels (afterwards it opens the "
+                    "Synology Drive download page if Synology Drive Client is "
+                    "not installed)",
         "synology": "check Synology Drive Client installation and report sync "
                     "folder status (no changes are made automatically)",
         "config":   "generate or update rack_config.json from setup_config.json's "
@@ -500,18 +596,10 @@ class SettingsDialog:
         exe = self._console_python()
         extra_args = ["--step", step] if step != "all" else []
         try:
-            if sys.platform == "win32":
-                # Wrap with `cmd /k` so the console stays open after the script
-                # exits, even if it fails fast (otherwise the window closes
-                # before you can read it).
-                subprocess.Popen(
-                    ["cmd", "/k", exe, script_path] + extra_args,
-                    cwd=project_root,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
-                )
-            else:
-                subprocess.Popen([exe, script_path] + extra_args, cwd=project_root)
+            self._launch_in_console(project_root, [exe, script_path] + extra_args)
             logger.info("Launched setup_environment.py (step=%s) in new console", step)
+            # Re-check the status lines when the user comes back to this window.
+            self._env_refresh_until = time.time() + 600
         except Exception as e:
             logger.exception("Failed to launch setup_environment.py")
             messagebox.showerror(
@@ -519,6 +607,37 @@ class SettingsDialog:
                 f"Could not start setup script:\n{e}",
                 parent=self.dialog,
             )
+
+    def _launch_in_console(self, project_root, argv):
+        """Run ``argv`` in its own interactive console so its prompts can be
+        answered. Windows: a new console window kept open with ``cmd /k``.
+        macOS: a Terminal window (a plain background Popen there has no usable
+        stdin, so any yes/no prompt would die). Elsewhere: a plain Popen."""
+        if sys.platform == "win32":
+            # Wrap with `cmd /k` so the console stays open after the script
+            # exits, even if it fails fast (otherwise the window closes
+            # before you can read it).
+            subprocess.Popen(
+                ["cmd", "/k"] + argv,
+                cwd=project_root,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+        elif sys.platform == "darwin":
+            import shlex
+            import tempfile
+            script_body = (
+                "#!/bin/bash\n"
+                f"cd {shlex.quote(project_root)}\n"
+                f"{' '.join(shlex.quote(a) for a in argv)}\n"
+                'echo\necho "Press Enter to close..."\nread\n'
+            )
+            fd, tmp_path = tempfile.mkstemp(suffix=".command")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(script_body)
+            os.chmod(tmp_path, 0o755)
+            subprocess.Popen(["open", tmp_path])
+        else:
+            subprocess.Popen(argv, cwd=project_root)
 
     def _install_dependencies(self):
         """Launch install_dependencies.py in a new console window."""
@@ -1213,6 +1332,26 @@ class SettingsDialog:
             justify="left", anchor="w", wraplength=720,
         ).pack(anchor="w", padx=20, pady=(10, 6))
 
+        # `subst` drive letters only exist on Windows. Say so, rather than
+        # letting 'Run Drives step now' silently do nothing.
+        subst_available = sys.platform == "win32"
+        self._drives_platform_note = None
+        if not subst_available:
+            self._drives_platform_note = tk.Label(
+                parent,
+                text=(
+                    "Windows only: `subst` drive letters (I:, M:, P:, F:) have no "
+                    "macOS/Linux equivalent, so nothing is mapped on this system. "
+                    "Here the work root is a real folder (the active base under "
+                    "Paths). These mappings are only used on the Windows PC, and "
+                    "'Run Drives step now' is disabled."
+                ),
+                font=font.Font(family="Segoe UI", size=9),
+                fg=COLORS["text_primary"], bg=COLORS["bg_card"],
+                justify="left", anchor="w", wraplength=720, padx=10, pady=6,
+            )
+            self._drives_platform_note.pack(fill=tk.X, padx=20, pady=(0, 6))
+
         # Actions row (above the list so it stays in view)
         actions = tk.Frame(parent, bg=COLORS["bg_primary"])
         actions.pack(fill=tk.X, padx=20, pady=(0, 6))
@@ -1225,13 +1364,15 @@ class SettingsDialog:
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
         ).pack(side=tk.LEFT)
 
-        make_button(
+        self._drives_run_btn = make_button(
             actions, text="Run Drives step now",
             command=lambda: self._run_environment_setup("drives"),
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
             font=font.Font(family="Segoe UI", size=10),
             relief=tk.FLAT, cursor="hand2", padx=15, pady=6,
-        ).pack(side=tk.LEFT, padx=(10, 0))
+            **({} if subst_available else {"state": tk.DISABLED}),
+        )
+        self._drives_run_btn.pack(side=tk.LEFT, padx=(10, 0))
 
         make_button(
             actions, text="Reload from disk",

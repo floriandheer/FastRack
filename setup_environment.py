@@ -15,6 +15,7 @@ import os
 import json
 import argparse
 import subprocess
+import webbrowser
 from pathlib import Path
 
 # Add modules/ to path (same pattern as fastrack_hub.py)
@@ -23,6 +24,13 @@ SCRIPTS_DIR = os.path.join(SCRIPT_FILE_DIR, "modules")
 sys.path.insert(0, SCRIPTS_DIR)
 
 from shared_logging import setup_logging, get_logger
+from environment_status import (  # noqa: E402 - needs modules/ on sys.path (above)
+    plan_folders,
+    parse_subst_output,
+    find_synology_drive,
+    synology_client_installed,
+    SYNOLOGY_DRIVE_URL,
+)
 
 logger = get_logger("setup_environment")
 
@@ -86,32 +94,6 @@ def load_config(config_path: str) -> dict:
         sys.exit(1)
 
     return cfg
-
-
-def parse_subst_output() -> dict:
-    """
-    Parse `subst` output and return {drive_letter: target_path}.
-
-    Output format:  I:\\: => D:\\_work\\Active
-    """
-    mapping = {}
-    try:
-        result = subprocess.run(
-            ["subst"], capture_output=True, text=True, timeout=5
-        )
-        for line in result.stdout.splitlines():
-            # e.g. "I:\: => D:\_work\Active"
-            parts = line.split(" => ", 1)
-            if len(parts) == 2:
-                drive = parts[0].rstrip("\\:")  # "I:\:" -> "I"
-                drive = drive.strip()
-                if len(drive) == 1:
-                    drive = f"{drive.upper()}:"
-                target = parts[1].strip()
-                mapping[drive] = target
-    except Exception as e:
-        logger.warning(f"Could not parse subst output: {e}")
-    return mapping
 
 
 def parse_mountvol_letters() -> set:
@@ -186,60 +168,25 @@ def step_prerequisites(cfg: dict) -> bool:
 # Step 2: Folder Structure
 # ============================================================
 
-def _looks_like_windows_path(path: str) -> bool:
-    """True for a drive-letter ('D:\\...') or backslash-style path - the
-    shape every path in setup_config.json.example currently uses. Meaningless
-    (and not safely creatable) on macOS/Linux."""
-    return (len(path) >= 2 and path[1] == ':') or '\\' in path
-
-
 def step_folders(cfg: dict, dry_run: bool, auto_yes: bool) -> bool:
     """Create folder structure from config."""
     banner("Step 2: Folder Structure")
 
-    fs = cfg["folder_structure"]
-    categories = fs.get("categories", [])
-    subcategories = fs.get("subcategories", {})
-    extra_dirs = fs.get("extra_dirs", [])
-
-    if sys.platform == "win32":
-        bases = fs.get("bases", [])
-    else:
-        # setup_config.json.example's bases are Windows-only paths
-        # (D:\_work\...). Off Windows, build the same structure under
-        # rack_settings' own platform-aware defaults instead (e.g.
-        # ~/_work/Active) rather than trying to create a literal
-        # "D:\_work\Active"-named folder.
-        try:
-            from rack_settings import RackSettings
-            settings = RackSettings()
-            bases = [settings.get_active_base(), settings.get_archive_base()]
-            print(f"  Non-Windows: using platform defaults instead of setup_config.json's paths:")
-            for b in bases:
-                print(f"    {b}")
-        except Exception as e:
-            print(f"  ERROR: could not resolve default folders: {e}")
-            return False
-
-    # Build full list of directories
-    dirs_to_create = []
-
-    for base in bases:
-        dirs_to_create.append(base)
-        for cat in categories:
-            cat_path = os.path.join(base, cat)
-            dirs_to_create.append(cat_path)
-            for sub in subcategories.get(cat, []):
-                dirs_to_create.append(os.path.join(cat_path, sub))
-
-    skipped_extra = 0
-    for d in extra_dirs:
-        if sys.platform != "win32" and _looks_like_windows_path(d):
-            skipped_extra += 1
-            continue
-        dirs_to_create.append(d)
-    if skipped_extra:
-        print(f"  Skipping {skipped_extra} Windows-only extra folder(s) from setup_config.json.")
+    # setup_config.json.example's bases are Windows-only paths (D:\_work\...).
+    # Off Windows the plan builds the same structure under rack_settings' own
+    # platform-aware bases instead (e.g. ~/_work/Active) rather than trying
+    # to create a literal "D:\_work\Active"-named folder.
+    plan = plan_folders(cfg)
+    if plan.error:
+        print(f"  ERROR: could not resolve default folders: {plan.error}")
+        return False
+    if plan.used_platform_defaults:
+        print(f"  Non-Windows: using platform defaults instead of setup_config.json's paths:")
+        for b in plan.bases:
+            print(f"    {b}")
+    dirs_to_create = plan.dirs
+    if plan.skipped_extra:
+        print(f"  Skipping {plan.skipped_extra} Windows-only extra folder(s) from setup_config.json.")
 
     # Check status
     existing = []
@@ -574,7 +521,7 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
 
     if sys.platform != "win32":
         print("  Skipping the automated check (this detection is Windows-only for now).")
-        print("  Synology Drive Client for Mac: https://www.synology.com/en-global/dsm/feature/drive")
+        print(f"  Synology Drive Client for Mac: {SYNOLOGY_DRIVE_URL}")
         return True
 
     sd_cfg = cfg.get("synology_drive", {})
@@ -583,21 +530,7 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
     ok = True
 
     # Detect installation
-    install_paths = [
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
-                     "Synology", "SynologyDrive"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                     "Synology", "SynologyDrive"),
-        os.path.join(os.path.expanduser("~"), "AppData", "Local",
-                     "SynologyDrive"),
-    ]
-    drive_exe = None
-    for p in install_paths:
-        candidate = os.path.join(p, "SynologyDrive.exe")
-        if os.path.isfile(candidate):
-            drive_exe = candidate
-            break
-    installed = drive_exe is not None or any(os.path.isdir(p) for p in install_paths)
+    drive_exe, installed = find_synology_drive()
     status_line("Synology Drive installed", installed)
 
     # Check if running
@@ -614,7 +547,7 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
 
     if not installed:
         print("\n  ACTION REQUIRED: Install Synology Drive Client")
-        print("    https://www.synology.com/en-global/dsm/feature/drive")
+        print(f"    {SYNOLOGY_DRIVE_URL}")
         return False
 
     # Check sync folders
@@ -683,6 +616,20 @@ def step_synology(cfg: dict, auto_yes: bool = False) -> bool:
             print(f"    Run manually: {drive_exe}")
 
     return ok
+
+
+def open_synology_download_page() -> None:
+    """Open Synology's Drive download page in the browser, unless the client
+    is already installed (Windows and macOS)."""
+    if synology_client_installed():
+        return
+    print()
+    print("  Synology Drive Client is not installed - opening its download page:")
+    print(f"    {SYNOLOGY_DRIVE_URL}")
+    try:
+        webbrowser.open(SYNOLOGY_DRIVE_URL)
+    except Exception as e:
+        print(f"  Could not open the browser: {e}")
 
 
 # ============================================================
@@ -917,6 +864,13 @@ def main():
     # Step 6: Startup Apps Launcher
     if run_all or args.step == "startup":
         results["Startup Apps"] = step_startup(cfg, args.yes, args.dry_run)
+
+    # The folders / drives are in place; the next thing to do by hand is
+    # installing Synology Drive, so open its download page (once, and only
+    # when it is missing).
+    if not args.dry_run and (run_all or args.step in ("folders", "drives")):
+        if all(results.get(name, True) for name in ("Folder Structure", "Drive Mappings")):
+            open_synology_download_page()
 
     # Step 7: Report
     final_report(results)

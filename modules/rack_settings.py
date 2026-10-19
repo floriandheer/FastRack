@@ -7,8 +7,11 @@ Handles paths, software defaults, and other configuration.
 
 import json
 import os
+import re
+import shutil
 import sys
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -112,6 +115,57 @@ def _default_software_sync() -> Dict[str, str]:
     }
 
 
+_DRIVE_LETTER_PREFIX = re.compile(r"[A-Za-z]:")
+
+
+def _is_windows_shaped(value) -> bool:
+    """True if `value` is a string that only makes sense as a Windows path:
+    it starts with a drive letter ('I:', 'D:\\x', 'D:/x') or contains a
+    backslash (separator or UNC share). Empty / non-string values are not."""
+    if not isinstance(value, str) or not value:
+        return False
+    return "\\" in value or _DRIVE_LETTER_PREFIX.match(value) is not None
+
+
+# Config values already reported by _posix_base(), so a bad value that is read
+# on every path lookup is logged once instead of on every call.
+_reported_bad_paths = set()
+
+
+def _posix_base(value, fallback: str, label: str) -> str:
+    """Off Windows, return `value` if it is a usable absolute POSIX path
+    (a leading '~' is expanded), otherwise `fallback`. On Windows `value`
+    is returned untouched.
+
+    A relative or Windows-shaped base (e.g. 'I:' or 'D:\\_work\\Active')
+    would make os.path.join build a path relative to the current working
+    directory - which is how literal 'D:\\_work\\Active' folders ended up
+    inside the repo checkout on a Mac.
+    """
+    if sys.platform == "win32":
+        return value
+    if isinstance(value, str) and value and not _is_windows_shaped(value):
+        expanded = os.path.expanduser(value)
+        if expanded.startswith("/"):
+            return expanded
+    key = (label, repr(value))
+    if key not in _reported_bad_paths:
+        _reported_bad_paths.add(key)
+        logger.warning(
+            f"Ignoring {label} {value!r}: not an absolute path on this "
+            f"system; using {fallback!r} instead")
+    return fallback
+
+
+def _native_subpath(subpath: str) -> str:
+    """Off Windows, turn backslash separators in a category subpath into '/'
+    so a Windows-style 'Visual\\GD' cannot end up as one odd folder name.
+    Windows: returned unchanged."""
+    if sys.platform == "win32" or not isinstance(subpath, str):
+        return subpath
+    return subpath.replace("\\", "/")
+
+
 def _load_setup_seed() -> Optional[Dict]:
     """First-run seed for rack_config.json.
 
@@ -120,6 +174,11 @@ def _load_setup_seed() -> Optional[Dict]:
     project-root setup_config.json into rack_config.json; this function lets
     RackSettings pull the same values itself the first time it runs on a new
     machine.
+
+    setup_config.json describes the Windows PC (subst drive letters,
+    ``D:\\_work\\...``). Off Windows those values are ignored, so the
+    platform-aware defaults stay in place instead of being overwritten with
+    paths that cannot exist there.
 
     Returns a dict with optional keys ``drives`` and ``software_sync`` that
     overlay DEFAULT_CONFIG, or None if no seed file exists / nothing to apply.
@@ -138,16 +197,27 @@ def _load_setup_seed() -> Optional[Dict]:
     if not pc:
         return None
 
+    def usable(key: str) -> bool:
+        if key not in pc:
+            return False
+        if sys.platform == "win32":
+            return True
+        value = pc[key]
+        if isinstance(value, str) and value and not _is_windows_shaped(value):
+            return True
+        logger.info(f"Setup seed: ignoring {key}={value!r} (Windows-only value)")
+        return False
+
     overrides: Dict = {"drives": {}, "software_sync": {}}
-    if "work_drive" in pc:
+    if usable("work_drive"):
         overrides["drives"]["work"] = pc["work_drive"]
-    if "active_base" in pc:
+    if usable("active_base"):
         overrides["drives"]["active_base"] = pc["active_base"]
-    if "archive_base" in pc:
+    if usable("archive_base"):
         overrides["drives"]["archive_base"] = pc["archive_base"]
-    if "mapped_software_path" in pc:
+    if usable("mapped_software_path"):
         overrides["software_sync"]["mapped_software_path"] = pc["mapped_software_path"]
-    if "launchers_base_path" in pc:
+    if usable("launchers_base_path"):
         overrides["software_sync"]["launchers_base_path"] = pc["launchers_base_path"]
 
     if not overrides["drives"] and not overrides["software_sync"]:
@@ -299,8 +369,10 @@ class RackSettings:
             if self.config_path.exists():
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                    # Merge with defaults to handle new fields
-                    return self._merge_with_defaults(loaded)
+                if sys.platform != "win32":
+                    loaded = self._migrate_windows_paths(loaded)
+                # Merge with defaults to handle new fields
+                return self._merge_with_defaults(loaded)
             else:
                 seeded = copy.deepcopy(self.DEFAULT_CONFIG)
                 seed = _load_setup_seed()
@@ -317,6 +389,88 @@ class RackSettings:
         except Exception as e:
             logger.error(f"Error loading config: {e}")
             return self.DEFAULT_CONFIG.copy()
+
+    def _migrate_windows_paths(self, loaded: Dict) -> Dict:
+        """One-time repair of a rack_config.json written with Windows paths.
+
+        An older RackSettings seeded a brand-new config on macOS/Linux from
+        setup_config.json's Windows values ('I:', 'D:\\_work\\Active',
+        'P:\\Software', ...). Such values cannot exist off Windows and made
+        every path helper return a relative path. Any drives / software_sync
+        value that is Windows-shaped is replaced by this platform's default;
+        a work root that is Windows-shaped follows the (repaired) active base,
+        as it does in the defaults.
+
+        The previous file is copied next to the original first and nothing is
+        deleted. If the backup cannot be made the repaired values are used for
+        this session only and the file on disk stays as it was.
+
+        Only called off Windows. Returns `loaded` itself when there is nothing
+        to repair, otherwise a repaired copy.
+        """
+        import copy
+        if not isinstance(loaded, dict):
+            return loaded
+
+        fixes = []  # (section, key, old, new)
+        repaired = copy.deepcopy(loaded)
+        platform_defaults = {
+            ("drives", "active_base"): _default_active_base(),
+            ("drives", "archive_base"): _default_archive_base(),
+        }
+        for key, value in _default_software_sync().items():
+            platform_defaults[("software_sync", key)] = value
+        for (section, key), new in platform_defaults.items():
+            values = repaired.get(section)
+            if isinstance(values, dict) and _is_windows_shaped(values.get(key)):
+                fixes.append((section, key, values[key], new))
+                values[key] = new
+
+        drives = repaired.get("drives")
+        if isinstance(drives, dict) and _is_windows_shaped(drives.get("work")):
+            new = drives.get("active_base")
+            if not (isinstance(new, str) and new and not _is_windows_shaped(new)):
+                new = _default_work_root()
+            fixes.append(("drives", "work", drives["work"], new))
+            drives["work"] = new
+
+        if not fixes:
+            return loaded
+
+        summary = "; ".join(f"{s}.{k}: {old!r} -> {new!r}" for s, k, old, new in fixes)
+        logger.warning(f"Windows paths found in {self.config_path} on a non-Windows "
+                       f"system; falling back to platform defaults ({summary})")
+
+        backup = self._backup_config_file()
+        if backup is None:
+            logger.warning("Backup failed; using the repaired values for this "
+                           "session only, the config file is left unchanged")
+            return repaired
+        try:
+            self._save(repaired)
+        except Exception:
+            logger.warning(f"Could not write the repaired config; the original "
+                           f"is untouched (backup: {backup})")
+            return repaired
+        logger.info(f"Config repaired; previous file kept as {backup}")
+        return repaired
+
+    def _backup_config_file(self) -> Optional[Path]:
+        """Copy the config file to a timestamped sibling and return its path,
+        or None if that failed. Never overwrites an existing backup."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = f"{self.config_path.name}.bak-windows-paths-{stamp}"
+        backup = self.config_path.with_name(base)
+        counter = 1
+        while backup.exists():
+            counter += 1
+            backup = self.config_path.with_name(f"{base}-{counter}")
+        try:
+            shutil.copy2(self.config_path, backup)
+        except OSError as e:
+            logger.warning(f"Could not back up {self.config_path}: {e}")
+            return None
+        return backup
 
     def _merge_with_defaults(self, loaded: Dict) -> Dict:
         """Merge loaded config with defaults to ensure all keys exist."""
@@ -484,6 +638,30 @@ class RackSettings:
         """
         return (self.config.get("business") or {}).get("soffice_path", "")
 
+    # Bases used to build category paths. Off Windows a relative or
+    # Windows-shaped value (see _posix_base) is replaced by the platform
+    # default, so the path helpers never return a path that resolves against
+    # the current working directory. Windows: the getter's value, unchanged.
+
+    def _active_base_for_paths(self) -> str:
+        value = self.get_active_base()
+        if sys.platform == "win32":
+            return value
+        return _posix_base(value, _default_active_base(), "active base")
+
+    def _archive_base_for_paths(self) -> str:
+        value = self.get_archive_base()
+        if sys.platform == "win32":
+            return value
+        return _posix_base(value, _default_archive_base(), "archive base")
+
+    def _work_root_for_paths(self) -> str:
+        value = self.get_work_drive()
+        if sys.platform == "win32":
+            return value
+        # No drive substitution off Windows: the work root is the active base.
+        return _posix_base(value, self._active_base_for_paths(), "work root")
+
     def get_work_path(self, category: str) -> str:
         """
         Get the full work path for a category.
@@ -494,9 +672,9 @@ class RackSettings:
         Returns:
             Full path like 'I:\\Visual'
         """
-        work_drive = self.get_work_drive()
+        work_drive = self._work_root_for_paths()
         cat_config = self.config["categories"].get(category, {})
-        subpath = cat_config.get("work_subpath", category)
+        subpath = _native_subpath(cat_config.get("work_subpath", category))
 
         work_root = work_drive + "\\" if _is_bare_drive_letter(work_drive) else work_drive
         subpath = _resolve_existing_casing(work_root, subpath)
@@ -513,9 +691,9 @@ class RackSettings:
         Returns:
             Full path like 'D:\\_work\\Active\\Visual'
         """
-        active_base = self.get_active_base()
+        active_base = self._active_base_for_paths()
         cat_config = self.config["categories"].get(category, {})
-        subpath = cat_config.get("work_subpath", category)
+        subpath = _native_subpath(cat_config.get("work_subpath", category))
         subpath = _resolve_existing_casing(active_base, subpath)
 
         return join_native_path(active_base, subpath)
@@ -530,9 +708,9 @@ class RackSettings:
         Returns:
             Full path like 'D:\\_work\\Archive\\Visual'
         """
-        archive_base = self.get_archive_base()
+        archive_base = self._archive_base_for_paths()
         cat_config = self.config["categories"].get(category, {})
-        subpath = cat_config.get("archive_subpath", category)
+        subpath = _native_subpath(cat_config.get("archive_subpath", category))
         subpath = _resolve_existing_casing(archive_base, subpath)
 
         return join_native_path(archive_base, subpath)

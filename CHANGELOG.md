@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Environment Setup opens the Synology Drive download page** — once the Folders and/or Drives
+  steps (or Run All) have finished without errors, `setup_environment.py` opens
+  https://www.synology.com/nl-nl/dsm/feature/drive in the browser, on Windows and macOS, so the
+  Synology Drive Client can be installed next. It only opens when the client is not installed yet
+  (looked for under Program Files / AppData on Windows and in Applications on a Mac), only once per
+  run, and never in a dry run. The confirmation dialogs mention it, and the Synology step's hints
+  now point to the same page.
+- **Environment Setup shows which steps still need action** — in Settings > General > Environment
+  Setup, a line per step sits under the buttons: amber with a dot when the step still has something to
+  do (missing folders, a drive mapping that is not active, a scheduled task that is not registered,
+  ...) and what is missing, green with a tick when it is done, dim when it does not apply on this
+  system (the Windows-only steps on a Mac). The buttons themselves are unchanged. The check only
+  looks (it never creates anything), runs in the background, and re-runs when you come back to the
+  dialog after starting a step, or with the new Refresh button.
+  The checks live in `modules/environment_status.py`; the Folders step now uses the same folder plan.
 - **Traktor Stems** (DJ Tools) — everything about Traktor's stems in one window. A status panel
   compares the "has stems" link on each track in `collection.nml` (bit `0x40` of `INFO FLAGS`)
   with the stem files actually on disk, and the tabs follow the life of a stem:
@@ -101,6 +116,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `requirements.txt` when present.
 
 ### Fixed
+- **Environment Setup steps now open a Terminal window on macOS** — the buttons under Settings >
+  General > Environment Setup started `setup_environment.py` as a background process on a Mac, where
+  it has no usable stdin, so its yes/no questions ("Create these directories?") could not be answered.
+  They now open a Terminal window, like the Workstation Apps installer does. Windows is unchanged.
+- **Drive and path settings now work on macOS/Linux** — `subst` drive letters (`I:`, `M:`, `P:`, `F:`)
+  only exist on Windows, but a new `rack_config.json` on a Mac was seeded from `setup_config.json`'s
+  Windows values (`I:`, `D:\_work\Active`, `P:\Software`, ...). Every path then came out relative to the
+  current folder (`I:/Visual`, `D:\_work\Active/Visual`), validation reported "Drive/path not found"
+  everywhere, and literal `D:\_work\Active` folders could be created inside the repository.
+  - The first-run seed ignores drive-letter and backslash values off Windows, so the platform defaults
+    (`~/_work/Active`, `~/_work/Archive`, ...) stay in place.
+  - An existing `rack_config.json` that already holds such values is repaired once when it is loaded off
+    Windows: the drive, archive, work and software-sync paths fall back to the platform defaults (the work
+    root follows the active base), the change is logged, and the old file is copied next to it as
+    `rack_config.json.bak-windows-paths-<timestamp>` first. Nothing is deleted.
+  - `get_work_path`, `get_active_path` and `get_archive_path` no longer return a relative or
+    backslash path off Windows; a bad base falls back to the platform default.
+  - Settings > Drives shows a note on macOS/Linux that `subst` letters are Windows-only, and the
+    "Run Drives step now" button is disabled there instead of doing nothing.
+  Windows behaviour is unchanged. Tests: `tests/test_rack_settings_platform.py`.
 - **Traktor Playlist Sync import no longer copies stem links to the other machine** — tracks
   it adds to the destination's collection now have the stem bit cleared, since the stem files
   stay behind on the machine that generated them.
