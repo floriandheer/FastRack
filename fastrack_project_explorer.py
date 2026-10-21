@@ -50,6 +50,9 @@ from invoice_manager.order_project_linker import (
     project_details_exists, get_website_url, set_website_url,
 )
 from shared_color_button import make_toggle_button
+from shared_scrollable_frame import (
+    safe_bind_touchpad_scroll, scroll_canvas_if_room, touchpad_scroll_units,
+)
 
 # Module name for logging (must match setup_logging call)
 MODULE_NAME = "project_tracker"
@@ -1829,10 +1832,14 @@ class ProjectTrackerApp:
         self.grid_canvas.bind('<Up>', self._on_grid_up)
         self.grid_canvas.bind('<Down>', self._on_grid_down)
         self.grid_canvas.bind('<Return>', self._on_enter_key)
-        # Mousewheel binding - different on Windows vs Linux
-        self.grid_canvas.bind_all("<MouseWheel>", self._on_grid_mousewheel)
-        self.grid_canvas.bind_all("<Button-4>", self._on_grid_mousewheel)  # Linux scroll up
-        self.grid_canvas.bind_all("<Button-5>", self._on_grid_mousewheel)  # Linux scroll down
+        # Wheel/trackpad scrolling. Bound on the window, not with bind_all: embedded in the hub, the
+        # left column's ScrollableFrame calls unbind_all on these sequences whenever the pointer leaves
+        # it (e.g. after picking a category), which would silently drop a global binding for good.
+        # Tk 9 sends a two-finger trackpad scroll as <TouchpadScroll>, not <MouseWheel>.
+        window = self.grid_canvas.winfo_toplevel()
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # Button-4/5: Linux wheel
+            window.bind(seq, self._on_grid_mousewheel, add="+")
+        safe_bind_touchpad_scroll(window.bind, "<TouchpadScroll>", self._on_grid_touchpad_scroll, "+")
 
         # Show list view by default
         self.list_frame.pack(fill=tk.BOTH, expand=True)
@@ -2884,9 +2891,27 @@ class ProjectTrackerApp:
         if self.view_mode.get() == "grid" and self.tree_item_to_project:
             self._populate_grid()
 
+    def _pointer_over_grid(self, event):
+        """True while the grid is shown and the pointer is over it (or a card in it).
+
+        Tk delivers a trackpad/wheel event to the widget under the pointer, except a Windows Tk 8.6 wheel
+        event, which goes to the focused widget - for that, the pointer position decides."""
+        try:
+            if self.view_mode.get() != "grid" or not self.grid_canvas.winfo_exists():
+                return False
+            grid = str(self.grid_canvas)
+
+            def in_grid(widget):
+                path = str(widget)
+                return path == grid or path.startswith(grid + ".")
+
+            return in_grid(event.widget) or in_grid(self.grid_canvas.winfo_containing(event.x_root, event.y_root))
+        except (tk.TclError, KeyError):
+            return False
+
     def _on_grid_mousewheel(self, event):
         """Handle mousewheel scrolling for grid view."""
-        if self.view_mode.get() != "grid":
+        if not self._pointer_over_grid(event):
             return
 
         # Check if there's content to scroll
@@ -2914,6 +2939,13 @@ class ProjectTrackerApp:
             return "break"
         except:
             return "break"
+
+    def _on_grid_touchpad_scroll(self, event):
+        """Handle a two-finger trackpad scroll for grid view."""
+        if not self._pointer_over_grid(event):
+            return
+        units = touchpad_scroll_units(self.grid_canvas, event)
+        return scroll_canvas_if_room(self.grid_canvas, units) if units else "break"
 
     def _populate_grid(self):
         """Populate the grid view with project cards.

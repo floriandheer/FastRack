@@ -17,6 +17,7 @@ from shared_logging import get_logger
 from rack_settings import RackSettings
 from ui_theme import COLORS, CATEGORY_COLORS
 from shared_color_button import make_button
+from shared_scrollable_frame import enable_canvas_scroll
 import environment_status as env_status
 
 logger = get_logger("pipeline")
@@ -774,18 +775,8 @@ class SettingsDialog:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.bind("<Configure>", lambda e, wid=win_id_paths: canvas.itemconfig(wid, width=e.width))
 
-        # Enable mousewheel scrolling when mouse is over the canvas
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        def _bind_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-        def _unbind_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-
-        canvas.bind("<Enter>", _bind_mousewheel)
-        canvas.bind("<Leave>", _unbind_mousewheel)
+        # Mouse wheel + trackpad scrolling while the pointer is over the canvas
+        enable_canvas_scroll(canvas)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
@@ -1408,10 +1399,7 @@ class SettingsDialog:
             lambda e, wid=win_id: canvas.itemconfig(wid, width=e.width),
         )
 
-        def _on_mw(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mw))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        enable_canvas_scroll(canvas)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1682,18 +1670,8 @@ class SettingsDialog:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.bind("<Configure>", lambda e, wid=win_id_sw: canvas.itemconfig(wid, width=e.width))
 
-        # Enable mousewheel scrolling when mouse is over the canvas
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        def _bind_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-        def _unbind_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-
-        canvas.bind("<Enter>", _bind_mousewheel)
-        canvas.bind("<Leave>", _unbind_mousewheel)
+        # Mouse wheel + trackpad scrolling while the pointer is over the canvas
+        enable_canvas_scroll(canvas)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
@@ -2059,10 +2037,7 @@ class SettingsDialog:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.bind("<Configure>", lambda e, wid=win_id: canvas.itemconfig(wid, width=e.width))
 
-        def _on_mw(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mw))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        enable_canvas_scroll(canvas)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2902,9 +2877,7 @@ class SettingsDialog:
         win_id = canvas.create_window((0, 0), window=self._templates_list_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
-        canvas.bind("<Enter>", lambda e: canvas.bind_all(
-            "<MouseWheel>", lambda ev: canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        enable_canvas_scroll(canvas)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -2976,11 +2949,7 @@ class SettingsDialog:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.bind("<Configure>", lambda e, wid=win_id_apps: canvas.itemconfig(wid, width=e.width))
 
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        enable_canvas_scroll(canvas)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)

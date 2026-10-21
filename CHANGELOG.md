@@ -116,6 +116,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `requirements.txt` when present.
 
 ### Fixed
+- **Two-finger trackpad scrolling now works everywhere, not just in the left column** — with
+  Tk 9 (as in the Python 3.14 install on the Mac) a trackpad swipe is no longer sent as
+  `<MouseWheel>`, so every scrollable area that only listened for the mouse wheel ignored it: the
+  Project Finder's grid view, the Sandbox browser's grid, and the Paths, Software Defaults,
+  Drives, Startup Apps, Workstation Apps and Folder Templates tabs in Settings. They now scroll
+  with the trackpad like the left column does (a real mouse wheel still works, and Tk 8.6 builds
+  such as python.org's on Windows are unaffected). Wheel scrolling in Settings also no longer
+  rounds small wheel steps down to nothing. The Project Finder grid also keeps scrolling after
+  you have used the left column (picking a category used to remove its global wheel binding, so
+  scrolling stopped working until FastRack was restarted); it is now bound on the window instead.
+  The shared logic is in `shared_scrollable_frame.py` (`enable_canvas_scroll` for hand-built
+  canvases).
 - **FastRack logo now shows on macOS, in the header and as the app icon** — two separate causes.
   The header logo was missing whenever FastRack was started from `Fastrack.app` (Finder/Dock): the
   bundle's launcher script was run under Rosetta (x86_64), so the arm64 Pillow install failed to
