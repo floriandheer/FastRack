@@ -9,6 +9,7 @@ All files live in tmp_path; the real config, project database and tracker settin
 import json
 import sys
 import time
+import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -139,3 +140,60 @@ def test_a_rebuild_asked_for_during_a_rebuild_runs_afterwards_not_inside(app, tk
 
     assert runs["count"] == 2 and runs["max_depth"] == 1       # one extra pass, never nested
     assert len(app.grid_cards) == PROJECTS
+
+
+def test_a_trackpad_swipe_scrolls_the_grid(app, tk_window):
+    """Tk 9 sends a two-finger swipe as <TouchpadScroll>, not <MouseWheel>; the grid used to ignore it."""
+    try:
+        app.grid_canvas.bind_all("<TouchpadScroll>")
+    except tk.TclError:
+        pytest.skip("this Tk predates TIP 684 and has no <TouchpadScroll>")
+    tk_window.geometry("700x300")
+    tk_window.deiconify()
+    try:
+        settle(tk_window, 0.3)
+        bbox = app.grid_canvas.bbox("all")
+        assert bbox[3] - bbox[1] > app.grid_canvas.winfo_height()      # more cards than fit
+        assert app.grid_canvas.yview()[0] == 0.0
+
+        app.grid_canvas.event_generate("<TouchpadScroll>", delta=(-5) & 0xFFFF)      # swipe up: view moves down
+        scrolled = app.grid_canvas.yview()[0]
+        assert scrolled > 0.0
+
+        app.grid_canvas.event_generate("<TouchpadScroll>", delta=5)                  # swipe down: view moves up
+        assert app.grid_canvas.yview()[0] < scrolled
+    finally:
+        tk_window.withdraw()
+
+
+def test_the_trackpad_still_scrolls_the_grid_after_the_left_column_was_used(app, tk_window):
+    """Embedded in the hub, the grid shares one Tk interpreter with the left column's ScrollableFrame, which
+    unbinds the global scroll bindings whenever the pointer leaves it (e.g. after clicking a category)."""
+    from shared_scrollable_frame import ScrollableFrame
+    try:
+        app.grid_canvas.bind_all("<TouchpadScroll>")
+    except tk.TclError:
+        pytest.skip("this Tk predates TIP 684 and has no <TouchpadScroll>")
+    tk_window.geometry("700x300+300+200")               # away from the screen's (0, 0) corner
+    tk_window.deiconify()
+    try:
+        left = ScrollableFrame(tk_window)
+        left.place(x=0, y=0, width=40, height=40)       # packing would leave it unmapped: the grid fills the window
+        settle(tk_window, 0.3)
+        assert left.winfo_ismapped()
+        left.event_generate("<Enter>")          # pointer goes to the category list ...
+        left.event_generate("<Leave>")          # ... and back out to the project grid
+
+        app.grid_canvas.event_generate("<TouchpadScroll>", delta=(-5) & 0xFFFF)
+        assert app.grid_canvas.yview()[0] > 0.0
+
+        app.grid_canvas.yview_moveto(0)
+        app.grid_canvas.event_generate("<MouseWheel>", delta=-120)
+        assert app.grid_canvas.yview()[0] > 0.0
+
+        app.grid_canvas.yview_moveto(0)                 # a swipe over the left column leaves the grid alone
+        left.canvas.event_generate("<TouchpadScroll>", delta=(-5) & 0xFFFF)
+        left.canvas.event_generate("<MouseWheel>", delta=-120)
+        assert app.grid_canvas.yview()[0] == 0.0
+    finally:
+        tk_window.withdraw()

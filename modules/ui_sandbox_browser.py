@@ -25,6 +25,9 @@ from sandbox_tag_store import SandboxTagStore
 import sandbox_versioning as versioning
 from shared_open_path import open_path, reveal_path
 from shared_color_button import make_button, make_toggle_button
+from shared_scrollable_frame import (
+    safe_bind_touchpad_scroll, scroll_canvas_if_room, touchpad_scroll_units,
+)
 
 logger = get_logger(__name__)
 
@@ -322,8 +325,9 @@ class SandboxBrowserPanel(tk.Frame):
             "<Configure>",
             lambda e: self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all")))
         self.grid_canvas.bind("<Configure>", self._on_grid_canvas_resize)
-        self.grid_canvas.bind("<MouseWheel>", self._on_grid_mousewheel)
-        self.grid_inner.bind("<MouseWheel>", self._on_grid_mousewheel)
+        for w in (self.grid_canvas, self.grid_inner):
+            w.bind("<MouseWheel>", self._on_grid_mousewheel)
+            safe_bind_touchpad_scroll(w.bind, "<TouchpadScroll>", self._on_grid_touchpad_scroll)
 
         self.grid_canvas.bind("<Left>", lambda e: self._grid_move(-1, 0))
         self.grid_canvas.bind("<Right>", lambda e: self._grid_move(1, 0))
@@ -788,6 +792,13 @@ class SandboxBrowserPanel(tk.Frame):
             pass
         return "break"
 
+    def _on_grid_touchpad_scroll(self, event):
+        """Two-finger trackpad scroll: Tk 9 sends <TouchpadScroll> rather
+        than <MouseWheel> for it, so it needs its own binding wherever the
+        wheel is bound."""
+        units = touchpad_scroll_units(self.grid_canvas, event)
+        return scroll_canvas_if_room(self.grid_canvas, units) if units else "break"
+
     def _grid_listing(self) -> Tuple[List[dict], int]:
         """Entries for the grid (dict: path, is_dir, count, subtitle) and
         the total before the card cap."""
@@ -942,12 +953,14 @@ class SandboxBrowserPanel(tk.Frame):
             badge.bind("<Button-1>", lambda e, p=path: self._grid_click(p))
             badge.bind("<Double-Button-1>", lambda e, p=path: self._grid_activate(p))
             badge.bind("<MouseWheel>", self._on_grid_mousewheel)
+            safe_bind_touchpad_scroll(badge.bind, "<TouchpadScroll>", self._on_grid_touchpad_scroll)
             badge.bind("<Button-3>", lambda e, p=path: self._on_grid_right_click(e, p))
 
         for w in [card, bar, icon, name_label, sub_label]:
             w.bind("<Button-1>", lambda e, p=path: self._grid_click(p))
             w.bind("<Double-Button-1>", lambda e, p=path: self._grid_activate(p))
             w.bind("<MouseWheel>", self._on_grid_mousewheel)
+            safe_bind_touchpad_scroll(w.bind, "<TouchpadScroll>", self._on_grid_touchpad_scroll)
             w.bind("<Button-3>", lambda e, p=path: self._on_grid_right_click(e, p))
 
         self._grid_cards.append({"path": path, "widget": card, "recolor": recolor})

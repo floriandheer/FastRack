@@ -22,6 +22,111 @@ def safe_bind_touchpad_scroll(binder, *args):
         pass
 
 
+def touchpad_scroll_units(widget, event):
+    """Direction of a <TouchpadScroll> event as -1 (view up), 1 (view down)
+    or 0 (no vertical movement / unreadable). %D packs signed X/Y deltas
+    into one int; unpack with the Tcl helper Tk ships for exactly this
+    rather than hand-rolling the bit-shifting ourselves."""
+    try:
+        _dx, dy = widget.tk.call('tk::PreciseScrollDeltas', event.delta)
+        dy = int(dy)
+    except (tk.TclError, ValueError):
+        return 0
+    if dy == 0:
+        return 0
+    return -1 if dy > 0 else 1
+
+
+def scroll_canvas_if_room(canvas, units):
+    """Scroll `canvas` by `units` (positive = down) only if its content is
+    actually taller than the visible view. Always returns "break" so it can
+    be returned straight from a Tk event handler."""
+    try:
+        bbox = canvas.bbox("all")
+        if bbox is None:
+            return "break"
+        if bbox[3] - bbox[1] <= canvas.winfo_height():
+            return "break"
+        canvas.yview_scroll(units, "units")
+    except tk.TclError:
+        pass
+    return "break"
+
+
+# Widgets whose Tk class bindings already scroll them on wheel/trackpad. An
+# `all`-tag handler runs after those, so without this check a scroll over
+# one inside a scrollable canvas would move both.
+_SELF_SCROLLING_CLASSES = ("Text", "Listbox", "Treeview")
+
+
+def scrolls_itself(widget):
+    """True if `widget` is a Text/Listbox/Treeview with content to scroll."""
+    try:
+        return (widget.winfo_class() in _SELF_SCROLLING_CLASSES
+                and tuple(widget.yview()) != (0.0, 1.0))
+    except (tk.TclError, AttributeError):
+        return False
+
+
+def enable_canvas_scroll(canvas, hover=None):
+    """Mouse wheel + trackpad scrolling for a hand-built scrollable canvas
+    (a tk.Canvas with an embedded frame), matching ScrollableFrame: active
+    while the pointer is over `hover` (default: the canvas itself - pass its
+    container when the canvas shares it with a scrollbar or other widgets).
+    Bound globally for the duration of the hover, so it keeps working for
+    content added later without rebinding.
+
+    Tk 9 sends a two-finger trackpad scroll as <TouchpadScroll>, not
+    <MouseWheel>, so a canvas that only binds <MouseWheel> ignores the
+    trackpad entirely (see ScrollableFrame._activate_mouse_wheel)."""
+    hover = hover if hover is not None else canvas
+    state = {"active": False}
+
+    def on_wheel(event):
+        if scrolls_itself(event.widget):
+            return None
+        if event.num == 4 or event.delta > 0:
+            return scroll_canvas_if_room(canvas, -1)
+        if event.num == 5 or event.delta < 0:
+            return scroll_canvas_if_room(canvas, 1)
+        return "break"
+
+    def on_touchpad(event):
+        if scrolls_itself(event.widget):
+            return None
+        units = touchpad_scroll_units(canvas, event)
+        return scroll_canvas_if_room(canvas, units) if units else "break"
+
+    def activate(_event=None):
+        state["active"] = True
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind_all(seq, on_wheel)
+        safe_bind_touchpad_scroll(canvas.bind_all, "<TouchpadScroll>", on_touchpad)
+
+    def deactivate(_event=None):
+        if not state["active"]:
+            return
+        state["active"] = False
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.unbind_all(seq)
+        safe_bind_touchpad_scroll(canvas.unbind_all, "<TouchpadScroll>")
+
+    def on_leave(event):
+        # Moving from `hover` onto one of its own children also fires
+        # <Leave> on it; only deactivate once the pointer is really outside.
+        try:
+            under = str(hover.winfo_containing(event.x_root, event.y_root))
+            if under == str(hover) or under.startswith(str(hover) + "."):
+                return
+        except (tk.TclError, KeyError):
+            pass
+        deactivate()
+
+    hover.bind("<Enter>", activate, add="+")
+    hover.bind("<Leave>", on_leave, add="+")
+    canvas.bind("<Destroy>", deactivate, add="+")
+
+
 class ScrollableFrame(tk.Frame):
     """A scrollable frame widget with smooth mouse wheel scrolling."""
 
@@ -115,18 +220,7 @@ class ScrollableFrame(tk.Frame):
     def _scroll_if_room(self, units):
         """Scroll by `units` (positive = down) only if the content is
         actually taller than the visible view."""
-        try:
-            bbox = self.canvas.bbox("all")
-            if bbox is None:
-                return "break"
-            view_height = self.canvas.winfo_height()
-            content_height = bbox[3] - bbox[1]
-            if content_height <= view_height:
-                return "break"
-            self.canvas.yview_scroll(units, "units")
-            return "break"
-        except tk.TclError:
-            return "break"
+        return scroll_canvas_if_room(self.canvas, units)
 
     def _on_mouse_wheel(self, event):
         """Handle a real mouse wheel (Tk 9's <MouseWheel> is mouse-only;
@@ -139,17 +233,9 @@ class ScrollableFrame(tk.Frame):
 
     def _on_touchpad_scroll(self, event):
         """Handle a two-finger trackpad scroll (Tk 9's <TouchpadScroll>,
-        TIP 684). %D packs signed X/Y deltas into one int; unpack with the
-        Tcl helper Tk ships for exactly this rather than hand-rolling the
-        bit-shifting ourselves."""
-        try:
-            _dx, dy = self.canvas.tk.call('tk::PreciseScrollDeltas', event.delta)
-            dy = int(dy)
-        except tk.TclError:
-            return "break"
-        if dy == 0:
-            return "break"
-        return self._scroll_if_room(-1 if dy > 0 else 1)
+        TIP 684)."""
+        units = touchpad_scroll_units(self.canvas, event)
+        return self._scroll_if_room(units) if units else "break"
 
     def get_frame(self):
         """Get the scrollable frame."""
