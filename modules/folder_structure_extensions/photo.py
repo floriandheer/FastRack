@@ -6,13 +6,68 @@ so this extension replaces the primary input row entirely and provides a
 custom folder-name builder. There are no software chips and no specs file.
 """
 
+import os
 import re
+import shutil
 import tkinter as tk
+from tkinter import messagebox, ttk
 
 from shared_form_keyboard import (
-    create_styled_entry, create_styled_label,
+    create_styled_checkbox, create_styled_entry, create_styled_label,
 )
 from . import FolderStructureExtension
+
+DEFAULT_SD_PATH = r"G:\DCIM"
+
+
+def _unique_path(dest_dir, name):
+    """Return a path in dest_dir for name, suffixing _N if it already exists."""
+    stem, ext = os.path.splitext(name)
+    path = os.path.join(dest_dir, name)
+    n = 1
+    while os.path.exists(path):
+        path = os.path.join(dest_dir, f"{stem}_{n}{ext}")
+        n += 1
+    return path
+
+
+def _copy_with_progress(parent, source, dest_dir):
+    """Copy every file under source (flattened) into dest_dir, showing progress."""
+    files = [
+        os.path.join(root, f)
+        for root, _, names in os.walk(source)
+        for f in names
+    ]
+    if not files:
+        messagebox.showinfo("Import", f"No files found in {source}")
+        return
+
+    win = tk.Toplevel(parent)
+    win.title("Importing from card")
+    win.transient(parent)
+    label = tk.Label(win, text="", width=50, anchor="w")
+    label.pack(padx=15, pady=(15, 5))
+    bar = ttk.Progressbar(win, maximum=len(files), length=380)
+    bar.pack(padx=15, pady=(0, 15))
+    win.grab_set()
+
+    failed = []
+    for i, src in enumerate(files, 1):
+        name = os.path.basename(src)
+        label.config(text=f"{i}/{len(files)}  {name}")
+        bar["value"] = i
+        win.update()
+        try:
+            shutil.copy2(src, _unique_path(dest_dir, name))
+        except OSError as e:
+            failed.append(f"{name}: {e}")
+    win.destroy()
+
+    if failed:
+        messagebox.showwarning(
+            "Import finished with errors",
+            f"Copied {len(files) - len(failed)}/{len(files)} files.\n\n" + "\n".join(failed[:10]),
+        )
 
 
 def _sanitize(name):
@@ -55,6 +110,30 @@ class PhotoExtension(FolderStructureExtension):
         # so DB writes still get a useful project name. We synthesize via project
         # data overrides rather than sharing a StringVar.
         return [date_entry, location_entry, activity_entry]
+
+    def build_extra_widgets(self, parent_frame):
+        self.import_var = tk.BooleanVar(value=os.path.isdir(DEFAULT_SD_PATH))
+        self.import_check = create_styled_checkbox(
+            parent_frame, text="Import from card:", variable=self.import_var,
+        )
+        self.import_check.pack(side=tk.LEFT, padx=(0, 5))
+        self.import_check.bind(
+            "<Return>", lambda e: self.import_var.set(not self.import_var.get())
+        )
+
+        self.import_path_var = tk.StringVar(value=DEFAULT_SD_PATH)
+        import_entry = create_styled_entry(parent_frame, textvariable=self.import_path_var, width=14)
+        import_entry.pack(side=tk.LEFT)
+        return [self.import_check, import_entry]
+
+    def after_structure_created(self, project_dir):
+        if not self.import_var.get():
+            return
+        source = self.import_path_var.get().strip()
+        if not os.path.isdir(source):
+            messagebox.showwarning("Import skipped", f"Source folder not found:\n{source}")
+            return
+        _copy_with_progress(self.creator.root, source, project_dir)
 
     def build_folder_name(self):
         date = _sanitize(self.creator.date_var.get())

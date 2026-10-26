@@ -81,6 +81,10 @@ class FolderStructureExtension:
         """Top-level overrides for project_data (e.g. a different client_name rule)."""
         return {}
 
+    def after_structure_created(self, project_dir: str) -> None:
+        """Called once the folders exist, before the project is registered."""
+        pass
+
     def write_specs_extras(self, content_parts: List[str]) -> None:
         """Append extra sections to the Project_Details.txt content list."""
         pass

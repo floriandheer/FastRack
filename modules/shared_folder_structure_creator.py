@@ -566,6 +566,8 @@ class GenericFolderStructureCreator(FormKeyboardMixin):
             os.makedirs(project_dir, exist_ok=True)
             tree = parse_tree_file(self.tree_file)
             tree_create_structure(project_dir, tree, self._replacements(), self._conditionals())
+            if self.extension:
+                self.extension.after_structure_created(project_dir)
 
             software_specs = get_active_software(self.software_chips) if self.software_chips else {}
 

@@ -124,12 +124,15 @@ def write_lua_script(root: Path, script_path: Path = LUA_SCRIPT_PATH) -> Path:
     return script_path
 
 
-def build_command(exe: str, script_path: Path) -> List[str]:
-    """Darktable command line that runs `script_path` on startup."""
+def build_command(exe: str, script_path: Path, export_dir: Path) -> List[str]:
+    """Darktable command line that runs `script_path` on startup and points
+    the export module's target storage at `export_dir`."""
     script_lua = str(script_path).replace("\\", "/")
+    export_template = str(export_dir).replace("\\", "/") + "/$(FILE_NAME)"
     return [
         exe,
         "--conf", "ui_last/import_recursive=false",
+        "--conf", f"plugins/imageio/storage/disk/file_directory={export_template}",
         "--luacmd", f"dofile([==[{script_lua}]==])",
     ]
 
@@ -173,7 +176,9 @@ def main():
         return
 
     try:
-        command = build_command(exe, write_lua_script(root))
+        export_dir = root / "_export"
+        export_dir.mkdir(exist_ok=True)
+        command = build_command(exe, write_lua_script(root), export_dir)
         subprocess.Popen(command)
         logger.info(f"Launched Darktable to import {root}: {command}")
     except OSError as e:
