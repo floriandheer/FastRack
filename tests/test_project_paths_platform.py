@@ -37,7 +37,7 @@ def work(tmp_path, monkeypatch):
                    "Photo/_Sandbox/2019-09-30_RAWExperimenten",
                    "Visual/2024-05-02_Acme_Poster",
                    "Visual/_LIBRARY",
-                   "Audio/01_Prod/01_InProgress/2025-03-01_Artist_Track"):
+                   "Audio/2025-03-01_PR_Artist_Track"):
         (active / folder).mkdir(parents=True)
     (archive / "Visual" / "2023-01-10_OldClient_Logo").mkdir(parents=True)
 
@@ -81,7 +81,9 @@ def test_every_scan_folder_that_exists_on_disk_is_found(mac, work):
 
     assert active["Visual"] == work.active / "Visual"
     assert active["Photo_Personal"] == work.active / "Photo" / "_Personal"
-    assert active["Audio_InProgress"] == work.active / "Audio" / "01_Prod" / "01_InProgress"
+    assert active["Audio"] == work.active / "Audio"
+    assert active["Audio_Sandbox"] == work.active / "Audio" / "_Sandbox"
+    assert archive["Audio"] == work.archive / "Audio"
     assert archive["Visual"] == work.archive / "Visual"
     assert all("\\" not in str(p) for p in list(active.values()) + list(archive.values()))
     assert active["Visual"].exists() and active["Photo_Personal"].exists() and archive["Visual"].exists()

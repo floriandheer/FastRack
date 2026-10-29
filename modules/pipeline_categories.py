@@ -305,21 +305,23 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         ],
         "subtypes": {
             "DJ": {
-                "display_name": "DJ Tools",
+                "display_name": "DJ",
                 "emoji": "🎧",
-                # No tree_template yet — DJ is a script-only subtype until a folder template is wired up
-                "title": None,
-                "tree_template": None,
+                "title": "DJ Set Folder Structure",
+                "tree_template": "audio_dj_structure.txt",
                 "folder_prefix": "DJ",
                 "project_type": "Audio-DJ",
                 "legacy_project_types": [],
                 "autocomplete_category": "Audio",
                 "work_path_category": "Audio",
                 "software_defaults_args": ("Audio",),
-                "software_chips": [],
+                "software_chips": [
+                    ("Ableton", "ableton", "12"),
+                    ("Traktor", "traktor", "4"),
+                ],
                 "extra_fields": [],
                 "supports_personal": True,
-                "supports_sandbox": False,
+                "supports_sandbox": True,
                 "creates_specs_file": False,
                 "extension": None,
                 "scripts": [
@@ -371,7 +373,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "emoji": "🎛️",
                 "title": "Audio Production Folder Structure",
                 "tree_template": "audio_production_structure.txt",
-                "folder_prefix": None,
+                "folder_prefix": "PR",
                 "project_type": "Audio-Production",
                 "legacy_project_types": ["Audio"],
                 "autocomplete_category": "Audio",
@@ -764,18 +766,54 @@ def category_display_name(name: str) -> str:
 
 # ---- project_type lookups (with legacy alias support) ----
 
+def _shade_for_subtype(base_hex: str, position: int, count: int) -> str:
+    """Spread a category's subtypes around its colour so each one is recognisable.
+
+    Subtype ``position`` of ``count`` gets its hue rotated by up to +-32 degrees
+    (and alternating lightness), staying in the category's colour family.
+    A single-subtype category keeps its colour unchanged.
+    """
+    if count <= 1:
+        return base_hex
+    import colorsys
+    r, g, b = (int(base_hex[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, sat = colorsys.rgb_to_hls(r, g, b)
+    step = min(36.0, 64.0 / (count - 1))
+    h = (h + (position - (count - 1) / 2) * step / 360.0) % 1.0
+    l = min(0.7, max(0.3, l + (0.05 if position % 2 else -0.05)))
+
+    def luminance(rgb):
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    # Cards put white text on this colour: darken until the contrast is readable
+    rgb = colorsys.hls_to_rgb(h, l, sat)
+    while l > 0.2 and 1.05 / (luminance(rgb) + 0.05) < 4.5:
+        l -= 0.02
+        rgb = colorsys.hls_to_rgb(h, l, sat)
+    return "#{:02x}{:02x}{:02x}".format(*(round(c * 255) for c in rgb))
+
+
 def _build_project_type_index() -> Dict[str, Dict[str, Any]]:
-    """Map project_type strings (canonical + legacy aliases) to display info."""
+    """Map project_type strings (canonical + legacy aliases) to display info.
+
+    ``color`` is the subtype colour (a shade of the category colour when the
+    category has several subtypes, or the subtype's own ``color`` if set);
+    ``badge`` is the short tag (e.g. "DJ", "PR") shown on cards when the
+    category has several subtypes.
+    """
     index: Dict[str, Dict[str, Any]] = {}
     for cat_name, cat in CATEGORIES.items():
-        for sub_key, sub in cat.get("subtypes", {}).items():
+        typed = [(k, v) for k, v in cat.get("subtypes", {}).items() if v.get("project_type")]
+        for position, (sub_key, sub) in enumerate(typed):
             pt = sub.get("project_type")
-            if not pt:
-                continue
+            multi = len(typed) > 1
             entry = {
                 "icon": sub.get("emoji", ""),
                 "name": sub.get("display_name", sub_key),
-                "color": cat["color"],
+                "color": sub.get("color") or _shade_for_subtype(cat["color"], position, len(typed)),
+                "badge": (sub.get("folder_prefix") or sub_key) if multi else "",
+                "category_color": cat["color"],
                 "category": cat_name,
                 "subtype": sub_key,
                 "canonical": pt,
@@ -791,6 +829,8 @@ def _build_project_type_index() -> Dict[str, Dict[str, Any]]:
                 "icon": cat["emoji"],
                 "name": cat["display_name"],
                 "color": cat["color"],
+                "badge": "",
+                "category_color": cat["color"],
                 "category": cat_name,
                 "subtype": None,
                 "canonical": cat_name,

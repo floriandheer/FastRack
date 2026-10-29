@@ -591,9 +591,9 @@ class ProjectImporter:
             "Visual_Personal": _p(active_base, r"Visual\_Personal"),
             "Visual_Sandbox": _p(active_base, r"Visual\_Sandbox"),
             # Audio
-            "Audio_InProgress": _p(active_base, r"Audio\01_Prod\01_InProgress"),
-            "Audio_Finished": _p(active_base, r"Audio\01_Prod\03_Finished"),
+            "Audio": _p(active_base, r"Audio"),
             "Audio_Personal": _p(active_base, r"Audio\_Personal"),
+            "Audio_Sandbox": _p(active_base, r"Audio\_Sandbox"),
             # Physical (scan each subdirectory separately)
             "Physical_Order": _p(active_base, r"Physical\Order"),
             "Physical_Product": _p(active_base, r"Physical\Product"),
@@ -618,7 +618,9 @@ class ProjectImporter:
             "Visual_Personal": _p(archive_base, r"Visual\_Personal"),
             "Visual_Sandbox": _p(archive_base, r"Visual\_Sandbox"),
             # Audio
+            "Audio": _p(archive_base, r"Audio"),
             "Audio_Personal": _p(archive_base, r"Audio\_Personal"),
+            "Audio_Sandbox": _p(archive_base, r"Audio\_Sandbox"),
             # Physical (mirror active subdirectory structure)
             "Physical_Order": _p(archive_base, r"Physical\Order"),
             "Physical_Product": _p(archive_base, r"Physical\Product"),
@@ -775,6 +777,38 @@ class ProjectImporter:
             db.save()
 
         return stats
+
+    @classmethod
+    def _parse_audio_folder(cls, folder_name: str, is_personal: bool) -> Optional[Dict]:
+        """Parse Audio folders.
+
+        YYYY-MM-DD_PR_[Client_]Project   production
+        YYYY-MM-DD_DJ_Name               DJ set / recording
+        YYYY-MM-DD_[Client_]Project      older production folders without a tag
+        """
+        m = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)$', folder_name)
+        if not m:
+            return None
+        date, rest = m.groups()
+
+        ptype = "Audio-Production"
+        tag = re.match(r'^(PR|DJ)_(.+)$', rest)
+        if tag:
+            ptype = "Audio-DJ" if tag.group(1) == "DJ" else "Audio-Production"
+            rest = tag.group(2)
+
+        if ptype == "Audio-DJ" or is_personal or "_" not in rest:
+            client, project = "Personal", rest
+        else:
+            client, project = rest.split("_", 1)
+
+        return {
+            "date": date,
+            "client": client,
+            "project": project,
+            "type": ptype,
+            "is_personal": is_personal or client == "Personal",
+        }
 
     @classmethod
     def _parse_folder_name(cls, folder_name: str, category: str) -> Optional[Dict]:
@@ -1054,28 +1088,9 @@ class ProjectImporter:
                     "is_personal": True
                 }
 
-        # Audio: Date_Client_Project or Date_ProjectName
+        # Audio: production (PR) and DJ projects
         elif base_category.startswith("Audio"):
-            # Try with client first: YYYY-MM-DD_Client_Project
-            match = re.match(r'^(\d{4}-\d{2}-\d{2})_([^_]+)_(.+)$', folder_name)
-            if match:
-                return {
-                    "date": match.group(1),
-                    "client": "Personal" if is_personal else match.group(2),
-                    "project": match.group(3),
-                    "type": "Audio",
-                    "is_personal": is_personal
-                }
-            # Simple: YYYY-MM-DD_ProjectName
-            match = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)$', folder_name)
-            if match:
-                return {
-                    "date": match.group(1),
-                    "client": "Personal" if is_personal else "Audio",
-                    "project": match.group(2),
-                    "type": "Audio",
-                    "is_personal": is_personal
-                }
+            return cls._parse_audio_folder(folder_name, is_personal)
 
         # Photo: Date_Location_Activity
         elif base_category == "Photo":
@@ -2433,7 +2448,7 @@ class ProjectTrackerApp:
         """Map a project_type string to its tracker category."""
         if project_type in ("GD", "FX", "VFX", "VJ") or project_type.startswith("Visual-"):
             return "Visual"
-        elif project_type == "Audio":
+        elif project_type == "Audio" or project_type.startswith("Audio-"):
             return "Audio"
         elif project_type == "Physical":
             return "Physical"
@@ -3098,6 +3113,18 @@ class ProjectTrackerApp:
                                      padx=3, pady=0)
             sandbox_badge._is_accent_bar = True  # skip during highlight recolor
             sandbox_badge.place(relx=1.0, y=0, anchor="ne")
+
+        # Subtype tag (DJ / PR / GD / FX ...) in the subtype colour, top-left,
+        # so the kind of project reads at a glance. Only categories with
+        # several subtypes carry one.
+        subtype_badge = type_info.get("badge", "")
+        if subtype_badge:
+            tag_font_size = max(5, int(6 * font_scale))
+            tag_bg = bar_color
+            tag = tk.Label(card, text=subtype_badge.upper(), bg=tag_bg, fg="#ffffff",
+                           font=("Arial", tag_font_size, "bold"), padx=4, pady=0)
+            tag._is_accent_bar = True  # skip during highlight recolor
+            tag.place(x=0, y=0, anchor="nw")
 
         # Project name - allow up to 3 lines of wrapping
         project_name = project.get("project_name", "")

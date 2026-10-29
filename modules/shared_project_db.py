@@ -275,7 +275,7 @@ class ProjectDatabase:
         """Get clients that have projects in a specific category."""
         category_types = {
             "Visual": lambda t: t in ("GD", "FX", "VFX", "VJ") or t.startswith("Visual-"),
-            "Audio": lambda t: t == "Audio",
+            "Audio": lambda t: t == "Audio" or t.startswith("Audio-"),
             "Physical": lambda t: t == "Physical",
             "RealTime": lambda t: t in ("Godot", "TD", "Resolume", "RealTime"),
             "Photo": lambda t: t == "Photo",

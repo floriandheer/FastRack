@@ -2695,33 +2695,33 @@ class SettingsDialog:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
 
     def _template_groups(self):
-        """[(key, header, colour, [(label, filename)])] -- one group per category,
+        """[(key, (icon, header), colour, [((icon, label), filename)])] -- one group per category,
         then Business (bookkeeping) and any template files not linked yet."""
         from pipeline_categories import CATEGORIES, all_creative_subtype_pairs
         groups, seen = {}, set()
         for cat, sub in all_creative_subtype_pairs():
             c = CATEGORIES[cat]
             s = c["subtypes"][sub]
-            header = f"{c.get('emoji', '')}  {c.get('display_name', cat)}"
+            header = (c.get('emoji', ''), c.get('display_name', cat))
             grp = groups.setdefault(cat, (cat, header, c.get("color", COLORS["border"]), []))
-            grp[3].append((f"{s.get('emoji', '')} {s.get('display_name', sub)}", s["tree_template"]))
+            grp[3].append(((s.get('emoji', ''), s.get('display_name', sub)), s["tree_template"]))
             seen.add(s["tree_template"])
         result = list(groups.values())
         # Used outside the New Project flow (Invoice Manager bookkeeping folders)
         extra = "bookkeeping_structure.txt"
         if os.path.isfile(os.path.join(self._templates_dir(), extra)):
             biz = CATEGORIES.get("Business", {})
-            result.append(("Business", f"{biz.get('emoji', '')}  {biz.get('display_name', 'Business')}",
+            result.append(("Business", (biz.get('emoji', ''), biz.get('display_name', 'Business')),
                            biz.get("color", COLORS["border"]),
-                           [("Bookkeeping (Invoice Manager)", extra)]))
+                           [(("", "Bookkeeping (Invoice Manager)"), extra)]))
             seen.add(extra)
         try:
             names = sorted(os.listdir(self._templates_dir()))
         except OSError:
             names = []
-        unlinked = [(f, f) for f in names if f.endswith("_structure.txt") and f not in seen]
+        unlinked = [(("", f), f) for f in names if f.endswith("_structure.txt") and f not in seen]
         if unlinked:
-            result.append(("_unlinked", "⚠  Not linked to a project type yet",
+            result.append(("_unlinked", ("⚠", "Not linked to a project type yet"),
                            COLORS["border"], unlinked))
         return result
 
@@ -2787,6 +2787,10 @@ class SettingsDialog:
         label_font = font.Font(family="Segoe UI", size=10)
         small_font = font.Font(family="Segoe UI", size=9)
         head_font = font.Font(family="Segoe UI", size=11, weight="bold")
+        # Icons get their own fixed-width cell so the text after them starts at
+        # the same x whatever glyph (or none) is shown.
+        icon_font = font.Font(family="Segoe UI Emoji", size=11)
+        icon_cell = 3
         collapsed = self._templates_collapsed
         for key, header, color, items in self._template_groups():
             section = tk.Frame(self._templates_list_frame, bg=COLORS["bg_primary"])
@@ -2799,9 +2803,13 @@ class SettingsDialog:
             chevron = tk.Label(bar, font=head_font, fg=COLORS["text_secondary"],
                                bg=COLORS["bg_secondary"], cursor="hand2", width=2)
             chevron.pack(side=tk.LEFT, padx=(8, 0), pady=8)
-            title = tk.Label(bar, text=header, font=head_font, fg=COLORS["text_primary"],
+            header_icon, header_text = header
+            icon = tk.Label(bar, text=header_icon, font=icon_font, fg=COLORS["text_primary"],
+                            bg=COLORS["bg_secondary"], cursor="hand2", width=icon_cell, anchor="center")
+            icon.pack(side=tk.LEFT)
+            title = tk.Label(bar, text=header_text, font=head_font, fg=COLORS["text_primary"],
                              bg=COLORS["bg_secondary"], cursor="hand2")
-            title.pack(side=tk.LEFT)
+            title.pack(side=tk.LEFT, padx=(2, 0))
             n = len(items)
             badge = tk.Label(bar, text=f"{n} template{'s' if n != 1 else ''}", font=small_font,
                              fg=COLORS["text_secondary"], bg=COLORS["bg_secondary"], cursor="hand2")
@@ -2811,20 +2819,24 @@ class SettingsDialog:
             for label, fname in items:
                 row = tk.Frame(body, bg=COLORS["bg_card"])
                 row.pack(fill=tk.X, padx=(16, 10), pady=5)
-                row.columnconfigure(0, weight=1)
-                tk.Label(row, text=label, font=label_font, fg=COLORS["text_primary"],
-                         bg=COLORS["bg_card"], anchor="w").grid(row=0, column=0, sticky="w")
+                row.columnconfigure(1, weight=1)
+                label_icon, label_text = label
+                tk.Label(row, text=label_icon, font=icon_font, fg=COLORS["text_primary"],
+                         bg=COLORS["bg_card"], width=icon_cell, anchor="center"
+                         ).grid(row=0, column=0, sticky="w")
+                tk.Label(row, text=label_text, font=label_font, fg=COLORS["text_primary"],
+                         bg=COLORS["bg_card"], anchor="w").grid(row=0, column=1, sticky="w")
                 count = self._template_folder_count(fname)
                 detail = fname if count is None else (
                     f"{fname}  ·  {count} folder{'s' if count != 1 else ''}")
                 tk.Label(row, text=detail, font=small_font, fg=COLORS["text_secondary"],
-                         bg=COLORS["bg_card"], anchor="w").grid(row=1, column=0, sticky="w")
+                         bg=COLORS["bg_card"], anchor="w").grid(row=1, column=1, sticky="w")
                 make_button(
                     row, text="Edit template", command=lambda f=fname: self._open_template_file(f),
                     bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
                     activebackground=COLORS["bg_hover"], activeforeground=COLORS["text_primary"],
                     font=small_font, relief=tk.FLAT, cursor="hand2", padx=12, pady=4,
-                ).grid(row=0, column=1, rowspan=2, padx=(10, 0))
+                ).grid(row=0, column=2, rowspan=2, padx=(10, 0))
 
             def render(key=key, chevron=chevron, body=body):
                 if key in collapsed:
@@ -2838,7 +2850,7 @@ class SettingsDialog:
                 collapsed.symmetric_difference_update({key})
                 render()
 
-            for w in (bar, chevron, title, badge):
+            for w in (bar, chevron, icon, title, badge):
                 w.bind("<Button-1>", toggle)
             render()
 
