@@ -56,13 +56,14 @@ def test_card_shows_the_kind_tag():
     root.withdraw()
     try:
         app = fpe.ProjectTrackerApp.__new__(fpe.ProjectTrackerApp)
-        app.grid_inner = tk.Frame(root)
+        app.grid_canvas = tk.Canvas(root)
         app.grid_cards = []
         project = {"project_type": "Physical", "project_name": "Uiltje", "client_name": "Saam",
                    "date_created": "2018-02-15", "status": "archived", "metadata": {},
                    "path": r"D:\Archive\Physical\Project\2018-02-15_CNC_Saam_Uiltje"}
-        card = app._create_project_card(project, 0, 0)
-        texts = [w.cget("text") for w in card.winfo_children() if isinstance(w, tk.Label)]
-        assert "CNC" in texts
+        app._create_project_card(project, 0, 0)
+        canvas = app.grid_canvas
+        texts = [canvas.itemcget(i, "text") for i in canvas.find_all() if canvas.type(i) == "text"]
+        assert "CNC" in texts and "archived" in texts and "Uiltje" in texts
     finally:
         root.destroy()

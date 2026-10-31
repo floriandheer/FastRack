@@ -559,6 +559,15 @@ class RenameManager:
             return False
 
 
+class GridCard:
+    """Handle to one project card drawn on the grid canvas."""
+
+    __slots__ = ("bg_item", "card_bg", "x", "y", "size")
+
+    def __init__(self, bg_item, card_bg, x, y, size):
+        self.bg_item, self.card_bg, self.x, self.y, self.size = bg_item, card_bg, x, y, size
+
+
 _PHYSICAL_KIND_TAG = re.compile(r'^\d{4}-\d{2}-\d{2}_\s*(3DPrint|CNC|Technical|Arch)_')
 
 
@@ -1228,6 +1237,8 @@ class ProjectTrackerApp:
         self._grid_scale_job = None  # pending after() that applies the size slider (see _on_grid_scale_changed)
         self._grid_populating = False  # a _populate_grid pass is running (see _populate_grid)
         self._grid_populate_again = False  # a rebuild was asked for while one was running
+        self._refresh_job = None  # pending coalesced refresh_project_list (see _schedule_refresh)
+        self._highlighted_indices = set()  # cards currently drawn as selected
 
         # Filter status (load from settings)
         # Status filter toggles — multiple can be active at once
@@ -1835,7 +1846,6 @@ class ProjectTrackerApp:
         self.grid_window = self.grid_canvas.create_window((0, 0), window=self.grid_inner, anchor="nw")
 
         # Bind resize and scroll events
-        self.grid_inner.bind("<Configure>", lambda e: self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all")))
         self.grid_canvas.bind("<Configure>", self._on_grid_canvas_resize)
 
         # Keyboard navigation for grid view
@@ -2541,7 +2551,7 @@ class ProjectTrackerApp:
 
         self._update_fab_visibility()
         self._update_physical_subtype_visibility()
-        self.refresh_project_list()
+        self._schedule_refresh()
 
     def _apply_saved_settings(self):
         """Apply saved settings after UI is built."""
@@ -2610,7 +2620,7 @@ class ProjectTrackerApp:
 
         self._update_fab_visibility()
         self._update_physical_subtype_visibility()
-        self.refresh_project_list()
+        self._schedule_refresh()
 
     def _update_category_card_style(self, btn_info, name):
         """Update category button styling based on selection state."""
@@ -2637,15 +2647,43 @@ class ProjectTrackerApp:
 
         self._update_fab_visibility()
         self._update_physical_subtype_visibility()
-        self.refresh_project_list()
+        self._schedule_refresh()
 
     def flush_initial_refresh(self):
         """Build the project list now if the deferred first refresh never ran."""
         if getattr(self, "_initial_refresh_pending", False):
             self.refresh_project_list()
 
+    def _schedule_refresh(self, delay_ms: int = 25):
+        """Refresh the list shortly, once, however many switches arrive meanwhile.
+
+        Category shortcuts can be pressed faster than the grid can be rebuilt;
+        rebuilding for every press queues up seconds of work. The buttons and
+        the rest of the UI still update at once; only the project list waits
+        for a brief pause in the input and is then built for the last choice.
+        """
+        self._cancel_scheduled_refresh()
+        try:
+            self._refresh_job = self.project_tree.after(delay_ms, self._run_scheduled_refresh)
+        except tk.TclError:
+            self._refresh_job = None
+            self.refresh_project_list()
+
+    def _cancel_scheduled_refresh(self):
+        if self._refresh_job is not None:
+            try:
+                self.project_tree.after_cancel(self._refresh_job)
+            except tk.TclError:
+                pass
+            self._refresh_job = None
+
+    def _run_scheduled_refresh(self):
+        self._refresh_job = None
+        self.refresh_project_list()
+
     def refresh_project_list(self):
         """Refresh the project list from database based on selected category."""
+        self._cancel_scheduled_refresh()
         self._initial_refresh_pending = False
         # Clear tree
         for item in self.project_tree.get_children():
@@ -2901,7 +2939,9 @@ class ProjectTrackerApp:
         self.grid_canvas.itemconfig(self.grid_window, width=event.width)
         # Repopulate grid when resized to adjust number of columns
         if self.view_mode.get() == "grid" and self.tree_item_to_project:
-            self._populate_grid()
+            cols = max(1, event.width // (self._get_scaled_card_size() + 16))
+            if cols != self.grid_cols:
+                self._populate_grid()
 
     def _pointer_over_grid(self, event):
         """True while the grid is shown and the pointer is over it (or a card in it).
@@ -2983,12 +3023,16 @@ class ProjectTrackerApp:
                 pass
 
     def _populate_grid_now(self):
-        # Reset grid tracking BEFORE destroying widgets
+        # Reset grid tracking BEFORE removing items
         self.grid_cards = []
         self.grid_projects = []
         self.grid_selected_indices = set()
+        self._highlighted_indices = set()
 
-        # Clear existing grid items
+        # Cards are drawn as canvas items, not widgets: Tk on Windows spends
+        # ~1.5 ms per widget on layout, so a grid of 75 cards (450 widgets)
+        # took most of a second to appear. Dropping the items is instant.
+        self.grid_canvas.delete("card")
         for widget in self.grid_inner.winfo_children():
             widget.destroy()
 
@@ -3000,6 +3044,7 @@ class ProjectTrackerApp:
                                   bg="#0d1117", fg="#8b949e", font=("Arial", 11))
             no_projects.pack(pady=20)
             self.grid_selected_index = -1
+            self.grid_canvas.configure(scrollregion=(0, 0, 1, 1))
             return
 
         # Calculate number of columns based on canvas width and scaled card size
@@ -3008,7 +3053,7 @@ class ProjectTrackerApp:
         padding = 16  # Total padding between cards
         self.grid_cols = max(1, canvas_width // (card_size + padding))
 
-        # Create grid of project cards - use constant spacing (no weight distribution)
+        # Create grid of project cards
         for idx, project in enumerate(projects):
             row = idx // self.grid_cols
             col = idx % self.grid_cols
@@ -3017,64 +3062,102 @@ class ProjectTrackerApp:
             self.grid_cards.append(card)
             self.grid_projects.append(project)
 
+        rows = (len(projects) + self.grid_cols - 1) // self.grid_cols
+        self.grid_canvas.configure(scrollregion=(0, 0, max(1, canvas_width), rows * (card_size + padding)))
+
         # Restore selection if valid, otherwise select first
         if self.grid_selected_index >= len(self.grid_projects):
             self.grid_selected_index = 0 if self.grid_projects else -1
 
         # Highlight current selection
         if self.grid_selected_index >= 0:
-            self._highlight_grid_card(self.grid_selected_index)
+            self.grid_selected_indices = {self.grid_selected_index}
+            self._highlight_grid_cards()
+            self._update_grid_count_label()
 
         # Ensure FAB stays on top after grid population
         if self.fab_button and self.view_state == "PROJECT_LIST":
             self.fab_button.lift()
             self.fab_label.lift()
 
+    def _grid_font(self, size: int, bold: bool = False):
+        """Shared Font objects for the grid cards (one per size/weight)."""
+        cache = self.__dict__.setdefault("_grid_fonts", {})
+        key = (size, bold)
+        if key not in cache:
+            cache[key] = tkfont.Font(root=self.grid_canvas, family="Arial", size=size,
+                                     weight="bold" if bold else "normal")
+        return cache[key]
+
+    @staticmethod
+    def _wrap_card_text(text: str, font, width: int, max_lines: int = 3) -> str:
+        """Word-wrap text to the pixel width, at most max_lines lines ('...' if cut)."""
+        lines, current = [], ""
+        for word in text.split():
+            while font.measure(word) > width and len(word) > 1:
+                n = len(word) - 1
+                while n > 1 and font.measure(word[:n]) > width:
+                    n -= 1
+                if current:
+                    lines.append(current)
+                    current = ""
+                lines.append(word[:n])
+                word = word[n:]
+            candidate = f"{current} {word}".strip()
+            if font.measure(candidate) <= width:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            last = lines[-1]
+            while last and font.measure(last + "...") > width:
+                last = last[:-1]
+            lines[-1] = last + "..."
+        return "\n".join(lines)
+
     def _create_project_card(self, project: Dict, row: int, col: int, card_size: int = 120):
-        """Create a single square project card for grid view."""
+        """Draw a single square project card for grid view (canvas items, one tag per card)."""
+        canvas = self.grid_canvas
         project_type = project.get("project_type", "")
         type_info = project_type_info(project_type)
         status = project.get("status", "active")
 
         # Scale factor for fonts based on card size (120 is base)
         font_scale = card_size / 120.0
-        name_size = max(7, int(8 * font_scale))
-        small_size = max(6, int(7 * font_scale))
+        name_font = self._grid_font(max(7, int(8 * font_scale)), bold=True)
+        small_font = self._grid_font(max(6, int(7 * font_scale)))
+        badge_size = max(5, int(5 * font_scale))
+        badge_font = self._grid_font(badge_size)
+        tag_font = self._grid_font(max(5, int(6 * font_scale)), bold=True)
 
         # Truncation length for subtitle
         client_max = max(6, int(10 * font_scale))
 
         # Colors - dim for archived projects, tint for sandbox. Sandbox is a
-        # flag, not a status — an archived project can also be sandbox.
+        # flag, not a status - an archived project can also be sandbox.
         tag_style = project_tag(project, type_info)
         accent_color = tag_style["color"]
         is_archived = status == "archived"
         is_sandbox_flag = bool(project.get("metadata", {}).get("is_sandbox", False))
-        is_sandbox = is_sandbox_flag and not is_archived
-        was_sandbox = is_sandbox_flag
         card_bg = "#1c2128"
         title_fg = "white"
         sub_fg = "#8b949e"
         bar_height = max(3, int(4 * font_scale))
 
-        # Card frame - fixed square size
-        card = tk.Frame(self.grid_inner, bg=card_bg, relief=tk.FLAT,
-                       width=card_size, height=card_size, cursor="hand2")
-        card.grid(row=row, column=col, padx=8, pady=8)
-        card.grid_propagate(False)  # Keep fixed size
-        card.pack_propagate(False)  # Keep fixed size
+        pad = 8
+        x0 = pad + col * (card_size + 2 * pad)
+        y0 = pad + row * (card_size + 2 * pad)
+        x1, y1 = x0 + card_size, y0 + card_size
+        card_index = len(self.grid_cards)  # Current index (before this card is added)
+        tag = f"card{card_index}"
+        tags = ("card", tag)
 
-        # Use grid layout: accent bar top, title fills middle, then variant
-        # (for Web projects), subtitle, and date pinned to bottom.
-        card.columnconfigure(0, weight=1)
-        card.rowconfigure(0, weight=0)  # accent bar - fixed
-        card.rowconfigure(1, weight=1)  # title - expands to fill available space
-        card.rowconfigure(2, weight=0)  # variant text (Web only)
-        card.rowconfigure(3, weight=0)  # subtitle - fixed at bottom
-        card.rowconfigure(4, weight=0)  # date - fixed at bottom
-
-        # Store default bg on card for highlight restore
-        card._card_bg = card_bg
+        bg_item = canvas.create_rectangle(x0, y0, x1, y1, fill=card_bg, width=0, tags=tags)
 
         # Colored accent bar at top - muted for archived, vibrant for active
         if is_archived:
@@ -3083,53 +3166,60 @@ class ProjectTrackerApp:
             bar_color = f"#{r//3:02x}{g//3:02x}{b//3:02x}"
         else:
             bar_color = accent_color
-        accent_bar = tk.Frame(card, bg=bar_color, height=bar_height)
-        accent_bar._is_accent_bar = True
-        accent_bar.grid(row=0, column=0, sticky="new")
+        canvas.create_rectangle(x0, y0, x1, y0 + bar_height, fill=bar_color, width=0, tags=tags)
+
+        def badge(text, bg, fg, font, left=False, top=0):
+            """Small label glued to a top corner, overlapping the accent bar."""
+            w = font.measure(text) + 8
+            h = font.metrics("linespace")
+            bx0 = x0 if left else x1 - w
+            canvas.create_rectangle(bx0, y0 + top, bx0 + w, y0 + top + h, fill=bg, width=0, tags=tags)
+            canvas.create_text(bx0 + w / 2, y0 + top + h / 2, text=text, fill=fg, font=font, tags=tags)
+            return h
+
         if is_archived:
-            # Archive badge: thicker strip overlapping the right side of the accent bar
-            badge_height = max(10, int(12 * font_scale))
-            badge_font_size = max(5, int(5 * font_scale))
-            archive_badge = tk.Label(card, text="archived", bg="#da3633", fg="#ffd7d5",
-                                     font=("Arial", badge_font_size),
-                                     padx=3, pady=0)
-            archive_badge._is_accent_bar = True  # skip during highlight recolor
-            archive_badge.place(relx=1.0, y=0, anchor="ne")
+            h = badge("archived", "#da3633", "#ffd7d5", badge_font)
             # If this archived project was a sandbox project, stack a sandbox
             # badge directly beneath the archive badge.
-            if was_sandbox:
-                sandbox_badge = tk.Label(card, text="sandbox", bg="#b45309", fg="#ffffff",
-                                         font=("Arial", badge_font_size),
-                                         padx=3, pady=0)
-                sandbox_badge._is_accent_bar = True
-                sandbox_badge.place(relx=1.0, y=badge_height + 1, anchor="ne")
-        elif is_sandbox:
-            # Sandbox badge
-            badge_font_size = max(5, int(5 * font_scale))
-            sandbox_badge = tk.Label(card, text="sandbox", bg="#b45309", fg="#ffffff",
-                                     font=("Arial", badge_font_size),
-                                     padx=3, pady=0)
-            sandbox_badge._is_accent_bar = True  # skip during highlight recolor
-            sandbox_badge.place(relx=1.0, y=0, anchor="ne")
+            if is_sandbox_flag:
+                badge("sandbox", "#b45309", "#ffffff", badge_font, top=h + 1)
+        elif is_sandbox_flag:
+            badge("sandbox", "#b45309", "#ffffff", badge_font)
 
         # Subtype tag (DJ / PR / GD / FX ...) in the subtype colour, top-left,
         # so the kind of project reads at a glance. Only categories with
         # several subtypes carry one.
-        subtype_badge = tag_style["badge"]
-        if subtype_badge:
-            tag_font_size = max(5, int(6 * font_scale))
-            tag_bg = bar_color
-            tag = tk.Label(card, text=subtype_badge.upper(), bg=tag_bg, fg="#ffffff",
-                           font=("Arial", tag_font_size, "bold"), padx=4, pady=0)
-            tag._is_accent_bar = True  # skip during highlight recolor
-            tag.place(x=0, y=0, anchor="nw")
+        if tag_style["badge"]:
+            badge(tag_style["badge"].upper(), bar_color, "#ffffff", tag_font, left=True)
 
-        # Project name - allow up to 3 lines of wrapping
-        project_name = project.get("project_name", "")
-        name_label = tk.Label(card, text=project_name, bg=card_bg, fg=title_fg,
-                             font=("Arial", name_size, "bold"), wraplength=card_size-10,
-                             justify=tk.CENTER)
-        name_label.grid(row=1, column=0, sticky="n", pady=(int(8 * font_scale), 0))
+        # Project name - up to 3 lines of wrapping
+        name_text = self._wrap_card_text(project.get("project_name", ""), name_font, card_size - 10)
+        canvas.create_text(x0 + card_size / 2, y0 + bar_height + int(8 * font_scale), text=name_text,
+                           fill=title_fg, font=name_font, anchor="n", justify="center", tags=tags)
+
+        line = small_font.metrics("linespace")
+        bottom = y1 - int(6 * font_scale)
+
+        # Date - compact format, pinned to bottom
+        date_str = project.get("date_created", "")
+        if len(date_str) > 7:
+            date_str = date_str[2:]  # Remove century: 2025-12-29 -> 25-12-29
+        canvas.create_text(x0 + card_size / 2, bottom, text=date_str, fill=sub_fg,
+                           font=small_font, anchor="s", tags=tags)
+        bottom -= line
+
+        # Subtitle - location for Photo, client name for others
+        if project_type == "Photo":
+            location = project.get("metadata", {}).get("location", "")
+            subtitle = f"\U0001F4CD {location}" if location else ""
+        else:
+            subtitle = project.get("client_name", "")
+        subtitle_display = subtitle[:client_max]
+        if len(subtitle) > client_max:
+            subtitle_display += "..."
+        canvas.create_text(x0 + card_size / 2, bottom, text=subtitle_display, fill=sub_fg,
+                           font=small_font, anchor="s", tags=tags)
+        bottom -= line
 
         # Web variant indicator: plain small text above the subtitle so the
         # user sees WordPress vs. Static at a glance without an extra badge.
@@ -3139,36 +3229,8 @@ class ProjectTrackerApp:
                 is_wp = is_wordpress_project(folder)
             except Exception:
                 is_wp = False
-            variant_text = "WordPress" if is_wp else "Static"
-            variant_fg = "#58a6ff" if is_wp else sub_fg
-            variant_label = tk.Label(card, text=variant_text, bg=card_bg,
-                                     fg=variant_fg, font=("Arial", small_size))
-            variant_label.grid(row=2, column=0, sticky="s")
-
-        # Subtitle - location for Photo, client name for others
-        if project_type == "Photo":
-            location = project.get("metadata", {}).get("location", "")
-            subtitle = f"📍 {location}" if location else ""
-        else:
-            subtitle = project.get("client_name", "")
-        subtitle_display = subtitle[:client_max]
-        if len(subtitle) > client_max:
-            subtitle_display += "..."
-        client_label = tk.Label(card, text=subtitle_display, bg=card_bg, fg=sub_fg,
-                               font=("Arial", small_size))
-        client_label.grid(row=3, column=0, sticky="s")
-
-        # Date - compact format, pinned to bottom
-        date_str = project.get("date_created", "")
-        if len(date_str) > 7:
-            date_str = date_str[2:]  # Remove century: 2025-12-29 -> 25-12-29
-        date_label = tk.Label(card, text=date_str, bg=card_bg,
-                             fg=sub_fg, font=("Arial", small_size))
-        date_label.grid(row=4, column=0, sticky="s", pady=(0, int(6 * font_scale)))
-
-        # Bind click event to all card elements
-        # Store index in closure for click handler
-        card_index = len(self.grid_cards)  # Current index (before this card is added)
+            canvas.create_text(x0 + card_size / 2, bottom, text="WordPress" if is_wp else "Static",
+                               fill="#58a6ff" if is_wp else sub_fg, font=small_font, anchor="s", tags=tags)
 
         def on_card_click(e, p=project, idx=card_index):
             ctrl = e.state & 0x4   # Ctrl held
@@ -3210,16 +3272,12 @@ class ProjectTrackerApp:
             self.selected_project = p
             self._open_folder()
 
-        card.bind("<Button-1>", on_card_click)
-        card.bind("<Double-1>", on_card_double_click)
-        for child in card.winfo_children():
-            child.bind("<Button-1>", on_card_click)
-            child.bind("<Double-1>", on_card_double_click)
-            for grandchild in child.winfo_children():
-                grandchild.bind("<Button-1>", on_card_click)
-                grandchild.bind("<Double-1>", on_card_double_click)
+        canvas.tag_bind(tag, "<Button-1>", on_card_click)
+        canvas.tag_bind(tag, "<Double-1>", on_card_double_click)
+        canvas.tag_bind(tag, "<Enter>", lambda e: canvas.configure(cursor="hand2"))
+        canvas.tag_bind(tag, "<Leave>", lambda e: canvas.configure(cursor=""))
 
-        return card
+        return GridCard(bg_item, card_bg, x0, y0, card_size)
 
     def _update_grid_count_label(self):
         """Update count label based on grid selection."""
@@ -3230,53 +3288,43 @@ class ProjectTrackerApp:
         else:
             self.count_label.config(text=f"{total}")
 
-    def _highlight_grid_cards(self):
-        """Highlight all selected cards and unhighlight others."""
-        for i, card in enumerate(self.grid_cards):
-            if not card.winfo_exists():
-                continue
-            try:
-                is_selected = i in self.grid_selected_indices
-                default_bg = card._card_bg if hasattr(card, '_card_bg') else "#1c2128"
-                bg = "#2d333b" if is_selected else default_bg
-                card.configure(bg=bg)
-                for child in card.winfo_children():
-                    # Skip accent bar - it keeps its category color
-                    if hasattr(child, '_is_accent_bar'):
-                        continue
-                    child.configure(bg=bg)
-                    for grandchild in child.winfo_children():
-                        grandchild.configure(bg=bg)
-            except tk.TclError:
-                continue
+    def _style_grid_card(self, card, selected: bool):
+        """Paint one card as selected or not."""
+        self.grid_canvas.itemconfigure(card.bg_item, fill="#2d333b" if selected else card.card_bg)
+
+    def _highlight_grid_cards(self, scroll: bool = True):
+        """Highlight all selected cards and unhighlight others.
+
+        Only the cards whose state changed are repainted.
+        """
+        current = set(self.grid_selected_indices)
+        for i in self._highlighted_indices ^ current:
+            if 0 <= i < len(self.grid_cards):
+                self._style_grid_card(self.grid_cards[i], i in current)
+        self._highlighted_indices = current
 
         # Scroll to make last selected card visible
-        if self.grid_selected_index >= 0:
+        if scroll and self.grid_selected_index >= 0:
             self._scroll_to_grid_card(self.grid_selected_index)
 
     def _scroll_to_grid_card(self, index: int):
         """Scroll to make card at index visible."""
-        if index >= 0 and index < len(self.grid_cards):
-            card = self.grid_cards[index]
-            if not card.winfo_exists():
-                return
-            try:
-                self.grid_canvas.update_idletasks()
-                card_y = card.winfo_y()
-                card_height = card.winfo_height()
-                canvas_height = self.grid_canvas.winfo_height()
-                bbox = self.grid_canvas.bbox("all")
-                if bbox:
-                    content_height = bbox[3] - bbox[1]
-                    if content_height > canvas_height:
-                        scroll_top = self.grid_canvas.yview()[0] * content_height
-                        scroll_bottom = scroll_top + canvas_height
-                        if card_y < scroll_top:
-                            self.grid_canvas.yview_moveto(card_y / content_height)
-                        elif card_y + card_height > scroll_bottom:
-                            self.grid_canvas.yview_moveto((card_y + card_height - canvas_height) / content_height)
-            except tk.TclError:
-                pass
+        if index < 0 or index >= len(self.grid_cards):
+            return
+        card = self.grid_cards[index]
+        try:
+            canvas_height = self.grid_canvas.winfo_height()
+            region = self.grid_canvas.cget("scrollregion").split()
+            content_height = float(region[3]) - float(region[1]) if len(region) == 4 else 0
+            if content_height > canvas_height:
+                scroll_top = self.grid_canvas.yview()[0] * content_height
+                scroll_bottom = scroll_top + canvas_height
+                if card.y < scroll_top:
+                    self.grid_canvas.yview_moveto(card.y / content_height)
+                elif card.y + card.size > scroll_bottom:
+                    self.grid_canvas.yview_moveto((card.y + card.size - canvas_height) / content_height)
+        except tk.TclError:
+            pass
 
     def _highlight_grid_card(self, index: int):
         """Highlight the card at given index and unhighlight others (single select)."""
