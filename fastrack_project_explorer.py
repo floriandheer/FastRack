@@ -40,6 +40,7 @@ from shared_creator_registry import (
 )
 from pipeline_categories import (
     category_color, project_type_info, archive_category as archive_category_for,
+    kind_style,
 )
 from ui_pipeline_categories import PIPELINE_CATEGORIES
 from ui_theme import make_flat_button
@@ -558,6 +559,33 @@ class RenameManager:
             return False
 
 
+_PHYSICAL_KIND_TAG = re.compile(r'^\d{4}-\d{2}-\d{2}_\s*(3DPrint|CNC|Technical|Arch)_')
+
+
+def physical_kind(project: Dict) -> str:
+    """Kind of a Physical project (3DPrint, CNC, Technical, Arch).
+
+    Taken from the stored metadata, else from the tag in the folder name
+    (projects imported before kinds existed), else 3DPrint -- orders and
+    older folders carry no tag and are almost always prints.
+    """
+    kind = (project.get("metadata") or {}).get("physical_kind", "")
+    if not kind:
+        folder = os.path.basename(str(project.get("path", "")).replace("\\", "/").rstrip("/"))
+        m = _PHYSICAL_KIND_TAG.match(folder)
+        kind = m.group(1) if m else "3DPrint"
+    return kind
+
+
+def project_tag(project: Dict, type_info: Dict) -> Dict[str, str]:
+    """{badge, color} shown on a project's card: its subtype tag and shade."""
+    if type_info.get("category") == "Physical":
+        style = kind_style("Physical", physical_kind(project))
+        if style:
+            return style
+    return {"badge": type_info.get("badge", ""), "color": type_info.get("color", "#8b949e")}
+
+
 class ProjectImporter:
     """Handles importing existing projects from filesystem."""
 
@@ -764,6 +792,7 @@ class ProjectImporter:
                         "is_sandbox": folder_info.get("is_sandbox_origin", False),
                         "location": parsed.get("location", ""),
                         "physical_subtype": parsed.get("physical_subtype", ""),
+                        "physical_kind": parsed.get("physical_kind", ""),
                         "woo_order_number": parsed.get("woo_order_number", ""),
                     }
                 }, auto_save=False)
@@ -970,59 +999,27 @@ class ProjectImporter:
                     "physical_subtype": physical_subtype or "Order",
                     "woo_order_number": match.group(1),
                 }
-            # 3DPrint pattern with client: YYYY-MM-DD_3DPrint_Client_Project
-            match = re.match(cls.PATTERNS["Physical"], folder_name)
+            # Tagged folders: YYYY-MM-DD_<3DPrint|CNC|Technical|Arch>_[Client_]Project
+            # Product folders use "alles3d" as implicit client; personal folders
+            # have no client, so everything after the tag is the project name.
+            match = re.match(r'^(\d{4}-\d{2}-\d{2})_\s*(3DPrint|CNC|Technical|Arch)_(.+)$', folder_name)
             if match:
-                return {
-                    "date": match.group(1),
-                    "client": "Personal" if is_personal else match.group(2),
-                    "project": match.group(3),
-                    "type": "Physical",
-                    "is_personal": is_personal,
-                    "physical_subtype": physical_subtype
-                }
-            # 3DPrint pattern without client: YYYY-MM-DD_3DPrint_Project
-            # Product folders use this format with "alles3d" as implicit client
-            match = re.match(r'^(\d{4}-\d{2}-\d{2})_3DPrint_(.+)$', folder_name)
-            if match:
+                date, kind, rest = match.groups()
                 if physical_subtype == "Product":
-                    return {
-                        "date": match.group(1),
-                        "client": "alles3d",
-                        "project": match.group(2),
-                        "type": "Physical",
-                        "is_personal": False,
-                        "physical_subtype": "Product"
-                    }
+                    client, project, personal = "alles3d", rest, False
+                elif is_personal or "_" not in rest:
+                    client, project, personal = "Personal", rest, True
+                else:
+                    client, project = rest.split("_", 1)
+                    personal = False
                 return {
-                    "date": match.group(1),
-                    "client": "Personal",
-                    "project": match.group(2),
+                    "date": date,
+                    "client": client,
+                    "project": project,
                     "type": "Physical",
-                    "is_personal": True,
-                    "physical_subtype": physical_subtype
-                }
-            # Architecture pattern: YYYY-MM-DD_Arch_Project
-            match = re.match(r'^(\d{4}-\d{2}-\d{2})_Arch_(.+)$', folder_name)
-            if match:
-                return {
-                    "date": match.group(1),
-                    "client": "Personal",
-                    "project": match.group(2),
-                    "type": "Physical",
-                    "is_personal": True,
-                    "physical_subtype": physical_subtype
-                }
-            # Technical pattern (older archive format)
-            match = re.match(r'^(\d{4}-\d{2}-\d{2})_Technical_(.+)$', folder_name)
-            if match:
-                return {
-                    "date": match.group(1),
-                    "client": "Personal",
-                    "project": match.group(2),
-                    "type": "Physical",
-                    "is_personal": True,
-                    "physical_subtype": physical_subtype
+                    "is_personal": personal,
+                    "physical_subtype": physical_subtype,
+                    "physical_kind": kind,
                 }
 
         # RealTime: Try various patterns
@@ -3049,7 +3046,8 @@ class ProjectTrackerApp:
 
         # Colors - dim for archived projects, tint for sandbox. Sandbox is a
         # flag, not a status — an archived project can also be sandbox.
-        accent_color = type_info.get("color", "#8b949e")
+        tag_style = project_tag(project, type_info)
+        accent_color = tag_style["color"]
         is_archived = status == "archived"
         is_sandbox_flag = bool(project.get("metadata", {}).get("is_sandbox", False))
         is_sandbox = is_sandbox_flag and not is_archived
@@ -3117,7 +3115,7 @@ class ProjectTrackerApp:
         # Subtype tag (DJ / PR / GD / FX ...) in the subtype colour, top-left,
         # so the kind of project reads at a glance. Only categories with
         # several subtypes carry one.
-        subtype_badge = type_info.get("badge", "")
+        subtype_badge = tag_style["badge"]
         if subtype_badge:
             tag_font_size = max(5, int(6 * font_scale))
             tag_bg = bar_color
@@ -3649,6 +3647,8 @@ class ProjectTrackerApp:
                 raw_type = project.get(key, "")
                 type_info = project_type_info(raw_type)
                 value = type_info["name"]
+                if type_info.get("category") == "Physical":
+                    value = f"Physical - {physical_kind(project)}"
                 # For Web projects, annotate the type with the WP/static variant
                 # so the user can see at a glance which action set will apply.
                 if type_info.get("category") == "Web":

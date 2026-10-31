@@ -30,6 +30,7 @@ class PhysicalExtension(FolderStructureExtension):
         self.order_check = None
         self.product_check = None
         self.project_check = None
+        self.kind_var = None
         self.slicer_var = None
         self.printer_var = None
         self.preproduction_var = None
@@ -73,6 +74,14 @@ class PhysicalExtension(FolderStructureExtension):
         )
         self.project_check.pack(side=tk.LEFT)
 
+        # Kind of physical project: the tag in the folder name and on the card
+        create_styled_label(parent_frame, "Kind:").pack(side=tk.LEFT, padx=(0, 5))
+        self.kind_var = tk.StringVar(value="3DPrint")
+        create_styled_combobox(
+            parent_frame, textvariable=self.kind_var, width=9,
+            values=['3DPrint', 'CNC', 'Technical', 'Arch'],
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
         # Hardware combos
         create_styled_label(parent_frame, "Slicer:").pack(side=tk.LEFT, padx=(0, 5))
         self.slicer_var = tk.StringVar(value=sw_defaults.get("slicer", "Bambu Studio"))
@@ -105,7 +114,7 @@ class PhysicalExtension(FolderStructureExtension):
 
         # Wire previews
         for var in (self.personal_var, self.order_var, self.product_var, self.project_var,
-                    self.slicer_var, self.printer_var,
+                    self.kind_var, self.slicer_var, self.printer_var,
                     self.preproduction_var, self.library_var):
             var.trace_add("write", lambda *a: c.update_preview())
 
@@ -209,9 +218,10 @@ class PhysicalExtension(FolderStructureExtension):
         date = c.date_var.get() or datetime.now().strftime('%Y-%m-%d')
         client = c.client_name_var.get() if c.client_name_var else ""
         project = c.project_name_var.get() if c.project_name_var else ""
+        kind = self.kind_var.get() if self.kind_var else "3DPrint"
         if self.personal_var.get() or self.product_var.get():
-            return f"{date}_3DPrint_{project}"
-        return f"{date}_3DPrint_{client}_{project}"
+            return f"{date}_{kind}_{project}"
+        return f"{date}_{kind}_{client}_{project}"
 
     def get_target_directory(self, base_dir):
         # Physical routing is driven by the radio above writing to base_dir_var
@@ -253,6 +263,7 @@ class PhysicalExtension(FolderStructureExtension):
             "is_product": self.product_var.get() if self.product_var else False,
             "is_order": self.order_var.get() if self.order_var else False,
             "physical_subtype": subtype,
+            "physical_kind": self.kind_var.get() if self.kind_var else "3DPrint",
         }
 
     def write_specs_extras(self, content_parts):

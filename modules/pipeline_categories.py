@@ -399,6 +399,10 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "description": "Physical workflow automation",
         "work_path_key": "Physical",
         "category_scripts": [],
+        # Kinds of physical project, named by the tag in the folder name
+        # (YYYY-MM-DD_<tag>_...) -> short label shown on cards. They all share
+        # the "Physical" project_type; only the label/shade differs.
+        "kinds": {"3DPrint": "3D", "CNC": "CNC", "Technical": "TECH", "Arch": "ARCH"},
         "subtypes": {
             "Physical": {
                 "display_name": "3D Print / Physical",
@@ -839,6 +843,19 @@ def _build_project_type_index() -> Dict[str, Dict[str, Any]]:
 
 
 _PROJECT_TYPE_INDEX = _build_project_type_index()
+
+
+def kind_style(category: str, kind: str) -> Optional[Dict[str, str]]:
+    """{badge, color} for a project kind within a category (e.g. Physical/CNC),
+    or None when the category defines no such kind."""
+    cat = CATEGORIES.get(category) or {}
+    kinds = list(cat.get("kinds", {}))
+    if kind not in kinds:
+        return None
+    return {
+        "badge": cat["kinds"][kind],
+        "color": _shade_for_subtype(cat["color"], kinds.index(kind), len(kinds)),
+    }
 
 
 def project_type_info(project_type: str) -> Dict[str, Any]:
