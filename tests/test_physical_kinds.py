@@ -50,20 +50,15 @@ def test_every_kind_has_a_distinct_label_and_colour():
     assert kind_style("Physical", "Nope") is None
 
 
-def test_card_shows_the_kind_tag():
+def test_card_shows_the_kind_tag(tk_window):
     import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        app = fpe.ProjectTrackerApp.__new__(fpe.ProjectTrackerApp)
-        app.grid_canvas = tk.Canvas(root)
-        app.grid_cards = []
-        project = {"project_type": "Physical", "project_name": "Uiltje", "client_name": "Saam",
-                   "date_created": "2018-02-15", "status": "archived", "metadata": {},
-                   "path": r"D:\Archive\Physical\Project\2018-02-15_CNC_Saam_Uiltje"}
-        app._create_project_card(project, 0, 0)
-        canvas = app.grid_canvas
-        texts = [canvas.itemcget(i, "text") for i in canvas.find_all() if canvas.type(i) == "text"]
-        assert "CNC" in texts and "archived" in texts and "Uiltje" in texts
-    finally:
-        root.destroy()
+    app = fpe.ProjectTrackerApp.__new__(fpe.ProjectTrackerApp)
+    app.grid_canvas = tk.Canvas(tk_window)
+    app.grid_cards = []
+    project = {"project_type": "Physical", "project_name": "Uiltje", "client_name": "Saam",
+               "date_created": "2018-02-15", "status": "archived", "metadata": {},
+               "path": "D:/Archive/Physical/Project/2018-02-15_CNC_Saam_Uiltje"}
+    app._create_project_card(project, 0, 0)
+    canvas = app.grid_canvas
+    texts = [canvas.itemcget(i, "text") for i in canvas.find_all() if canvas.type(i) == "text"]
+    assert "CNC" in texts and "archived" in texts and "Uiltje" in texts

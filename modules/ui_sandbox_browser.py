@@ -23,6 +23,7 @@ from shared_logging import get_logger
 from ui_theme import COLORS
 from sandbox_tag_store import SandboxTagStore
 import sandbox_versioning as versioning
+import sandbox_notes as notes
 from shared_open_path import open_path, reveal_path
 from shared_color_button import make_button, make_toggle_button
 from shared_scrollable_frame import (
@@ -35,6 +36,7 @@ logger = get_logger(__name__)
 # unexpanded folder node, so the expand arrow shows without scanning the
 # whole subtree up front.
 _LOADING_PLACEHOLDER = "…loading…"
+_NOTE_MARK = " \u270E"  # pencil: this file has a note
 
 # Same dark surfaces the project explorer uses.
 _BG = "#0d1117"
@@ -130,6 +132,9 @@ class SandboxBrowserPanel(tk.Frame):
 
         # Single selection shared by list and grid; the side panel follows it.
         self._selected: Optional[str] = None
+        # Version file whose note is open in the note editor (None = no editor)
+        self._note_target: Optional[str] = None
+        self._loading_versions = False
 
         # Grid state
         self._grid_dir = root_path
@@ -399,7 +404,7 @@ class SandboxBrowserPanel(tk.Frame):
         self._build_versions_section(editor)
 
     def _build_versions_section(self, editor):
-        editor.rowconfigure(9, weight=1)
+        editor.rowconfigure(9, weight=1, minsize=96)  # versions list never collapses
 
         tk.Frame(editor, height=1, bg=COLORS["border"]).grid(
             row=7, column=0, sticky="ew", padx=12, pady=(0, 10))
@@ -445,7 +450,54 @@ class SandboxBrowserPanel(tk.Frame):
             editor, textvariable=self.versions_hint_var, font=font.Font(family="Segoe UI", size=8),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"], wraplength=260,
             justify="left", anchor="w",
-        ).grid(row=10, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ).grid(row=10, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        self._build_note_section(editor)
+
+    def _build_note_section(self, editor):
+        """Note for the version selected in the Versions list."""
+        header = tk.Frame(editor, bg=COLORS["bg_card"])
+        header.grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 4))
+        header.columnconfigure(0, weight=1)
+        self.note_title_var = tk.StringVar(value="Note")
+        tk.Label(
+            header, textvariable=self.note_title_var, font=font.Font(family="Segoe UI", size=9, weight="bold"),
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"], anchor="w"
+        ).grid(row=0, column=0, sticky="w")
+        self.note_save_btn = make_button(
+            header, text="Save note", command=self._flush_note,
+            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            activebackground=COLORS["bg_hover"], activeforeground=COLORS["text_primary"],
+            relief=tk.FLAT, cursor="hand2", padx=10, pady=2, state=tk.DISABLED,
+            font=font.Font(family="Segoe UI", size=8),
+        )
+        self.note_save_btn.grid(row=0, column=1, sticky="e")
+
+        text_frame = tk.Frame(editor, bg=COLORS["bg_card"])
+        text_frame.grid(row=12, column=0, sticky="ew", padx=12, pady=(0, 4))
+        text_frame.columnconfigure(0, weight=1)
+        self.note_text = tk.Text(
+            text_frame, height=4, wrap="word", undo=True,
+            bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
+            insertbackground=COLORS["text_primary"], relief=tk.FLAT, padx=6, pady=4,
+            font=font.Font(family="Segoe UI", size=9), state=tk.DISABLED,
+        )
+        self.note_text.grid(row=0, column=0, sticky="ew")
+        note_scroll = ttk.Scrollbar(text_frame, orient="vertical", command=self.note_text.yview,
+                                    style="Sandbox.Vertical.TScrollbar")
+        note_scroll.grid(row=0, column=1, sticky="ns")
+        self.note_text.configure(yscrollcommand=note_scroll.set)
+        self.note_text.bind("<FocusOut>", lambda e: self._flush_note())
+        self.note_text.bind("<Control-s>", lambda e: (self._flush_note(), "break")[1])
+        self.note_text.bind("<Control-S>", lambda e: (self._flush_note(), "break")[1])
+
+        self.note_hint_var = tk.StringVar(value="Select a version to write a note about it.")
+        tk.Label(
+            editor, textvariable=self.note_hint_var, font=font.Font(family="Segoe UI", size=8),
+            fg=COLORS["text_secondary"], bg=COLORS["bg_card"], wraplength=260,
+            justify="left", anchor="w",
+        ).grid(row=13, column=0, sticky="ew", padx=12, pady=(0, 12))
+        self.versions_tree.bind("<<TreeviewSelect>>", self._on_version_select)
 
     def _set_placeholder(self, entry: tk.Entry, text: str):
         entry.insert(0, text)
@@ -623,7 +675,7 @@ class SandboxBrowserPanel(tk.Frame):
         except OSError:
             return
         dirs = [e.path for e in entries if e.is_dir(follow_symlinks=False)]
-        files = [e.path for e in entries if not e.is_dir(follow_symlinks=False)]
+        files = notes.hide_notes(e.path for e in entries if not e.is_dir(follow_symlinks=False))
         for path in dirs:
             self._insert_node(parent_iid, path, True)
         # Only the latest version of each document is listed; older ones
@@ -637,12 +689,18 @@ class SandboxBrowserPanel(tk.Frame):
             return ""
         return f"v{versioning.split_version(os.path.basename(path))[1]:03d}"
 
-    def _insert_node(self, parent_iid: str, path: str, is_dir: bool, version_count: int = 1) -> str:
+    @staticmethod
+    def _node_text(path: str, is_dir: bool = False) -> str:
+        """Tree row label: icon, name and a pencil when the file has a note."""
         name = os.path.basename(path) or path
+        if is_dir:
+            return "\U0001F4C1 " + name
+        return "\U0001F4C4 " + name + (_NOTE_MARK if notes.has_note(path) else "")
+
+    def _insert_node(self, parent_iid: str, path: str, is_dir: bool, version_count: int = 1) -> str:
         tags = ", ".join(self.tag_store.get_tags(path))
-        prefix = "\U0001F4C1 " if is_dir else "\U0001F4C4 "
         iid = self.tree.insert(
-            parent_iid, "end", text=prefix + name,
+            parent_iid, "end", text=self._node_text(path, is_dir),
             values=("" if is_dir else self._version_cell(path, version_count), tags),
         )
         self._iid_paths[iid] = path
@@ -711,18 +769,19 @@ class SandboxBrowserPanel(tk.Frame):
 
     def _find_matches(self, filter_text: str) -> List[Tuple[str, int]]:
         """Documents matching the filter as (latest_path, version_count).
-        A document matches if any of its versions does by name or tag; it is
-        reported once, as its latest version."""
+        A document matches if any of its versions does by name, tag or note;
+        it is reported once, as its latest version."""
         needle = filter_text.lower()
         matches = []
         for dirpath, _dirs, filenames in os.walk(self.root_path):
-            fulls = [os.path.join(dirpath, n) for n in filenames]
+            fulls = notes.hide_notes(os.path.join(dirpath, n) for n in filenames)
             for latest, count in versioning.collapse_to_latest(fulls):
                 family = [f for f in fulls
                           if versioning.group_key(f) == versioning.group_key(latest)]
                 hit = any(
                     needle in os.path.basename(f).lower()
                     or any(needle in t.lower() for t in self.tag_store.get_tags(f))
+                    or needle in notes.read_note(f).lower()
                     for f in family
                 )
                 if hit:
@@ -760,7 +819,7 @@ class SandboxBrowserPanel(tk.Frame):
             parent_iid = ensure_dir_node(os.path.dirname(match))
             tags = ", ".join(self.tag_store.get_tags(match))
             iid = self.tree.insert(
-                parent_iid, "end", text="\U0001F4C4 " + os.path.basename(match),
+                parent_iid, "end", text=self._node_text(match),
                 values=(self._version_cell(match, version_counts.get(match, 1)), tags),
             )
             self._iid_paths[iid] = match
@@ -819,7 +878,7 @@ class SandboxBrowserPanel(tk.Frame):
             for e in scanned:
                 if e.is_dir(follow_symlinks=False):
                     entries.append({"path": e.path, "is_dir": True, "count": 1, "subtitle": ""})
-            files = [e.path for e in scanned if not e.is_dir(follow_symlinks=False)]
+            files = notes.hide_notes(e.path for e in scanned if not e.is_dir(follow_symlinks=False))
             for latest, count in versioning.collapse_to_latest(files):
                 entries.append({"path": latest, "is_dir": False, "count": count, "subtitle": ""})
         return entries[:_GRID_MAX_CARDS], len(entries)
@@ -1205,11 +1264,15 @@ class SandboxBrowserPanel(tk.Frame):
 
     def _refresh_versions(self):
         """Fill the Versions panel for the selected file (newest first)."""
+        self._flush_note()  # keep what was typed for the version shown so far
+        self._loading_versions = True
         self.versions_tree.delete(*self.versions_tree.get_children(""))
         self._version_paths.clear()
 
         path = self._selected_path()
         if not path or not os.path.isfile(path):
+            self._loading_versions = False
+            self._load_note(None)
             self.version_up_btn.config(text="Version up", state=tk.DISABLED)
             self.versions_hint_var.set(
                 "Select a file to see its versions." if not path
@@ -1220,18 +1283,87 @@ class SandboxBrowserPanel(tk.Frame):
         versions = versioning.list_versions(path)
         for v in versions:
             text = f"{v.label}  (latest)" if v.is_latest else v.label
+            if notes.has_note(v.path):
+                text += _NOTE_MARK
             iid = self.versions_tree.insert(
                 "", "end", text=text,
                 values=(v.modified.strftime("%Y-%m-%d %H:%M"), self._fmt_size(v.size)),
             )
             self._version_paths[iid] = v.path
 
+        # Open the note of the selected version (the latest when a document is picked)
+        chosen = next((iid for iid, p in self._version_paths.items()
+                       if os.path.normcase(p) == os.path.normcase(path)), None)
+        if chosen is None and self._version_paths:
+            chosen = next(iter(self._version_paths))
+        if chosen:
+            self.versions_tree.selection_set(chosen)
+        self._loading_versions = False
+        self._load_note(self._version_paths.get(chosen) if chosen else None)
+
         next_number = (versions[0].number + 1) if versions else 2
         self.version_up_btn.config(text=f"Version up → v{next_number:03d}", state=tk.NORMAL)
         self.versions_hint_var.set(
-            "Version up copies the latest version to a new file. "
-            "Double-click a version to open it."
+            "Version up copies the latest version. Double-click a version to open it."
         )
+
+    # ------------------------------------------------------------------
+    # Notes (one plain-text file per version, next to the document)
+    # ------------------------------------------------------------------
+
+    def _on_version_select(self, _event):
+        if self._loading_versions:
+            return
+        sel = self.versions_tree.selection()
+        path = self._version_paths.get(sel[0]) if sel else None
+        self._flush_note()
+        self._load_note(path)
+
+    def _load_note(self, version_path: Optional[str]):
+        """Show the note of ``version_path`` in the editor (None = disable it)."""
+        self._note_target = version_path
+        self.note_text.config(state=tk.NORMAL)
+        self.note_text.delete("1.0", tk.END)
+        if version_path:
+            self.note_text.insert("1.0", notes.read_note(version_path))
+            self.note_text.edit_reset()
+            label = versioning.split_version(os.path.basename(version_path))[1]
+            self.note_title_var.set(f"Note for v{label:03d}")
+            self.note_save_btn.config(state=tk.NORMAL)
+            self.note_hint_var.set(
+                f"Saved as {os.path.basename(notes.note_path(version_path))} (Ctrl+S, or just click away)."
+            )
+        else:
+            self.note_title_var.set("Note")
+            self.note_save_btn.config(state=tk.DISABLED)
+            self.note_text.config(state=tk.DISABLED)
+            self.note_hint_var.set("Select a version to write a note about it.")
+        self.note_text.edit_modified(False)
+
+    def _flush_note(self):
+        """Write the open note to disk if it was edited."""
+        target = self._note_target
+        if not target or not self.note_text.edit_modified():
+            return
+        try:
+            exists = notes.write_note(target, self.note_text.get("1.0", tk.END))
+        except OSError as e:
+            self._notify(f"Could not save note: {e}", "error")
+            return
+        self.note_text.edit_modified(False)
+        self._update_note_marks(target, exists)
+        self._notify(
+            f"Note {'saved' if exists else 'removed'} for {os.path.basename(target)}", "info")
+
+    def _update_note_marks(self, version_path: str, has_note: bool):
+        """Refresh the pencil on the version row and, for the shown row, in the tree."""
+        for iid, p in self._version_paths.items():
+            if os.path.normcase(p) == os.path.normcase(version_path):
+                base = self.versions_tree.item(iid, "text").replace(_NOTE_MARK, "")
+                self.versions_tree.item(iid, text=base + (_NOTE_MARK if has_note else ""))
+        iid = self._tree_iid_for(version_path)
+        if iid:
+            self.tree.item(iid, text=self._node_text(version_path))
 
     def _on_version_double_click(self, _event):
         iid = self.versions_tree.focus()
@@ -1263,7 +1395,7 @@ class SandboxBrowserPanel(tk.Frame):
         if iid:
             self._iid_paths[iid] = new_path
             count = len(versioning.list_versions(new_path))
-            self.tree.item(iid, text="\U0001F4C4 " + os.path.basename(new_path))
+            self.tree.item(iid, text=self._node_text(new_path))
             self.tree.set(iid, "version", self._version_cell(new_path, count))
             self.tree.set(iid, "tags", ", ".join(self.tag_store.get_tags(new_path)))
 
