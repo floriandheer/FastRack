@@ -488,8 +488,10 @@ def uninstall_scheduled_task() -> tuple[bool, str]:
 
 def run_launcher_now() -> tuple[bool, str]:
     """Invoke the deployed launcher manually (the "Test now" button).
-    Runs in a visible PowerShell window so the user can watch output —
-    the silent scheduled-task path is separate."""
+    Runs in a visible PowerShell window so the user can watch output; the
+    window closes by itself when the launcher finishes (full output stays
+    in logs\\startup_launcher.log). The silent scheduled-task path is
+    separate."""
     if sys.platform != "win32":
         return False, "Launcher is Windows-only."
     script = deployed_launcher_path()
@@ -500,7 +502,7 @@ def run_launcher_now() -> tuple[bool, str]:
     try:
         subprocess.Popen(
             [
-                "powershell.exe", "-NoExit",
+                "powershell.exe",
                 "-ExecutionPolicy", "Bypass",
                 "-NoProfile", "-File", str(script),
             ],

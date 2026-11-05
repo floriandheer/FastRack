@@ -163,6 +163,12 @@ class WebPublishConfig:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                 self._merge(default, loaded)
+                # Repair drive-relative paths saved by older versions ("I:Web\..." -> "I:\Web\...")
+                for site in default.get("sites", {}).values():
+                    for key in ("export_dir", "dev_dir", "wiki_local_dir"):
+                        val = site.get(key, "")
+                        if len(val) > 2 and val[1] == ":" and val[2] not in "\\/":
+                            site[key] = val[:2] + "\\" + val[2:]
                 # Remove sites that no longer exist on disk
                 discovered = self._discover_sites()
                 default["sites"] = {
@@ -525,11 +531,54 @@ class PublishWorkflow:
             self._complete(False, "Validation failed: WinSCP not found")
             return False
 
+        # The upload uses `synchronize -delete`, so a half-written export would
+        # wipe the real site on the server. VitePress empties its outDir at the
+        # start of a build, so wait for any running build to settle first.
+        if not self._wait_for_stable_export(export_dir):
+            return False
+
         self._output(f"Export dir: {export_dir}")
         self._output(f"WinSCP: {winscp}")
         self._output(f"FTP host: {ftp_cfg['host']}")
         self._output("Validation passed")
         return True
+
+    @staticmethod
+    def _export_snapshot(export_dir: str):
+        """Return (file_count, newest_mtime) for everything under export_dir."""
+        count, newest = 0, 0.0
+        for dirpath, _dirs, files in os.walk(export_dir):
+            for name in files:
+                count += 1
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(dirpath, name)))
+                except OSError:
+                    pass
+        return count, newest
+
+    def _wait_for_stable_export(self, export_dir: str, quiet_seconds: float = 10.0,
+                                timeout: float = 180.0) -> bool:
+        """Block until export_dir has an index.html and has stopped changing."""
+        deadline = time.time() + timeout
+        announced = False
+        while True:
+            count, newest = self._export_snapshot(export_dir)
+            has_index = os.path.isfile(os.path.join(export_dir, "index.html"))
+            settled = has_index and (time.time() - newest) >= quiet_seconds
+            if settled:
+                self._output(f"Export looks complete ({count} files)")
+                return True
+            if self._cancelled() or time.time() > deadline:
+                reason = ("index.html is missing" if not has_index
+                          else "files were still being written")
+                self._output(f"Export dir is not ready: {reason}. "
+                             "Run the Build first and wait for it to finish, then publish again.")
+                self._complete(False, "Validation failed: export is incomplete (build running?)")
+                return False
+            if not announced:
+                self._output("Export dir changed moments ago (build still running?) - waiting ...")
+                announced = True
+            time.sleep(2)
 
     def _ftp_upload(self, exclude_wiki: bool) -> bool:
         export_dir = self.site_cfg["export_dir"]
