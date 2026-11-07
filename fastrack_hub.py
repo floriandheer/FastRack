@@ -959,6 +959,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             # (button styles, tracker filter) explicitly so the saved
             # selection is visibly restored.
             self._apply_categories()
+            self._flush_category_apply()
         else:
             # Show all by default (no category selected)
             self._clear_category_selection()
@@ -1175,6 +1176,32 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 btn_info["icon"].configure(bg=COLORS["bg_secondary"], fg=color)
                 btn_info["name"].configure(bg=COLORS["bg_secondary"], fg=COLORS["text_primary"])
 
+        # Everything below is expensive (rebuilds the tool rows, writes the
+        # config, swaps the right panel). Run it once after input pauses so
+        # rapid WASD/arrow presses only pay for the final category.
+        job = getattr(self, "_category_apply_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._category_apply_job = self.root.after(30, self._run_category_apply)
+
+    def _run_category_apply(self):
+        self._category_apply_job = None
+        self._apply_categories_heavy()
+
+    def _flush_category_apply(self):
+        """Run a pending deferred category update right now."""
+        job = getattr(self, "_category_apply_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+            self._run_category_apply()
+
+    def _apply_categories_heavy(self):
         # Update tools panel with every selected category.
         self._update_tools_panel(self.selected_categories)
 
@@ -1221,6 +1248,9 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         (a UX-specific behavior distinct from simply having no categories).
         """
         self.session.clear_categories()
+        # Apply the (deferred) empty selection first so the panel work
+        # below isn't overridden by it afterwards.
+        self._flush_category_apply()
 
         # Hide the category panel; re-show the project tracker
         # unconditionally (clear = "show me all projects", which is a
@@ -1446,8 +1476,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         name = script_data.get("name", script_key)
         has_gear = bool(script_data.get("direct_run"))
 
-        icon_font = font.Font(family="Segoe UI Emoji", size=14)
-        name_font = font.Font(family="Segoe UI", size=10)
+        # Fonts are cached: creating new Font objects per row on every
+        # category switch is slow and leaks Tk font handles.
+        if not hasattr(self, "_tool_icon_font"):
+            self._tool_icon_font = font.Font(family="Segoe UI Emoji", size=14)
+            self._tool_name_font = font.Font(family="Segoe UI", size=10)
+        icon_font = self._tool_icon_font
+        name_font = self._tool_name_font
 
         # Row frame with left color accent
         btn_frame = tk.Frame(parent, bg=COLORS["bg_secondary"], cursor="hand2")
