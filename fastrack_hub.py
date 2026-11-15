@@ -537,9 +537,20 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Left panel container - sized to fit the widest tool label across
         # every category (capped) so names are never clipped, rather than a
         # fixed width.
-        left_panel_container = tk.Frame(main_container, bg=COLORS["bg_card"], width=self._compute_sidebar_width())
+        self._sidebar_width = self._compute_sidebar_width()
+        left_panel_container = tk.Frame(main_container, bg=COLORS["bg_card"], width=self._sidebar_width)
         left_panel_container.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12), pady=0)
         left_panel_container.pack_propagate(False)
+        self.left_panel_container = left_panel_container
+        self._left_panel_collapsed = False
+
+        # Collapsed state: the sidebar shrinks to this thin rail, clickable
+        # anywhere, which brings it back (see toggle_left_panel).
+        self.left_rail = tk.Frame(left_panel_container, bg=COLORS["bg_card"])
+        expand_glyph = tk.Label(self.left_rail, text="»", bg=COLORS["bg_card"],
+                                fg=COLORS["text_secondary"], font=("Segoe UI", 13))
+        expand_glyph.pack(fill=tk.X, pady=(9, 0))
+        self._bind_left_panel_toggle(expand_glyph, self.left_rail, expand_glyph)
 
         # Keyboard-focus indicator for the right-hand area (project tracker /
         # sandbox browser). A real layout slot between the two columns rather
@@ -565,16 +576,25 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.categories_section = tk.Frame(left_panel, bg=COLORS["bg_card"])
         self.categories_section.pack(fill=tk.X, padx=15, pady=(15, 10))
 
-        # Categories header (clickable to show all)
+        # Header row: "CATEGORIES" (clickable to show all) on the left, the
+        # sidebar's collapse handle on the right.
+        cat_header_row = tk.Frame(self.categories_section, bg=COLORS["bg_card"])
+        cat_header_row.pack(fill=tk.X, pady=(0, 8))
+
+        collapse_glyph = tk.Label(cat_header_row, text="«", bg=COLORS["bg_card"],
+                                  fg=COLORS["text_secondary"], font=("Segoe UI", 13), padx=6)
+        collapse_glyph.pack(side=tk.RIGHT)
+        self._bind_left_panel_toggle(collapse_glyph, collapse_glyph)
+
         cat_header = tk.Label(
-            self.categories_section,
+            cat_header_row,
             text="CATEGORIES",
             font=font.Font(family="Segoe UI", size=9, weight="bold"),
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_card"],
             cursor="hand2"
         )
-        cat_header.pack(anchor="w", pady=(0, 8))
+        cat_header.pack(side=tk.LEFT)
         cat_header.bind("<Button-1>", lambda e: self._clear_category_selection())
         cat_header.bind("<Enter>", lambda e: cat_header.configure(fg=COLORS["accent"]))
         cat_header.bind("<Leave>", lambda e: cat_header.configure(fg=COLORS["text_secondary"]))
@@ -754,6 +774,76 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
         # Restore state from last session (run once at startup)
         self._restore_session_state()
+
+        if self.config_manager.config.get("left_panel_collapsed"):
+            self._set_left_panel_collapsed(True, save=False)
+
+    # ----- collapsible panels ----------------------------------------
+
+    LEFT_RAIL_WIDTH = 34
+
+    def _bind_left_panel_toggle(self, glyph, *widgets):
+        """Make `widgets` toggle the sidebar on click; `glyph` lights up on hover."""
+        def on_enter(e):
+            glyph.configure(fg=COLORS["text_primary"])
+            self._show_hint("Show/Hide Sidebar: Q")
+
+        def on_leave(e):
+            glyph.configure(fg=COLORS["text_secondary"])
+            self._show_hint("")
+
+        for w in widgets:
+            w.configure(cursor="hand2")
+            w.bind("<Button-1>", lambda e: self.toggle_left_panel())
+            w.bind("<Enter>", on_enter)
+            w.bind("<Leave>", on_leave)
+
+    def _set_left_panel_collapsed(self, collapsed, save=True):
+        self._left_panel_collapsed = bool(collapsed)
+        if self._left_panel_collapsed:
+            self.left_scroll.pack_forget()
+            self.left_rail.pack(fill=tk.BOTH, expand=True)
+            self.left_panel_container.configure(width=self.LEFT_RAIL_WIDTH)
+            # Keyboard focus can't stay on a panel that is no longer shown.
+            if self.focused_panel in self.LEFT_PANEL_ORDER:
+                self.last_left_panel = self.focused_panel
+                self.focused_panel = "tracker"
+                self._update_panel_focus()
+                self._focus_tracker_widget()
+        else:
+            self.left_rail.pack_forget()
+            self.left_scroll.pack(fill=tk.BOTH, expand=True)
+            self.left_panel_container.configure(width=self._sidebar_width)
+        if save:
+            self.config_manager.config["left_panel_collapsed"] = self._left_panel_collapsed
+            self.config_manager._save_config()
+
+    def toggle_left_panel(self):
+        """Collapse the categories/tools sidebar to a thin rail, or bring it back (Q)."""
+        self._set_left_panel_collapsed(not self._left_panel_collapsed)
+
+    def toggle_details_panel(self):
+        """Collapse/expand the tracker's Selected Project side panel (E)."""
+        tracker = getattr(self, "project_tracker", None)
+        if tracker is not None and self.tracker_panel.winfo_ismapped():
+            tracker.toggle_details_panel()
+
+    def _expand_left_panel_if_focused(self):
+        """WASD moved keyboard focus into the sidebar: make sure it is visible."""
+        if self._left_panel_collapsed and self.focused_panel in self.LEFT_PANEL_ORDER:
+            self._set_left_panel_collapsed(False)
+
+    def _nav_panel_up(self):
+        super()._nav_panel_up()
+        self._expand_left_panel_if_focused()
+
+    def _nav_panel_down(self):
+        super()._nav_panel_down()
+        self._expand_left_panel_if_focused()
+
+    def _nav_panel_left(self):
+        super()._nav_panel_left()
+        self._expand_left_panel_if_focused()
 
     # ----- right-panel swap helpers ---------------------------------
 
@@ -2711,6 +2801,13 @@ def main():
     # Toggle project tracker between list and grid view
     root.bind('t', lambda e: app._toggle_tracker_view())
     root.bind('T', lambda e: app._toggle_tracker_view())
+
+    # Collapse/expand the side panels (flanking WASD: Q = left sidebar,
+    # E = Selected Project panel on the right)
+    for key in ('q', 'Q'):
+        root.bind(key, lambda e: app.toggle_left_panel() if app._should_handle_keyboard() else None)
+    for key in ('e', 'E'):
+        root.bind(key, lambda e: app.toggle_details_panel() if app._should_handle_keyboard() else None)
 
     # Open project deck shortcut
     root.bind('<Control-d>', lambda e: app.open_project_deck())

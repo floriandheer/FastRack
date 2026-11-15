@@ -65,6 +65,7 @@ Layer 4: Quick Actions (context-sensitive)
 ├── N or . = Open notes (requires selected category)
 ├── / or Ctrl+F = Focus search
 ├── Ctrl+D = Open project deck (requires selected project)
+├── Q / E = Collapse/expand left sidebar / Selected Project panel
 ├── ` = Cycle scope
 └── Esc = Close creation panel
 ```
@@ -86,6 +87,8 @@ Layer 4: Quick Actions (context-sensitive)
 | **Ctrl+F** | Focus search field |
 | **Ctrl+D** | Open quick-actions deck for the selected project |
 | **T** | Toggle project tracker between list and grid view |
+| **Q** | Collapse / expand the left sidebar (categories, operations, tools) |
+| **E** | Collapse / expand the Selected Project panel on the right |
 | **Esc** | Close project creation panel |
 
 ### Scope Filters (affects both categories and projects)

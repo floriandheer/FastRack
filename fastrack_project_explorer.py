@@ -52,7 +52,7 @@ from invoice_manager.order_project_linker import (
 )
 from shared_color_button import make_toggle_button
 from shared_scrollable_frame import (
-    safe_bind_touchpad_scroll, scroll_canvas_if_room, touchpad_scroll_units,
+    ScrollableFrame, safe_bind_touchpad_scroll, scroll_canvas_if_room, touchpad_scroll_units,
 )
 
 # Module name for logging (must match setup_logging call)
@@ -1421,8 +1421,22 @@ class ProjectTrackerApp:
 
     def _build_right_panel(self, parent):
         """Build right panel with project list and details."""
-        right_frame = tk.Frame(parent, bg="#0d1117", highlightthickness=0, bd=0)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(0, 5), pady=5)
+        # Two columns: the project list (takes all spare width) and, to its
+        # right, the collapsible Selected Project side panel.
+        outer = tk.Frame(parent, bg="#0d1117", highlightthickness=0, bd=0)
+        outer.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(0, 5), pady=5)
+        self.tracker_outer = outer
+
+        # The side panel is created (and packed) before the list column: pack
+        # hands out space in packing order, so a fixed-width sibling packed
+        # after the expand=True list column would be squeezed to nothing.
+        self.details_frame = tk.Frame(outer, bg=self.DETAILS_BG, width=self.DETAILS_MIN_WIDTH,
+                                      highlightthickness=0, bd=0)
+        self.details_frame.pack_propagate(False)
+        self.details_frame.pack(**self._DETAILS_PACK)
+
+        right_frame = tk.Frame(outer, bg="#0d1117", highlightthickness=0, bd=0)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Top: Search and filter
         controls_frame = tk.Frame(right_frame, bg="#0d1117")
@@ -1600,7 +1614,7 @@ class ProjectTrackerApp:
         self._update_filter_button_styles()
 
         # Spacer column that keeps the controls left-aligned (the project
-        # count that used to fill it now lives above the details panel).
+        # count that used to fill it now lives under the project list).
         controls_frame.columnconfigure(4, weight=1)
 
         # Physical subtype filter pills (row 2, hidden by default)
@@ -1652,6 +1666,13 @@ class ProjectTrackerApp:
             self.physical_subtype_buttons[value] = btn
 
         self._update_physical_subtype_styles()
+
+        # With both side panels open on a small screen the list column is too
+        # narrow for search + toggles on one line: drop the toggles to a
+        # second row instead of letting them run off the edge.
+        self._controls_wrapped = False
+        self._controls_parts = (controls_frame, search_label, scope_frame, filter_frame)
+        controls_frame.bind("<Configure>", self._reflow_controls, add="+")
 
         # Middle: Project list header with view toggle
         list_header = tk.Frame(right_frame, bg="#0d1117")
@@ -1866,25 +1887,162 @@ class ProjectTrackerApp:
         # Show list view by default
         self.list_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Project count: bottom-left of the list, directly above the details
-        # panel. Packed between view_container and details_frame, so every
-        # place that hides/re-shows those two must handle this bar too.
+        # Project count: bottom-left of the list. Packed right after
+        # view_container, so every place that hides/re-shows that one must
+        # handle this bar too.
         self.count_bar = tk.Frame(right_frame, bg="#0d1117", highlightthickness=0, bd=0)
         self.count_bar.pack(fill=tk.X, padx=10)
         self.count_label = tk.Label(self.count_bar, text="0", bg="#0d1117", fg="#8b949e",
                                     font=("Arial", 13, "bold"))
         self.count_label.pack(side=tk.LEFT, padx=(4, 0), pady=(0, 2))
 
-        # Bottom: Project details (store reference for hiding during creation)
-        self.details_frame = tk.Frame(right_frame, bg="#1c2128")
-        self.details_frame.pack(fill=tk.X, padx=10, pady=10)
+        # The list column: creation panels are packed into it and the FAB
+        # floats over its view_container.
+        self.right_frame = right_frame
 
-        details_header = tk.Frame(self.details_frame, bg="#1c2128")
-        details_header.pack(fill=tk.X, padx=10, pady=(10, 5))
+        # Selected Project side panel (right of the list)
+        self._build_details_panel()
 
-        details_title = tk.Label(details_header, text="Selected Project", bg="#1c2128", fg="white",
-                                font=("Arial", 10, "bold"))
-        details_title.pack(side=tk.LEFT, anchor=tk.W)
+        # Create the Floating Action Button (FAB) - positioned over view_container
+        self._create_fab_button()
+
+    def _reflow_controls(self, event=None):
+        """Put the scope/status toggles beside the search box when they fit,
+        otherwise on their own row underneath it."""
+        controls, search_label, scope_frame, filter_frame = self._controls_parts
+        if event is not None and event.widget is not controls:
+            return
+        one_line = (search_label.winfo_reqwidth() + 5 + self.search_entry.winfo_reqwidth() + 15
+                    + 15 + scope_frame.winfo_reqwidth() + 15 + filter_frame.winfo_reqwidth())
+        wrap = controls.winfo_width() < one_line
+        if wrap == self._controls_wrapped:
+            return
+        self._controls_wrapped = wrap
+        if wrap:
+            # Both span the whole second row; the status toggles are offset
+            # past the scope toggles so the two groups sit side by side.
+            scope_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W, padx=0, pady=(0, 5))
+            filter_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W,
+                              padx=(scope_frame.winfo_reqwidth() + 15, 0), pady=(0, 5))
+        else:
+            scope_frame.grid(row=0, column=2, columnspan=1, sticky=tk.W, padx=(15, 0), pady=5)
+            filter_frame.grid(row=0, column=3, columnspan=1, sticky=tk.W, padx=(15, 0), pady=5)
+
+    # ----- Selected Project side panel --------------------------------
+
+    DETAILS_BG = "#1c2128"
+    # Panel width follows the tracker's own width (a share of it, clamped),
+    # so it stays readable on a small laptop without eating a wide monitor.
+    DETAILS_MIN_WIDTH = 280
+    DETAILS_MAX_WIDTH = 400
+    DETAILS_WIDTH_FRACTION = 0.26
+    DETAILS_RAIL_WIDTH = 34   # collapsed: just the expand handle
+    _DETAILS_PAD = 14
+    _DETAILS_PACK = dict(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=10)
+
+    def _build_details_panel(self):
+        """Build the collapsible Selected Project panel inside details_frame.
+
+        One vertical column: title, a few facts, the primary action, then
+        Paths / Documents / Actions / Manage sections. Rows and buttons that
+        don't apply to the selected project are hidden rather than shown
+        disabled, and the body scrolls when the window is too short for it.
+        """
+        bg = self.DETAILS_BG
+        muted = "#8b949e"
+        pad = self._DETAILS_PAD
+
+        self._details_collapsed = bool(self.settings.get("details_collapsed", False))
+        self._details_width = None
+        self._details_wrap_labels = []
+
+        def bind_toggle(*widgets, glyph):
+            def on_enter(e):
+                glyph.configure(fg="white")
+                if self.hint_callback:
+                    self.hint_callback("Show/Hide Project Panel: E")
+
+            def on_leave(e):
+                glyph.configure(fg=muted)
+                if self.hint_callback:
+                    self.hint_callback("")
+
+            for w in widgets:
+                w.configure(cursor="hand2")
+                w.bind("<Button-1>", lambda e: self.toggle_details_panel())
+                w.bind("<Enter>", on_enter)
+                w.bind("<Leave>", on_leave)
+
+        # Collapsed state: a thin rail, clickable anywhere, to bring it back.
+        self.details_rail = tk.Frame(self.details_frame, bg=bg)
+        expand_glyph = tk.Label(self.details_rail, text="«", bg=bg, fg=muted, font=("Arial", 13))
+        expand_glyph.pack(fill=tk.X, pady=(6, 0))
+        bind_toggle(self.details_rail, expand_glyph, glyph=expand_glyph)
+
+        # Expanded state
+        self.details_content = tk.Frame(self.details_frame, bg=bg)
+
+        header = tk.Frame(self.details_content, bg=bg)
+        header.pack(fill=tk.X, padx=(pad, 4), pady=(6, 0))
+        tk.Label(header, text="SELECTED PROJECT", bg=bg, fg=muted,
+                 font=("Arial", 8, "bold")).pack(side=tk.LEFT)
+        collapse_glyph = tk.Label(header, text="»", bg=bg, fg=muted, font=("Arial", 13), padx=8)
+        collapse_glyph.pack(side=tk.RIGHT)
+        bind_toggle(collapse_glyph, glyph=collapse_glyph)
+
+        # Scrollable body; its scrollbar only appears when the content is
+        # taller than the panel (see _sync_details_scrollbar).
+        self.details_scroll = ScrollableFrame(self.details_content, bg=bg,
+                                              scrollbar_style="Vertical.TScrollbar")
+        self.details_scroll.pack(fill=tk.BOTH, expand=True)
+        self._details_scrollbar_shown = True
+        body = self.details_scroll.get_frame()
+        body.bind("<Configure>", self._sync_details_scrollbar, add="+")
+        self.details_scroll.canvas.bind("<Configure>", self._sync_details_scrollbar, add="+")
+
+        self.details_empty_label = tk.Label(
+            body, text="Select a project to see its details.", bg=bg, fg=muted,
+            font=("Arial", 9), anchor="w", justify="left",
+        )
+        self._details_wrap_labels.append(self.details_empty_label)
+
+        # Everything below is only shown while a project is selected.
+        self.details_sections = sections = tk.Frame(body, bg=bg)
+
+        # Title block: project name, client underneath.
+        self.detail_labels = {}
+        title_label = tk.Label(sections, text="", bg=bg, fg="white",
+                               font=("Arial", 13, "bold"), anchor="w", justify="left")
+        title_label.pack(fill=tk.X, padx=pad, pady=(8, 0))
+        client_label = tk.Label(sections, text="", bg=bg, fg=muted,
+                                font=("Arial", 10), anchor="w", justify="left")
+        client_label.pack(fill=tk.X, padx=pad, pady=(2, 0))
+        self.detail_labels["project_name"] = title_label
+        self.detail_labels["client_name"] = client_label
+        self._details_wrap_labels += [title_label, client_label]
+
+        # Facts. A row whose value is empty for this project is hidden.
+        meta = tk.Frame(sections, bg=bg)
+        meta.pack(fill=tk.X, padx=pad, pady=(10, 0))
+        self._detail_meta_rows = {}
+        for i, (label, key) in enumerate([
+            ("Type", "project_type"),
+            ("Date", "date_created"),
+            ("Order", "order_number"),
+            ("Location", "location"),
+        ]):
+            caption = tk.Label(meta, text=label, bg=bg, fg=muted, font=("Arial", 8),
+                               width=8, anchor="w")
+            caption.grid(row=i, column=0, sticky="nw", pady=2)
+            value_label = tk.Label(meta, text="", bg=bg, fg="white", font=("Arial", 9),
+                                   anchor="w", justify="left")
+            value_label.grid(row=i, column=1, sticky="w", pady=2)
+            self.detail_labels[key] = value_label
+            self._detail_meta_rows[key] = (caption, value_label)
+
+        # Primary actions: Open Folder + the quick-actions deck.
+        primary = tk.Frame(sections, bg=bg)
+        primary.pack(fill=tk.X, padx=pad, pady=(14, 0))
 
         # Deck button - styled like the FAB (fixed-size square, centered
         # glyph, hover state) rather than a normal flat text button, since
@@ -1895,14 +2053,14 @@ class ProjectTrackerApp:
         deck_btn_bg_disabled = "#21262d"
 
         self.deck_btn = tk.Frame(
-            details_header,
+            primary,
             width=deck_btn_size,
             height=deck_btn_size,
             bg=deck_btn_bg,
             cursor="hand2",
         )
         self.deck_btn.pack_propagate(False)
-        self.deck_btn.pack(side=tk.RIGHT)
+        self.deck_btn.pack(side=tk.RIGHT, padx=(6, 0))
 
         self.deck_btn_label = tk.Label(
             self.deck_btn,
@@ -1918,9 +2076,9 @@ class ProjectTrackerApp:
 
         def _deck_btn_set_state(state):
             self._deck_btn_state = state
-            bg = deck_btn_bg if state == tk.NORMAL else deck_btn_bg_disabled
-            self.deck_btn.configure(bg=bg)
-            self.deck_btn_label.configure(bg=bg)
+            bg_now = deck_btn_bg if state == tk.NORMAL else deck_btn_bg_disabled
+            self.deck_btn.configure(bg=bg_now)
+            self.deck_btn_label.configure(bg=bg_now)
         self._set_deck_btn_state = _deck_btn_set_state
         _deck_btn_set_state(tk.DISABLED)
 
@@ -1947,80 +2105,75 @@ class ProjectTrackerApp:
         self.deck_btn_label.bind("<Enter>", _deck_btn_enter)
         self.deck_btn_label.bind("<Leave>", _deck_btn_leave)
 
-        # Two-column body: project info + status actions on the left,
-        # project-context Actions sitting right next to it. Keeps the panel
-        # compact instead of growing vertically when several actions apply.
-        # The left column takes its natural width; the right column sits
-        # directly beside it with a small gap. Trailing space stays empty so
-        # the columns stay grouped on the left.
-        details_body = tk.Frame(self.details_frame, bg="#1c2128")
-        details_body.pack(fill=tk.X)
-        details_left = tk.Frame(details_body, bg="#1c2128")
-        details_left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 16))
-        details_right = tk.Frame(details_body, bg="#1c2128")
-        details_right.pack(side=tk.LEFT, fill=tk.Y)
-
-        # Detail labels
-        self.detail_labels = {}
-        detail_fields = [
-            ("Client", "client_name"),
-            ("Project", "project_name"),
-            ("Order #", "order_number"),
-            ("Location", "location"),
-            ("Type", "project_type"),
-            ("Date", "date_created"),
-        ]
-
-        details_grid = tk.Frame(details_left, bg="#1c2128")
-        details_grid.pack(fill=tk.X, padx=10, pady=5)
-
-        for i, (label, key) in enumerate(detail_fields):
-            tk.Label(details_grid, text=f"{label}:", bg="#1c2128", fg="#8b949e",
-                    font=("Arial", 8)).grid(row=i, column=0, sticky=tk.W, pady=2)
-
-            value_label = tk.Label(details_grid, text="-", bg="#1c2128", fg="white",
-                                  font=("Arial", 9))
-            value_label.grid(row=i, column=1, sticky=tk.W, pady=2, padx=(10, 0))
-
-            self.detail_labels[key] = value_label
-
-        # Path section with clickable copy-to-clipboard
-        path_section = tk.Frame(details_left, bg="#1c2128")
-        path_section.pack(fill=tk.X, padx=10, pady=(5, 0))
-
-        # Active Path (only shown for active projects)
-        self.active_path_frame = tk.Frame(path_section, bg="#1c2128")
-        self.active_path_frame.pack(fill=tk.X, pady=2)
-
-        tk.Label(self.active_path_frame, text="Active Path:", bg="#1c2128", fg="#8b949e",
-                font=("Arial", 8), width=10, anchor="w").pack(side=tk.LEFT)
-
-        self.active_path_label = tk.Label(
-            self.active_path_frame, text="-", bg="#1c2128", fg="#58a6ff",
-            font=("Arial", 9), cursor="hand2", anchor="w"
+        self.open_btn = make_flat_button(
+            primary, "📂 Open Folder", self._open_folder,
+            bg="#238636", fg="white", hover_bg="#2ea043", font=("Arial", 10, "bold"),
+            state=tk.DISABLED, padx=12, pady=6,
         )
-        self.active_path_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
-        self.active_path_label.bind("<Button-1>", lambda e: self._open_path_in_explorer("active"))
-        self.active_path_label.bind("<Button-3>", lambda e: self._copy_path_to_clipboard("active"))
-        self.active_path_label.bind("<Enter>", lambda e: self.active_path_label.configure(fg="#79c0ff"))
-        self.active_path_label.bind("<Leave>", lambda e: self.active_path_label.configure(fg="#58a6ff"))
+        self.open_btn.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # RAW Path (always shown)
-        raw_path_frame = tk.Frame(path_section, bg="#1c2128")
-        raw_path_frame.pack(fill=tk.X, pady=2)
+        def add_section(title):
+            """A titled block under a hairline divider. Returns (frame, pack
+            options); the caller packs it, since Actions comes and goes."""
+            frame = tk.Frame(sections, bg=bg)
+            tk.Frame(frame, bg="#30363d", height=1).pack(fill=tk.X, pady=(0, 10))
+            tk.Label(frame, text=title, bg=bg, fg=muted, font=("Arial", 8, "bold"),
+                     anchor="w").pack(fill=tk.X, pady=(0, 4))
+            return frame
 
-        tk.Label(raw_path_frame, text="RAW Path:", bg="#1c2128", fg="#8b949e",
-                font=("Arial", 8), width=10, anchor="w").pack(side=tk.LEFT)
+        self._details_section_pack = dict(fill=tk.X, padx=pad, pady=(14, 0))
 
-        self.raw_path_label = tk.Label(
-            raw_path_frame, text="-", bg="#1c2128", fg="#58a6ff",
-            font=("Arial", 9), cursor="hand2", anchor="w"
+        def side_button(parent, text, command):
+            return make_flat_button(
+                parent, text, command,
+                bg="#262c36", fg="white", hover_bg="#30363d", font=("Arial", 9),
+                state=tk.DISABLED, anchor="w", padx=12, pady=6,
+            )
+
+        # --- Paths: caption above a clickable, wrapping value ---
+        paths = add_section("PATHS")
+        paths.pack(**self._details_section_pack)
+
+        def link_row(caption, on_click, on_right_click, hint):
+            row = tk.Frame(paths, bg=bg)
+            tk.Label(row, text=caption, bg=bg, fg=muted, font=("Arial", 8),
+                     anchor="w").pack(fill=tk.X)
+            value = tk.Label(row, text="-", bg=bg, fg="#58a6ff", font=("Arial", 9),
+                             cursor="hand2", anchor="w", justify="left")
+            value.pack(fill=tk.X)
+            value.bind("<Button-1>", lambda e: on_click())
+            value.bind("<Button-3>", lambda e: on_right_click())
+
+            def on_enter(e):
+                value.configure(fg="#79c0ff")
+                if self.hint_callback:
+                    self.hint_callback(hint)
+
+            def on_leave(e):
+                value.configure(fg="#58a6ff")
+                if self.hint_callback:
+                    self.hint_callback("")
+
+            value.bind("<Enter>", on_enter)
+            value.bind("<Leave>", on_leave)
+            self._details_wrap_labels.append(value)
+            return row, value
+
+        # Active path (only shown for active projects)
+        self.active_path_frame, self.active_path_label = link_row(
+            "Active", lambda: self._open_path_in_explorer("active"),
+            lambda: self._copy_path_to_clipboard("active"),
+            "Click: open  ·  Right-click: copy path",
         )
-        self.raw_path_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
-        self.raw_path_label.bind("<Button-1>", lambda e: self._open_path_in_explorer("raw"))
-        self.raw_path_label.bind("<Button-3>", lambda e: self._copy_path_to_clipboard("raw"))
-        self.raw_path_label.bind("<Enter>", lambda e: self.raw_path_label.configure(fg="#79c0ff"))
-        self.raw_path_label.bind("<Leave>", lambda e: self.raw_path_label.configure(fg="#58a6ff"))
+        self.active_path_frame.pack(**self._DETAILS_ROW_PACK)
+
+        # RAW path (always shown)
+        self.raw_path_frame, self.raw_path_label = link_row(
+            "RAW", lambda: self._open_path_in_explorer("raw"),
+            lambda: self._copy_path_to_clipboard("raw"),
+            "Click: open  ·  Right-click: copy path",
+        )
+        self.raw_path_frame.pack(**self._DETAILS_ROW_PACK)
 
         # Website URL — read from/written to the project's own
         # Project_Details.txt (a "Website: <url>" line), normally filled in
@@ -2028,138 +2181,128 @@ class ProjectTrackerApp:
         # truth, so hand-editing it there works too. Left-click opens it,
         # or prompts to set one if it's still empty; right-click always
         # opens the edit prompt.
-        website_frame = tk.Frame(path_section, bg="#1c2128")
-        website_frame.pack(fill=tk.X, pady=2)
-
-        tk.Label(website_frame, text="Website:", bg="#1c2128", fg="#8b949e",
-                font=("Arial", 8), width=10, anchor="w").pack(side=tk.LEFT)
-
-        self.website_label = tk.Label(
-            website_frame, text="-", bg="#1c2128", fg="#58a6ff",
-            font=("Arial", 9), cursor="hand2", anchor="w"
+        website_frame, self.website_label = link_row(
+            "Website", self._open_website, self._edit_website_url,
+            "Click: open  ·  Right-click: edit URL",
         )
-        self.website_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
-        self.website_label.bind("<Button-1>", lambda e: self._open_website())
-        self.website_label.bind("<Button-3>", lambda e: self._edit_website_url())
-        self.website_label.bind("<Enter>", lambda e: self.website_label.configure(fg="#79c0ff"))
-        self.website_label.bind("<Leave>", lambda e: self.website_label.configure(fg="#58a6ff"))
+        website_frame.pack(**self._DETAILS_ROW_PACK)
 
-        # Action buttons
-        button_frame = tk.Frame(details_left, bg="#1c2128")
-        button_frame.pack(fill=tk.X, padx=10, pady=(10, 10))
+        # --- Documents ---
+        # Project Details lives in _LIBRARY for any category, so it is always
+        # listed (disabled until a details file exists). Order Details /
+        # Invoice only exist once a project is linked to a WooCommerce order
+        # (Physical), so they are hidden for every other project.
+        documents = add_section("DOCUMENTS")
+        documents.pack(**self._details_section_pack)
 
-        self.open_btn = make_flat_button(
-            button_frame, "📂 Open Folder", self._open_folder,
-            bg="#238636", fg="white", hover_bg="#2ea043", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.open_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.project_details_btn = side_button(documents, "📄 Project Details", self._open_project_details)
+        self.order_details_btn = side_button(documents, "🧾 Order Details", self._open_order_details)
+        self.invoice_btn = side_button(documents, "💳 Invoice", self._open_invoice)
 
-        self.rename_btn = make_flat_button(
-            button_frame, "✏️ Rename", self._rename_project,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.rename_btn.pack(side=tk.LEFT, padx=5)
-
-        self.archive_btn = make_flat_button(
-            button_frame, "📦 Archive", self._archive_project,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.archive_btn.pack(side=tk.LEFT, padx=5)
-
-        self.unarchive_btn = make_flat_button(
-            button_frame, "📤 Un-Archive", self._unarchive_project,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.unarchive_btn.pack(side=tk.LEFT, padx=5)
-
-        self.promote_btn = make_flat_button(
-            button_frame, "🚀 Promote to Active", self._promote_project,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.promote_btn.pack(side=tk.LEFT, padx=5)
-
-        # Append a timestamped, project-tagged entry to the category-level
-        # notes/<category>_notes.txt scratchpad. Per-project notes still live
-        # in the project DB; this button is for the running category log.
-        self.log_note_btn = make_flat_button(
-            button_frame, "📝 Log to Notes", self._log_to_category_notes,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, padx=15, pady=6,
-        )
-        self.log_note_btn.pack(side=tk.LEFT, padx=5)
-
-        # Documents section, in the right column, to the left of Actions.
-        # Project Details lives in _LIBRARY for any category; Order Details /
-        # Invoice only apply once a project is linked to a WooCommerce order
-        # (Physical). Unlike Actions, this section is always shown — each
-        # button is individually enabled/disabled per selection in
-        # _display_project_details / _clear_details, never hidden as a group.
-        documents_frame = tk.Frame(details_right, bg="#1c2128")
-        documents_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 16))
-        documents_header = tk.Label(
-            documents_frame,
-            text="DOCUMENTS",
-            bg="#1c2128",
-            fg="#8b949e",
-            font=("Arial", 8, "bold"),
-            anchor="w",
-        )
-        documents_header.pack(fill=tk.X, pady=(8, 4))
-        documents_container = tk.Frame(documents_frame, bg="#1c2128")
-        documents_container.pack(fill=tk.X, pady=(0, 10))
-
-        self.project_details_btn = make_flat_button(
-            documents_container, "📄 Project Details", self._open_project_details,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, anchor="w", padx=15, pady=6,
-        )
-        self.project_details_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-        self.order_details_btn = make_flat_button(
-            documents_container, "🧾 Order Details", self._open_order_details,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, anchor="w", padx=15, pady=6,
-        )
-        self.order_details_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-        self.invoice_btn = make_flat_button(
-            documents_container, "💳 Invoice", self._open_invoice,
-            bg="#1c2128", fg="white", hover_bg="#262c36", font=("Arial", 9),
-            state=tk.DISABLED, anchor="w", padx=15, pady=6,
-        )
-        self.invoice_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-        # Project-context Actions section, in the right column, to the right
-        # of Documents. Populated dynamically in _display_project_details
-        # based on the selected project's project_type. Hidden when no
-        # project is selected or no actions match. Buttons stack vertically
-        # here so the panel stays compact horizontally instead of growing
-        # taller.
-        self.actions_frame = tk.Frame(details_right, bg="#1c2128")
-        self.actions_header = tk.Label(
-            self.actions_frame,
-            text="ACTIONS",
-            bg="#1c2128",
-            fg="#8b949e",
-            font=("Arial", 8, "bold"),
-            anchor="w",
-        )
-        self.actions_header.pack(fill=tk.X, pady=(8, 4))
-        self.actions_container = tk.Frame(self.actions_frame, bg="#1c2128")
-        self.actions_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # --- Actions: project-context scripts ---
+        # Populated in _populate_actions_section from the selected project's
+        # project_type; the whole section is hidden when nothing applies.
+        self.actions_frame = add_section("ACTIONS")
+        self.actions_container = tk.Frame(self.actions_frame, bg=bg)
+        self.actions_container.pack(fill=tk.X)
         # Buttons created on the fly per project; track them so we can clear.
         self._action_buttons = []
 
-        # Store reference to right frame for FAB positioning
-        self.right_frame = right_frame
+        # --- Manage ---
+        self.manage_frame = add_section("MANAGE")
+        self.manage_frame.pack(**self._details_section_pack)
 
-        # Create the Floating Action Button (FAB) - positioned over view_container
-        self._create_fab_button()
+        self.rename_btn = side_button(self.manage_frame, "✏️ Rename", self._rename_project)
+        self.archive_btn = side_button(self.manage_frame, "📦 Archive", self._archive_project)
+        self.unarchive_btn = side_button(self.manage_frame, "📤 Un-Archive", self._unarchive_project)
+        self.promote_btn = side_button(self.manage_frame, "🚀 Promote to Active", self._promote_project)
+        # Append a timestamped, project-tagged entry to the category-level
+        # notes/<category>_notes.txt scratchpad. Per-project notes still live
+        # in the project DB; this button is for the running category log.
+        self.log_note_btn = side_button(self.manage_frame, "📝 Log to Notes", self._log_to_category_notes)
+
+        tk.Frame(sections, bg=bg, height=pad).pack(fill=tk.X)  # bottom breathing room
+
+        self._clear_details()
+        self._set_details_collapsed(self._details_collapsed, save=False)
+        self.tracker_outer.bind("<Configure>", self._on_tracker_outer_resize, add="+")
+
+    _DETAILS_ROW_PACK = dict(fill=tk.X, pady=(0, 6))
+
+    @staticmethod
+    def _stack_buttons(buttons):
+        """Re-pack a vertical stack of (button, visible) pairs in order,
+        leaving out the ones that don't apply."""
+        for btn, _visible in buttons:
+            btn.pack_forget()
+        for btn, visible in buttons:
+            if visible:
+                btn.pack(side=tk.TOP, fill=tk.X, pady=2)
+
+    def _sync_details_scrollbar(self, _event=None):
+        """Show the panel's scrollbar only while its content overflows."""
+        scroll = self.details_scroll
+        if scroll.scrollbar is None:
+            return
+        view_height = scroll.canvas.winfo_height()
+        if view_height <= 1:  # not laid out yet
+            return
+        needed = scroll.scrollable_frame.winfo_reqheight() > view_height
+        if needed == self._details_scrollbar_shown:
+            return
+        self._details_scrollbar_shown = needed
+        if needed:
+            scroll.scrollbar.pack(side="right", fill="y", before=scroll.canvas)
+        else:
+            scroll.scrollbar.pack_forget()
+            scroll.canvas.yview_moveto(0)
+
+    def _on_tracker_outer_resize(self, event):
+        if event.widget is self.tracker_outer:
+            self._apply_details_width(event.width)
+
+    def _apply_details_width(self, outer_width=None):
+        """Size the side panel for the tracker's current width (or to the
+        collapsed rail) and re-wrap its text to fit."""
+        if self._details_collapsed:
+            width = self.DETAILS_RAIL_WIDTH
+        else:
+            if outer_width is None:
+                outer_width = self.tracker_outer.winfo_width()
+            width = max(self.DETAILS_MIN_WIDTH,
+                        min(self.DETAILS_MAX_WIDTH, int(outer_width * self.DETAILS_WIDTH_FRACTION)))
+        if width == self._details_width:
+            return
+        self._details_width = width
+        self.details_frame.configure(width=width)
+        if not self._details_collapsed:
+            # Room for the side padding and the (sometimes shown) scrollbar,
+            # so showing it never re-wraps the text.
+            wrap = width - 2 * self._DETAILS_PAD - 18
+            for label in self._details_wrap_labels:
+                label.configure(wraplength=wrap)
+            for _caption, value_label in self._detail_meta_rows.values():
+                value_label.configure(wraplength=wrap - 70)
+
+    def _set_details_collapsed(self, collapsed, save=True):
+        self._details_collapsed = bool(collapsed)
+        if self._details_collapsed:
+            self.details_content.pack_forget()
+            self.details_rail.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.details_rail.pack_forget()
+            self.details_content.pack(fill=tk.BOTH, expand=True)
+        self._apply_details_width()
+        if save:
+            self.settings.set("details_collapsed", self._details_collapsed)
+
+    def toggle_details_panel(self):
+        """Collapse the Selected Project panel to a thin rail, or bring it back."""
+        self._set_details_collapsed(not self._details_collapsed)
+
+    def _show_details_panel(self):
+        """Re-pack the side panel after it was hidden for a creation form."""
+        self.details_frame.pack(before=self.right_frame, **self._DETAILS_PACK)
 
     def _create_fab_button(self):
         """Create the floating action button for project creation."""
@@ -2208,7 +2351,7 @@ class ProjectTrackerApp:
         self.fab_label.bind("<Enter>", on_enter)
         self.fab_label.bind("<Leave>", on_leave)
 
-        # Position in bottom-right corner of view_container (above details panel)
+        # Position in bottom-right corner of view_container
         self.fab_button.place(relx=0.97, rely=0.97, anchor="se")
 
         # Update FAB visibility based on current category
@@ -2524,7 +2667,7 @@ class ProjectTrackerApp:
         # Show the view container, count bar and details panel again (in correct order)
         self.view_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.count_bar.pack(fill=tk.X, padx=10)
-        self.details_frame.pack(fill=tk.X, padx=10, pady=10)
+        self._show_details_panel()
 
         # Update FAB visibility
         self._update_fab_visibility()
@@ -3482,7 +3625,7 @@ class ProjectTrackerApp:
         is_work_or_all = "client" in self.filter_scopes
 
         if is_physical and is_work_or_all:
-            self.physical_subtype_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
+            self.physical_subtype_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, pady=(2, 0))
         else:
             self.physical_subtype_frame.grid_forget()
             # Reset filter when hidden so it doesn't silently filter
@@ -3652,9 +3795,12 @@ class ProjectTrackerApp:
         self._display_project_details(project)
 
     def _clear_details(self):
-        """Clear detail panel."""
+        """Clear detail panel (nothing selected): just a one-line prompt."""
+        self.details_sections.pack_forget()
+        self.details_empty_label.pack(fill=tk.X, padx=self._DETAILS_PAD, pady=(10, self._DETAILS_PAD))
+
         for label in self.detail_labels.values():
-            label.config(text="-")
+            label.config(text="")
 
         # Clear path labels and tracking variables
         self.active_path_label.config(text="-")
@@ -3662,7 +3808,6 @@ class ProjectTrackerApp:
         self.website_label.config(text="-")
         self._current_active_path = None
         self._current_raw_path = None
-        self.active_path_frame.pack(fill=tk.X, pady=2)  # Show by default
 
         self.open_btn.config(state=tk.DISABLED)
         self.rename_btn.config(state=tk.DISABLED)
@@ -3679,7 +3824,10 @@ class ProjectTrackerApp:
         self._populate_actions_section(None)
 
     def _display_project_details(self, project: Dict):
-        """Display project details in right panel."""
+        """Display project details in the side panel."""
+        self.details_empty_label.pack_forget()
+        self.details_sections.pack(fill=tk.X)
+
         # Update detail labels
         for key, label in self.detail_labels.items():
             if key == "location":
@@ -3708,6 +3856,15 @@ class ProjectTrackerApp:
 
             label.config(text=str(value))
 
+            # Facts with nothing to say for this project don't get a row.
+            if key in self._detail_meta_rows:
+                has_value = str(value).strip() not in ("", "-")
+                for widget in self._detail_meta_rows[key]:
+                    if has_value:
+                        widget.grid()
+                    else:
+                        widget.grid_remove()
+
         # Get status and stored path
         status = project.get("status", "active")
         stored_path = project.get("path", "")
@@ -3718,8 +3875,8 @@ class ProjectTrackerApp:
 
         # Handle paths based on project status
         if status == "active":
-            # Show Active Path frame
-            self.active_path_frame.pack(fill=tk.X, pady=2)
+            # Show Active Path row (above RAW)
+            self.active_path_frame.pack(before=self.raw_path_frame, **self._DETAILS_ROW_PACK)
 
             # Get the active path (work drive version)
             try:
@@ -3742,8 +3899,8 @@ class ProjectTrackerApp:
             self._current_raw_path = raw_path
             self.raw_path_label.config(text=raw_path)
         else:
-            # Archived: Keep Active Path frame visible but blank
-            self.active_path_frame.pack(fill=tk.X, pady=2)
+            # Archived: there is no active path, so drop the row
+            self.active_path_frame.pack_forget()
             self.active_path_label.config(text="-")
             self._current_active_path = None
             self.raw_path_label.config(text=stored_path)
@@ -3765,6 +3922,11 @@ class ProjectTrackerApp:
         has_order_link = bool(project.get("metadata", {}).get("woo_order_number"))
         self.order_details_btn.config(state=tk.NORMAL if has_order_link else tk.DISABLED)
         self.invoice_btn.config(state=tk.NORMAL if has_order_link else tk.DISABLED)
+        self._stack_buttons([
+            (self.project_details_btn, True),
+            (self.order_details_btn, has_order_link),
+            (self.invoice_btn, has_order_link),
+        ])
 
         # Enable archive/unarchive/promote based on status. Promote is offered
         # for active projects whose sandbox flag is set, to clear the flag.
@@ -3777,6 +3939,15 @@ class ProjectTrackerApp:
             self.archive_btn.config(state=tk.DISABLED)
             self.unarchive_btn.config(state=tk.NORMAL)
             self.promote_btn.config(state=tk.DISABLED)
+
+        # Only the status changes that apply to this project are listed.
+        self._stack_buttons([
+            (self.rename_btn, True),
+            (self.archive_btn, status == "active"),
+            (self.unarchive_btn, status == "archived"),
+            (self.promote_btn, status == "active" and is_sandbox_flag),
+            (self.log_note_btn, True),
+        ])
 
         # Populate the project-context Actions section based on project_type.
         self._populate_actions_section(project)
@@ -3872,7 +4043,7 @@ class ProjectTrackerApp:
             self.actions_frame.pack_forget()
             return
 
-        self.actions_frame.pack(side=tk.LEFT, fill=tk.Y, padx=0)
+        self.actions_frame.pack(before=self.manage_frame, **self._details_section_pack)
 
         for category_key, script_key, subcat_key, script_data in actions:
             color = category_color(category_key.capitalize()) or "#238636"
