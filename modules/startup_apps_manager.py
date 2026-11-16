@@ -71,18 +71,17 @@ def deployed_task_helper_path() -> Path:
 DEFAULT_CONFIG: dict = {
     "enabled": False,
     "timing": {
-        "app_init_delay_ms": 3000,
-        "process_window_timeout_ms": 1500,
-        "between_desktops_delay_ms": 1500,
-        "move_to_desktop_delay_ms": 60,
-        "move_to_monitor_delay_ms": 100,
-        "maximize_delay_ms": 12,
-        "after_maximize_delay_ms": 100,
-        # 15s mirrors the legacy 1_StartupScript_AppsToDesktop.ps1 value.
-        # 5s was too short: pythonw apps (FastRack) hadn't shown their
-        # main window before the launcher switched back to desktop 1,
-        # which placed them on the wrong desktop.
-        "final_init_delay_ms": 15000,
+        # Floor for how long the launcher keeps watching for an app's
+        # window (the per-app window_timeout_ms can only raise it). The
+        # launcher places each window the moment it exists, so this is a
+        # give-up bound, not a delay: a cold boot regularly needs 15s+
+        # for apps that show up in 2s when warm.
+        #
+        # Older configs also carry app_init_delay_ms,
+        # between_desktops_delay_ms, final_init_delay_ms and friends -
+        # fixed sleeps from when the launcher switched desktops per app
+        # group. They are still loaded/saved untouched but ignored.
+        "min_window_wait_ms": 30000,
     },
     # Process-name remap for apps launched via a stub launcher whose
     # window lives on a different process name. These mirror the
@@ -119,9 +118,9 @@ DEFAULT_CONFIG: dict = {
     # as a flat letter list for the PS1's simple poll loop.
     "wait_for_drives": [],
     "drive_wait_timeout_ms": 30000,
-    # Which virtual desktop the launcher switches back to after placing
-    # all apps (FinalInitDelay after the last one, then this). Used to be
-    # hardcoded to desktop 1.
+    # The "landing" desktop: the launcher switches to it once, before it
+    # launches anything, and you stay there while each app's window is
+    # moved to its own desktop.
     "final_desktop": 1,
     "apps": [],
 }
@@ -141,8 +140,9 @@ APP_ENTRY_TEMPLATE: dict = {
     "launch_order": 0,
     "enabled": True,
     # How long the launcher waits for this app's window to appear before
-    # giving up on placing it (per-app since apps vary wildly — a browser
-    # shows a window almost instantly, pythonw + Tkinter can take longer).
+    # giving up on placing it. Only matters above the global floor
+    # (timing.min_window_wait_ms) - raise it for an app that takes longer
+    # than that to show a window.
     "window_timeout_ms": 5000,
 }
 
@@ -523,8 +523,9 @@ def run_launcher_now() -> tuple[bool, str]:
 #     assignment. Without it, apps still launch + get monitor placement
 #     but stay on the current desktop. Pinned to Windows build numbers,
 #     so this is the one most likely to break after Windows updates.
-#   - AutoHotkey v2 — required only for "fullscreen" position mode (we
-#     send F11 via a tiny AHK script). Without it, fullscreen apps stop
+#   - AutoHotkey v2 — required only for "fullscreen" position mode (a
+#     tiny AHK script posts F11 to the window; it never activates
+#     anything or synthesizes input). Without it, fullscreen apps stop
 #     at maximize.
 #   - pywin32 — optional, used to resolve .lnk targets so window-finding
 #     by process name works. Without it, custom_path entries that point

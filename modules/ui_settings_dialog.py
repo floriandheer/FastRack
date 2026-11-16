@@ -1819,17 +1819,19 @@ class SettingsDialog:
         frame.columnconfigure(len(self._STARTUP_COLS), weight=1)
 
     def _startup_build_timing_controls(self, parent):
-        """Controls for the launcher's two desktop-switch delays plus
-        where it lands when done (StartupLauncher.ps1):
-          - line ~536 ``Start-Sleep -Milliseconds $T.BetweenDesktopsDelay``
-            — pause between each desktop while placing apps.
-          - line ~541 ``Start-Sleep -Milliseconds $T.FinalInitDelay`` then
-            ``Switch-Desktop`` to ``final_desktop`` — pause + which
-            desktop the launcher returns to once every app is placed
-            (used to be hardcoded to desktop 1).
-        All three bind the same way per-row app vars do (trace_add ->
-        write straight into self._startup_cfg) so the global Save button
-        picks them up with no extra sync step."""
+        """Launcher-wide controls (StartupLauncher.ps1):
+          - ``timing.min_window_wait_ms`` — how long the launcher keeps
+            watching for an app's window before giving up on it. Windows
+            are placed the moment they exist, so this is a bound, not a
+            delay.
+          - ``final_desktop`` — the desktop the launcher switches to once,
+            before launching; apps are moved from there to their own
+            desktop.
+        The fixed "between desktops" / "before returning" sleeps this
+        section used to edit no longer exist in the launcher.
+        Both bind the same way per-row app vars do (trace_add -> write
+        straight into self._startup_cfg) so the global Save button picks
+        them up with no extra sync step."""
         timing = self._startup_cfg.setdefault("timing", {})
         parent.columnconfigure(1, weight=1)
 
@@ -1862,28 +1864,17 @@ class SettingsDialog:
                 fg=COLORS["text_secondary"], bg=COLORS["bg_card"],
             ).pack(side=tk.LEFT, padx=(16, 0))
 
-        self._startup_between_desktops_var = tk.IntVar(
-            value=int(timing.get("between_desktops_delay_ms", 1500))
+        self._startup_min_wait_var = tk.IntVar(
+            value=int(timing.get("min_window_wait_ms", 30000))
         )
-        _bind(self._startup_between_desktops_var, self._startup_cfg["timing"],
-              "between_desktops_delay_ms", 0)
-        _row(0, "Between desktop switches",
-             "Pause after placing a desktop's apps",
+        _bind(self._startup_min_wait_var, self._startup_cfg["timing"],
+              "min_window_wait_ms", 1000)
+        _row(0, "Give up on a window after",
+             "Apps are placed as soon as their window exists; this only "
+             "bounds the wait",
              lambda p: ttk.Spinbox(
-                 p, from_=0, to=10000, increment=100, width=8,
-                 textvariable=self._startup_between_desktops_var),
-             unit="ms")
-
-        self._startup_final_delay_var = tk.IntVar(
-            value=int(timing.get("final_init_delay_ms", 15000))
-        )
-        _bind(self._startup_final_delay_var, self._startup_cfg["timing"],
-              "final_init_delay_ms", 0)
-        _row(1, "Before returning",
-             "Wait after the last app is placed",
-             lambda p: ttk.Spinbox(
-                 p, from_=0, to=60000, increment=500, width=8,
-                 textvariable=self._startup_final_delay_var),
+                 p, from_=1000, to=120000, increment=1000, width=8,
+                 textvariable=self._startup_min_wait_var),
              unit="ms")
 
         self._startup_final_desktop_var = tk.IntVar(
@@ -1891,8 +1882,8 @@ class SettingsDialog:
         )
         _bind(self._startup_final_desktop_var, self._startup_cfg,
               "final_desktop", 1)
-        _row(2, "Landing desktop",
-             "Desktop shown once everything is placed",
+        _row(1, "Landing desktop",
+             "Desktop you stay on while apps are sent to theirs",
              lambda p: ttk.Combobox(
                  p, textvariable=self._startup_final_desktop_var,
                  values=list(self._STARTUP_DESKTOP_CHOICES),
@@ -1945,9 +1936,9 @@ class SettingsDialog:
              COLORS["accent_dark"]).pack(side=tk.RIGHT)
         self._startup_task_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
-        # ----- Desktop transition timing -----
+        # ----- Window placement (wait bound + landing desktop) -----
         timing_frame = tk.LabelFrame(
-            parent, text=" Desktop Transition Timing ",
+            parent, text=" Window Placement ",
             font=font.Font(family="Segoe UI", size=11, weight="bold"),
             fg=COLORS["text_primary"], bg=COLORS["bg_card"],
             padx=15, pady=8,

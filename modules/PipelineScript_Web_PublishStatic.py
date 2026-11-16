@@ -8,6 +8,7 @@ Description: Upload Staatic exports to FTP via WinSCP, sync DokuWiki, and create
 """
 
 import os
+import re
 import sys
 import glob
 import json
@@ -22,7 +23,7 @@ from tkinter import ttk, messagebox, filedialog, scrolledtext
 from shared_window_icon import apply_category_icon
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from urllib.parse import quote
 
 # Setup logging using shared utility
@@ -232,6 +233,98 @@ class WebPublishConfig:
 
 
 # ====================================
+# BUILD FRESHNESS (VitePress sites)
+# ====================================
+
+BUILD_SCRIPT = "docs:build"
+
+# Folders under 02_Development that are not site source: dependencies, VCS,
+# editor state (Obsidian rewrites .obsidian/ just by being open), VitePress
+# caches/output, and the DokuWiki copy the publish itself downloads into
+# brainii/ (which would otherwise make every next publish look stale).
+SOURCE_SKIP_DIRS = {
+    "node_modules", ".git", ".claude", ".obsidian", ".temp", ".cache",
+    "cache", "dist", "dist-check", "__pycache__", "brainii",
+}
+
+# Ignore differences smaller than this (filesystem timestamp granularity).
+STALE_TOLERANCE_SECONDS = 2.0
+
+
+def find_build_dir(site_cfg: Dict) -> Optional[str]:
+    """Return the dev folder if the site is built with `npm run docs:build`
+    (VitePress), else None. WordPress/Staatic sites are exported from inside
+    WordPress and can't be rebuilt from here."""
+    if site_cfg.get("is_wordpress", False):
+        return None
+    dev_dir = site_cfg.get("dev_dir", "")
+    pkg = os.path.join(dev_dir, "package.json") if dev_dir else ""
+    if not pkg or not os.path.isfile(pkg):
+        return None
+    try:
+        with open(pkg, "r", encoding="utf-8") as f:
+            scripts = json.load(f).get("scripts") or {}
+    except Exception as e:
+        logger.warning(f"Could not parse {pkg}: {e}")
+        return None
+    return dev_dir if BUILD_SCRIPT in scripts else None
+
+
+def newest_source_change(dev_dir: str, exclude_dir: str = "") -> Tuple[float, str]:
+    """Return (mtime, path) of the most recently modified source file."""
+    exclude = os.path.normcase(os.path.abspath(exclude_dir)) if exclude_dir else ""
+    newest, newest_path = 0.0, ""
+    for dirpath, dirs, files in os.walk(dev_dir):
+        dirs[:] = [
+            d for d in dirs
+            if d not in SOURCE_SKIP_DIRS
+            and os.path.normcase(os.path.abspath(os.path.join(dirpath, d))) != exclude
+        ]
+        for name in files:
+            path = os.path.join(dirpath, name)
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            if mtime > newest:
+                newest, newest_path = mtime, path
+    return newest, newest_path
+
+
+def newest_export_file(export_dir: str) -> float:
+    newest = 0.0
+    if not os.path.isdir(export_dir):
+        return newest
+    for dirpath, _dirs, files in os.walk(export_dir):
+        for name in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(dirpath, name)))
+            except OSError:
+                pass
+    return newest
+
+
+def check_export_freshness(dev_dir: str, export_dir: str) -> Tuple[bool, str]:
+    """Return (is_stale, reason). Stale means the source was edited after the
+    last build finished writing the export (or there is no export at all)."""
+    if not os.path.isfile(os.path.join(export_dir, "index.html")):
+        return True, "there is no complete export yet"
+    built = newest_export_file(export_dir)
+    changed, changed_path = newest_source_change(dev_dir, exclude_dir=export_dir)
+    if changed > built + STALE_TOLERANCE_SECONDS:
+        rel = os.path.relpath(changed_path, dev_dir)
+        mins = (changed - built) / 60
+        when = f"{mins:.0f} min" if mins >= 1 else f"{changed - built:.0f} s"
+        return True, f"{rel} was edited {when} after the last build"
+    return False, "export is newer than every source file"
+
+
+def npm_build_command() -> List[str]:
+    npm = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+    return [npm, "run", BUILD_SCRIPT]
+
+
+# ====================================
 # WINSCP MANAGER
 # ====================================
 
@@ -369,32 +462,41 @@ class PublishWorkflow:
         self.has_dev = bool(self.site_cfg.get("dev_dir", "")
                            and os.path.isdir(self.site_cfg.get("dev_dir", "")))
         self.is_wordpress = self.site_cfg.get("is_wordpress", False)
+        self.build_dir = find_build_dir(self.site_cfg)
 
         # Callbacks: on_step_start(idx, name), on_step_done(idx, success),
         #            on_output(msg), on_complete(success, msg),
-        #            prompt_user(title, message, choices) -> str
+        #            ask_rebuild(reason) -> "build" | "skip" | "cancel"
+        #            (ask_rebuild runs on the Tk thread)
         self.cb = callbacks
 
         self._cancel = threading.Event()
 
-    def get_steps(self) -> List[str]:
-        if self.has_wiki:
-            steps = [
+    @staticmethod
+    def steps_for(site_cfg: Dict) -> List[str]:
+        has_dev = bool(site_cfg.get("dev_dir", "")
+                       and os.path.isdir(site_cfg.get("dev_dir", "")))
+        steps = ["Check build is up to date"] if find_build_dir(site_cfg) else []
+        if site_cfg.get("has_wiki", False):
+            steps += [
                 "Validate",
                 "FTP Upload (excl. wiki)",
                 "Sync wiki to local",
                 "Archive",
             ]
         else:
-            steps = [
+            steps += [
                 "Validate",
                 "FTP Upload",
                 "Archive",
             ]
-        if self.has_dev:
-            dev_label = "Dev Backup (WP + DB)" if self.is_wordpress else "Dev Backup"
-            steps.append(dev_label)
+        if has_dev:
+            is_wp = site_cfg.get("is_wordpress", False)
+            steps.append("Dev Backup (WP + DB)" if is_wp else "Dev Backup")
         return steps
+
+    def get_steps(self) -> List[str]:
+        return self.steps_for(self.site_cfg)
 
     def cancel(self):
         self._cancel.set()
@@ -425,11 +527,25 @@ class PublishWorkflow:
             logger.exception("Publish workflow failed")
             self._complete(False, f"Error: {e}")
 
+    def _run_build_check(self, steps: List[str]) -> Optional[int]:
+        """Run the optional build-freshness step. Returns the index of the
+        next step, or None if the publish should stop."""
+        if not self.build_dir:
+            return 0
+        self._step_start(0, steps[0])
+        ok = self._ensure_fresh_build()
+        self._step_done(0, ok)
+        if not ok or self._cancelled():
+            return None
+        return 1
+
     def _run_without_wiki(self):
         steps = self.get_steps()
-        step = 0
+        step = self._run_build_check(steps)
+        if step is None:
+            return
 
-        # Step 0: Validate
+        # Validate
         self._step_start(step, steps[step])
         ok = self._validate()
         self._step_done(step, ok)
@@ -465,9 +581,11 @@ class PublishWorkflow:
 
     def _run_with_wiki(self):
         steps = self.get_steps()
-        step = 0
+        step = self._run_build_check(steps)
+        if step is None:
+            return
 
-        # Step 0: Validate
+        # Validate
         self._step_start(step, steps[step])
         ok = self._validate()
         self._step_done(step, ok)
@@ -510,6 +628,76 @@ class PublishWorkflow:
         self._complete(True, "Publish completed successfully!")
 
     # ---- Individual Steps ----
+
+    def _ask_rebuild(self, reason: str) -> str:
+        """Ask the user (on the Tk thread) whether to build first."""
+        ask = self.cb.get("ask_rebuild")
+        if not ask:
+            return "build"
+        result = {}
+        done = threading.Event()
+
+        def _show():
+            try:
+                result["choice"] = ask(reason)
+            finally:
+                done.set()
+
+        self.root.after(0, _show)
+        done.wait()
+        return result.get("choice", "cancel")
+
+    def _ensure_fresh_build(self) -> bool:
+        export_dir = self.site_cfg.get("export_dir", "")
+        stale, reason = check_export_freshness(self.build_dir, export_dir)
+        if not stale:
+            self._output(f"Build is up to date ({reason})")
+            return True
+
+        self._output(f"Build looks outdated: {reason}")
+        choice = self._ask_rebuild(reason)
+        if choice == "skip":
+            self._output("Publishing the existing export without rebuilding")
+            return True
+        if choice != "build":
+            self._output("Publish cancelled")
+            self._complete(False, "Publish cancelled")
+            return False
+        return self._run_build()
+
+    def _run_build(self) -> bool:
+        # npm misbehaves on the subst work drive (symlinks in node_modules),
+        # so build from the underlying real path like the Build button does.
+        try:
+            cwd = get_rack_settings().to_active_base_path(self.build_dir)
+        except Exception:
+            cwd = self.build_dir
+        cmd = npm_build_command()
+        self._output(f"Running: npm run {BUILD_SCRIPT}  (in {cwd})")
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            process = subprocess.Popen(
+                cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                creationflags=flags,
+            )
+        except OSError as e:
+            self._output(f"Could not start npm: {e}")
+            self._complete(False, "Build failed: npm not found")
+            return False
+
+        ansi = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+        for line in iter(process.stdout.readline, ""):
+            line = ansi.sub("", line).rstrip()
+            if line:
+                self._output(f"  {line}")
+        code = process.wait()
+        if code != 0:
+            self._output(f"Build failed (exit code {code}) - nothing was uploaded")
+            self._complete(False, f"Build failed (exit code {code})")
+            return False
+        self._output("Build finished")
+        return True
 
     def _validate(self) -> bool:
         export_dir = self.site_cfg.get("export_dir", "")
@@ -1286,24 +1474,7 @@ class PublishStaticUI:
             w.destroy()
         self.step_labels = []
 
-        cfg = self.config.get_site_config(site_key)
-        has_wiki = cfg.get("has_wiki", False)
-        has_dev = bool(cfg.get("dev_dir", "")
-                       and os.path.isdir(cfg.get("dev_dir", "")))
-        is_wordpress = cfg.get("is_wordpress", False)
-
-        if has_wiki:
-            steps = [
-                "Validate",
-                "FTP Upload (excl. wiki)",
-                "Sync wiki to local",
-                "Archive",
-            ]
-        else:
-            steps = ["Validate", "FTP Upload", "Archive"]
-        if has_dev:
-            dev_label = "Dev Backup (WP + DB)" if is_wordpress else "Dev Backup"
-            steps.append(dev_label)
+        steps = PublishWorkflow.steps_for(self.config.get_site_config(site_key))
 
         colors = FORM_COLORS
         for i, step in enumerate(steps):
@@ -1380,6 +1551,7 @@ class PublishStaticUI:
             "on_step_done": self._on_step_done,
             "on_output": lambda msg: self._append_output(msg),
             "on_complete": self._on_complete,
+            "ask_rebuild": self._ask_rebuild,
         }
 
         self.workflow = PublishWorkflow(
@@ -1388,6 +1560,19 @@ class PublishStaticUI:
 
         thread = threading.Thread(target=self.workflow.run, daemon=True)
         thread.start()
+
+    def _ask_rebuild(self, reason: str) -> str:
+        answer = messagebox.askyesnocancel(
+            "Build outdated",
+            f"The export looks older than your latest changes:\n{reason}.\n\n"
+            "Yes - build first, then publish\n"
+            "No - publish the existing export\n"
+            "Cancel - stop",
+            parent=self.root,
+        )
+        if answer is None:
+            return "cancel"
+        return "build" if answer else "skip"
 
     def _on_step_start(self, idx: int, name: str):
         if idx < len(self.step_labels):
