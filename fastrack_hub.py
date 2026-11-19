@@ -56,7 +56,7 @@ from rack_settings import get_rack_settings, join_native_path
 from shared_open_path import open_path
 from shared_scrollable_frame import ScrollableFrame
 
-from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button
+from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button, run_without_flicker
 from ui_pipeline_categories import (
     APP_NAME, APP_VERSION, LOGO_PATH,
     CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES
@@ -545,45 +545,33 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self._left_panel_collapsed = False
 
         # Collapsed state: the sidebar shrinks to this thin rail, clickable
-        # anywhere, which brings it back (see toggle_left_panel).
+        # anywhere, which brings it back (see toggle_left_panel). Glyph font
+        # and offsets mirror the tracker's Selected Project panel, so the
+        # two side panels' handles sit at the same height.
+        glyph_font = ("Arial", 13)
         self.left_rail = tk.Frame(left_panel_container, bg=COLORS["bg_card"])
         expand_glyph = tk.Label(self.left_rail, text="»", bg=COLORS["bg_card"],
-                                fg=COLORS["text_secondary"], font=("Segoe UI", 13))
-        expand_glyph.pack(fill=tk.X, pady=(9, 0))
+                                fg=COLORS["text_secondary"], font=glyph_font)
+        expand_glyph.pack(fill=tk.X, pady=(6, 0))
         self._bind_left_panel_toggle(expand_glyph, self.left_rail, expand_glyph)
 
-        # Keyboard-focus indicator for the right-hand area (project tracker /
-        # sandbox browser). A real layout slot between the two columns rather
-        # than an overlay on the panel: those panels are created lazily and
-        # fill their frame, so an overlay gets buried under them. Must be
-        # packed before any right-hand panel so it always keeps its width.
-        # (12 + 3 = the 15px gap this column used to have on its own.)
-        self.right_focus_strip = tk.Frame(main_container, bg=COLORS["bg_primary"], width=3)
-        self.right_focus_strip.pack(side=tk.LEFT, fill=tk.Y)
+        # Expanded state: a fixed header (like the Selected Project panel's)
+        # above the scrolling body.
+        self.left_content = tk.Frame(left_panel_container, bg=COLORS["bg_card"])
+        self.left_content.pack(fill=tk.BOTH, expand=True)
 
-        # Scrollable left panel. The scrollbar stays visible (rather than
-        # relying on mouse-wheel/trackpad scrolling alone) so the Tools
-        # section is always reachable even when the sidebar's content is
-        # taller than the window — mouse-wheel scroll still works too.
-        self.left_scroll = ScrollableFrame(left_panel_container, bg=COLORS["bg_card"],
-                                           scrollbar_style="Vertical.TScrollbar")
-        self.left_scroll.pack(fill=tk.BOTH, expand=True)
-        left_panel = self.left_scroll.get_frame()
+        # Header row: the collapse handle on the LEFT, the side the sidebar
+        # collapses into, in a cell exactly as wide as the rail, so the
+        # handle stays put when toggling. Then "CATEGORIES" (click: show all).
+        cat_header_row = tk.Frame(self.left_content, bg=COLORS["bg_card"])
+        cat_header_row.pack(fill=tk.X, pady=(6, 0))
 
-        # ═══════════════════════════════════════════════════════════
-        # CATEGORIES SECTION (includes scope toggles)
-        # ═══════════════════════════════════════════════════════════
-        self.categories_section = tk.Frame(left_panel, bg=COLORS["bg_card"])
-        self.categories_section.pack(fill=tk.X, padx=15, pady=(15, 10))
-
-        # Header row: "CATEGORIES" (clickable to show all) on the left, the
-        # sidebar's collapse handle on the right.
-        cat_header_row = tk.Frame(self.categories_section, bg=COLORS["bg_card"])
-        cat_header_row.pack(fill=tk.X, pady=(0, 8))
-
+        self._left_glyph_pixel = tk.PhotoImage(width=1, height=1)
         collapse_glyph = tk.Label(cat_header_row, text="«", bg=COLORS["bg_card"],
-                                  fg=COLORS["text_secondary"], font=("Segoe UI", 13), padx=6)
-        collapse_glyph.pack(side=tk.RIGHT)
+                                  fg=COLORS["text_secondary"], font=glyph_font,
+                                  image=self._left_glyph_pixel, compound="center",
+                                  width=self.LEFT_RAIL_WIDTH, padx=0)
+        collapse_glyph.pack(side=tk.LEFT)
         self._bind_left_panel_toggle(collapse_glyph, collapse_glyph)
 
         cat_header = tk.Label(
@@ -598,6 +586,35 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         cat_header.bind("<Button-1>", lambda e: self._clear_category_selection())
         cat_header.bind("<Enter>", lambda e: cat_header.configure(fg=COLORS["accent"]))
         cat_header.bind("<Leave>", lambda e: cat_header.configure(fg=COLORS["text_secondary"]))
+
+        # Keyboard-focus indicator for the right-hand area (project tracker /
+        # sandbox browser). A real layout slot between the two columns rather
+        # than an overlay on the panel: those panels are created lazily and
+        # fill their frame, so an overlay gets buried under them. Must be
+        # packed before any right-hand panel so it always keeps its width.
+        # (12 + 3 = the 15px gap this column used to have on its own.)
+        self.right_focus_strip = tk.Frame(main_container, bg=COLORS["bg_primary"], width=3)
+        self.right_focus_strip.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Scrollable left panel. Whenever the sidebar's content is taller
+        # than the window, the scrollbar shows (rather than relying on
+        # mouse-wheel/trackpad scrolling alone) so the Tools section is
+        # always reachable — mouse-wheel scroll still works too.
+        self.left_scroll = ScrollableFrame(self.left_content, bg=COLORS["bg_card"],
+                                           scrollbar_style="Vertical.TScrollbar")
+        self.left_scroll.pack(fill=tk.BOTH, expand=True)
+        left_panel = self.left_scroll.get_frame()
+        # Like the Selected Project panel, the scrollbar only shows while
+        # the content is taller than the sidebar.
+        self._left_scrollbar_shown = True
+        left_panel.bind("<Configure>", self._sync_left_scrollbar, add="+")
+        self.left_scroll.canvas.bind("<Configure>", self._sync_left_scrollbar, add="+")
+
+        # ═══════════════════════════════════════════════════════════
+        # CATEGORIES SECTION (includes scope toggles)
+        # ═══════════════════════════════════════════════════════════
+        self.categories_section = tk.Frame(left_panel, bg=COLORS["bg_card"])
+        self.categories_section.pack(fill=tk.X, padx=15, pady=(8, 10))
 
         # Scope toggles (Personal / Work) now live in the project tracker's
         # controls row, since they filter projects, not category tools. The
@@ -801,7 +818,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
     def _set_left_panel_collapsed(self, collapsed, save=True):
         self._left_panel_collapsed = bool(collapsed)
         if self._left_panel_collapsed:
-            self.left_scroll.pack_forget()
+            self.left_content.pack_forget()
             self.left_rail.pack(fill=tk.BOTH, expand=True)
             self.left_panel_container.configure(width=self.LEFT_RAIL_WIDTH)
             # Keyboard focus can't stay on a panel that is no longer shown.
@@ -812,15 +829,33 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 self._focus_tracker_widget()
         else:
             self.left_rail.pack_forget()
-            self.left_scroll.pack(fill=tk.BOTH, expand=True)
+            self.left_content.pack(fill=tk.BOTH, expand=True)
             self.left_panel_container.configure(width=self._sidebar_width)
         if save:
             self.config_manager.config["left_panel_collapsed"] = self._left_panel_collapsed
             self.config_manager._save_config()
 
+    def _sync_left_scrollbar(self, _event=None):
+        """Show the sidebar's scrollbar only while its content overflows."""
+        scroll = self.left_scroll
+        if scroll.scrollbar is None:
+            return
+        view_height = scroll.canvas.winfo_height()
+        if view_height <= 1:  # not laid out yet
+            return
+        needed = scroll.scrollable_frame.winfo_reqheight() > view_height
+        if needed == self._left_scrollbar_shown:
+            return
+        self._left_scrollbar_shown = needed
+        if needed:
+            scroll.scrollbar.pack(side="right", fill="y", before=scroll.canvas)
+        else:
+            scroll.scrollbar.pack_forget()
+            scroll.canvas.yview_moveto(0)
+
     def toggle_left_panel(self):
         """Collapse the categories/tools sidebar to a thin rail, or bring it back (Q)."""
-        self._set_left_panel_collapsed(not self._left_panel_collapsed)
+        run_without_flicker(self.root, lambda: self._set_left_panel_collapsed(not self._left_panel_collapsed))
 
     def toggle_details_panel(self):
         """Collapse/expand the tracker's Selected Project side panel (E)."""
@@ -831,7 +866,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
     def _expand_left_panel_if_focused(self):
         """WASD moved keyboard focus into the sidebar: make sure it is visible."""
         if self._left_panel_collapsed and self.focused_panel in self.LEFT_PANEL_ORDER:
-            self._set_left_panel_collapsed(False)
+            run_without_flicker(self.root, lambda: self._set_left_panel_collapsed(False))
 
     def _nav_panel_up(self):
         super()._nav_panel_up()

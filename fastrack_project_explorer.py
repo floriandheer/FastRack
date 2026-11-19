@@ -43,7 +43,7 @@ from pipeline_categories import (
     kind_style,
 )
 from ui_pipeline_categories import PIPELINE_CATEGORIES
-from ui_theme import make_flat_button
+from ui_theme import make_flat_button, make_icon_button, run_without_flicker
 from ui_project_deck import ProjectDeckWindow
 from invoice_manager.wc_monitor import sanitize_filename
 from invoice_manager.order_project_linker import (
@@ -1424,7 +1424,10 @@ class ProjectTrackerApp:
         # Two columns: the project list (takes all spare width) and, to its
         # right, the collapsible Selected Project side panel.
         outer = tk.Frame(parent, bg="#0d1117", highlightthickness=0, bd=0)
-        outer.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(0, 5), pady=5)
+        # Embedded in the hub, the hub already keeps the window margin; the
+        # side panel then lines up edge-for-edge with the hub's sidebar.
+        outer_pad = dict(padx=0, pady=0) if self.embedded else dict(padx=(0, 5), pady=5)
+        outer.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, **outer_pad)
         self.tracker_outer = outer
 
         # The side panel is created (and packed) before the list column: pack
@@ -1433,7 +1436,7 @@ class ProjectTrackerApp:
         self.details_frame = tk.Frame(outer, bg=self.DETAILS_BG, width=self.DETAILS_MIN_WIDTH,
                                       highlightthickness=0, bd=0)
         self.details_frame.pack_propagate(False)
-        self.details_frame.pack(**self._DETAILS_PACK)
+        self.details_frame.pack(**self._details_pack())
 
         right_frame = tk.Frame(outer, bg="#0d1117", highlightthickness=0, bd=0)
         right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1938,7 +1941,13 @@ class ProjectTrackerApp:
     DETAILS_WIDTH_FRACTION = 0.26
     DETAILS_RAIL_WIDTH = 34   # collapsed: just the expand handle
     _DETAILS_PAD = 14
-    _DETAILS_PACK = dict(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=10)
+
+    def _details_pack(self):
+        """Pack options for the side panel: flush with the tracker's edges
+        when embedded (matching the hub's sidebar), inset when standalone."""
+        if self.embedded:
+            return dict(side=tk.RIGHT, fill=tk.Y, padx=0, pady=0)
+        return dict(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=10)
 
     def _build_details_panel(self):
         """Build the collapsible Selected Project panel inside details_frame.
@@ -2123,12 +2132,10 @@ class ProjectTrackerApp:
 
         self._details_section_pack = dict(fill=tk.X, padx=pad, pady=(14, 0))
 
-        def side_button(parent, text, command):
-            return make_flat_button(
-                parent, text, command,
-                bg="#262c36", fg="white", hover_bg="#30363d", font=("Arial", 9),
-                state=tk.DISABLED, anchor="w", padx=12, pady=6,
-            )
+        def side_button(parent, icon, text, command):
+            return self._details_button(parent, icon, text, command,
+                                        bg="#262c36", hover_bg="#30363d",
+                                        state=tk.DISABLED)
 
         # --- Paths: caption above a clickable, wrapping value ---
         paths = add_section("PATHS")
@@ -2195,9 +2202,9 @@ class ProjectTrackerApp:
         documents = add_section("DOCUMENTS")
         documents.pack(**self._details_section_pack)
 
-        self.project_details_btn = side_button(documents, "📄 Project Details", self._open_project_details)
-        self.order_details_btn = side_button(documents, "🧾 Order Details", self._open_order_details)
-        self.invoice_btn = side_button(documents, "💳 Invoice", self._open_invoice)
+        self.project_details_btn = side_button(documents, "📄", "Project Details", self._open_project_details)
+        self.order_details_btn = side_button(documents, "🧾", "Order Details", self._open_order_details)
+        self.invoice_btn = side_button(documents, "💳", "Invoice", self._open_invoice)
 
         # --- Actions: project-context scripts ---
         # Populated in _populate_actions_section from the selected project's
@@ -2212,14 +2219,14 @@ class ProjectTrackerApp:
         self.manage_frame = add_section("MANAGE")
         self.manage_frame.pack(**self._details_section_pack)
 
-        self.rename_btn = side_button(self.manage_frame, "✏️ Rename", self._rename_project)
-        self.archive_btn = side_button(self.manage_frame, "📦 Archive", self._archive_project)
-        self.unarchive_btn = side_button(self.manage_frame, "📤 Un-Archive", self._unarchive_project)
-        self.promote_btn = side_button(self.manage_frame, "🚀 Promote to Active", self._promote_project)
+        self.rename_btn = side_button(self.manage_frame, "✏️", "Rename", self._rename_project)
+        self.archive_btn = side_button(self.manage_frame, "📦", "Archive", self._archive_project)
+        self.unarchive_btn = side_button(self.manage_frame, "📤", "Un-Archive", self._unarchive_project)
+        self.promote_btn = side_button(self.manage_frame, "🚀", "Promote to Active", self._promote_project)
         # Append a timestamped, project-tagged entry to the category-level
         # notes/<category>_notes.txt scratchpad. Per-project notes still live
         # in the project DB; this button is for the running category log.
-        self.log_note_btn = side_button(self.manage_frame, "📝 Log to Notes", self._log_to_category_notes)
+        self.log_note_btn = side_button(self.manage_frame, "📝", "Log to Notes", self._log_to_category_notes)
 
         tk.Frame(sections, bg=bg, height=pad).pack(fill=tk.X)  # bottom breathing room
 
@@ -2228,6 +2235,17 @@ class ProjectTrackerApp:
         self.tracker_outer.bind("<Configure>", self._on_tracker_outer_resize, add="+")
 
     _DETAILS_ROW_PACK = dict(fill=tk.X, pady=(0, 6))
+
+    @staticmethod
+    def _details_button(parent, icon, text, command, bg, hover_bg=None, state=tk.NORMAL):
+        """One row button of the side panel (Documents / Actions / Manage).
+        Every one goes through here so icons sit in the same fixed-width
+        column and all labels start at the same x, whatever the emoji."""
+        return make_icon_button(
+            parent, icon, text, command,
+            bg=bg, fg="white", hover_bg=hover_bg, font=("Arial", 9),
+            padx=10, pady=5, icon_width=20, gap=6, state=state,
+        )
 
     @staticmethod
     def _stack_buttons(buttons):
@@ -2298,11 +2316,12 @@ class ProjectTrackerApp:
 
     def toggle_details_panel(self):
         """Collapse the Selected Project panel to a thin rail, or bring it back."""
-        self._set_details_collapsed(not self._details_collapsed)
+        run_without_flicker(self.details_frame,
+                            lambda: self._set_details_collapsed(not self._details_collapsed))
 
     def _show_details_panel(self):
         """Re-pack the side panel after it was hidden for a creation form."""
-        self.details_frame.pack(before=self.right_frame, **self._DETAILS_PACK)
+        self.details_frame.pack(before=self.right_frame, **self._details_pack())
 
     def _create_fab_button(self):
         """Create the floating action button for project creation."""
@@ -4047,21 +4066,19 @@ class ProjectTrackerApp:
 
         for category_key, script_key, subcat_key, script_data in actions:
             color = category_color(category_key.capitalize()) or "#238636"
-            label = f"{script_data.get('icon', '')} {script_data.get('name', script_key)}".strip()
-            btn = make_flat_button(
-                self.actions_container, label,
+            btn = self._details_button(
+                self.actions_container, script_data.get("icon", ""),
+                script_data.get("name", script_key),
                 lambda sd=script_data: self._run_project_action(sd),
-                bg=color, fg="white", font=("Arial", 9),
-                padx=15, pady=6, anchor="w",
+                bg=color,
             )
             btn.pack(side=tk.TOP, fill=tk.X, pady=2)
             self._action_buttons.append(btn)
 
         if show_website_btn:
-            website_btn = make_flat_button(
-                self.actions_container, "🌐 Visit Website", self._open_website,
-                bg="#ea580c", fg="white", font=("Arial", 9),
-                padx=15, pady=6, anchor="w",
+            website_btn = self._details_button(
+                self.actions_container, "🌐", "Visit Website", self._open_website,
+                bg="#ea580c",
             )
             website_btn.pack(side=tk.TOP, fill=tk.X, pady=2)
             self._action_buttons.append(website_btn)
