@@ -368,7 +368,7 @@ class GenericFolderStructureCreator(FormKeyboardMixin):
             root.bind("<S>", self._on_s_key)
 
     def _on_s_key(self, event):
-        if self._in_text_field:
+        if self._is_typing_in_text_field(event):
             return
         if self.sandbox_var is not None:
             self.sandbox_var.set(not self.sandbox_var.get())

@@ -138,19 +138,19 @@ class PhysicalExtension(FolderStructureExtension):
         root.bind("<J>", self._on_j)
 
     def _on_o(self, event):
-        if getattr(self.creator, '_in_text_field', False):
+        if self.creator._is_typing_in_text_field(event):
             return
         self._toggle_type('order')
         return "break"
 
     def _on_d(self, event):
-        if getattr(self.creator, '_in_text_field', False):
+        if self.creator._is_typing_in_text_field(event):
             return
         self._toggle_type('product')
         return "break"
 
     def _on_j(self, event):
-        if getattr(self.creator, '_in_text_field', False):
+        if self.creator._is_typing_in_text_field(event):
             return
         self._toggle_type('project')
         return "break"

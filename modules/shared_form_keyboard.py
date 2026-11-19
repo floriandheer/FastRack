@@ -175,7 +175,7 @@ class FormKeyboardMixin:
     def _on_p_key(self, event):
         """Handle P key to toggle Personal checkbox."""
         # Don't toggle if we're in a text field
-        if hasattr(self, '_in_text_field') and self._in_text_field:
+        if self._is_typing_in_text_field(event):
             return
 
         # Toggle personal checkbox
@@ -187,6 +187,28 @@ class FormKeyboardMixin:
                 self.toggle_personal()
 
         return "break"
+
+    _TEXT_INPUT_CLASSES = {"Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"}
+
+    def _is_typing_in_text_field(self, event=None) -> bool:
+        """True when the keystroke is going into an editable text widget.
+
+        Checks the widget that actually holds focus rather than relying on
+        FocusIn/FocusOut tracking, which misses entries nested inside
+        composite widgets (e.g. the client AutocompleteEntry frame).
+        """
+        widget = getattr(event, "widget", None) if event is not None else None
+        if not isinstance(widget, tk.Misc):
+            try:
+                widget = self.parent.focus_get()
+            except (tk.TclError, KeyError, AttributeError):
+                widget = None
+        if widget is None:
+            return bool(getattr(self, "_in_text_field", False))
+        try:
+            return widget.winfo_class() in self._TEXT_INPUT_CLASSES
+        except tk.TclError:
+            return False
 
     def _on_focus_in(self, event):
         """Track when focus enters a text field."""
