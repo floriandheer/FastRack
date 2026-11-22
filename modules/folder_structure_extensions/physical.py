@@ -35,6 +35,8 @@ class PhysicalExtension(FolderStructureExtension):
         self.printer_var = None
         self.preproduction_var = None
         self.library_var = None
+        self.library_check = None
+        self._library_backup = None  # user's _LIBRARY choice while Order forces it on
         self._client_backup = ""
         self._base_dir_backup = ""
 
@@ -107,10 +109,11 @@ class PhysicalExtension(FolderStructureExtension):
         ).pack(side=tk.LEFT, padx=(0, 10))
 
         self.library_var = tk.BooleanVar(value=False)
-        create_styled_checkbox(
+        self.library_check = create_styled_checkbox(
             parent_frame, text="_LIBRARY", variable=self.library_var,
             command=c.update_preview,
-        ).pack(side=tk.LEFT)
+        )
+        self.library_check.pack(side=tk.LEFT)
 
         # Wire previews
         for var in (self.personal_var, self.order_var, self.product_var, self.project_var,
@@ -186,6 +189,8 @@ class PhysicalExtension(FolderStructureExtension):
             self._client_backup = c.client_name_var.get() if c.client_name_var else ""
             self._base_dir_backup = c.base_dir_var.get()
 
+        self._sync_order_library()
+
         physical_base = c.settings.get_work_path("Physical").replace('\\', '/')
         if self.personal_var.get():
             if c.client_name_var: c.client_name_var.set("Personal")
@@ -209,6 +214,27 @@ class PhysicalExtension(FolderStructureExtension):
             self._base_dir_backup = ""
 
         c.update_preview()
+
+    def _sync_order_library(self):
+        """WooCommerce orders always get a _LIBRARY (order details, invoice
+        links live there): tick and lock the toggle while Order is selected,
+        and give back the user's own choice when they switch away."""
+        if self.library_var is None:
+            return
+        is_order = bool(self.order_var and self.order_var.get())
+        if is_order and self._library_backup is None:
+            self._library_backup = self.library_var.get()
+            self.library_var.set(True)
+        elif not is_order and self._library_backup is not None:
+            self.library_var.set(self._library_backup)
+            self._library_backup = None
+        if self.library_check is not None:
+            self.library_check.configure(state=tk.DISABLED if is_order else tk.NORMAL)
+
+    def _library_included(self):
+        if self.order_var is not None and self.order_var.get():
+            return True
+        return bool(self.library_var and self.library_var.get())
 
     # ---- naming + routing ----
 
@@ -236,7 +262,7 @@ class PhysicalExtension(FolderStructureExtension):
         active = get_active_software(c.software_chips) if c.software_chips else {}
         return {
             'preproduction': self.preproduction_var.get() if self.preproduction_var else False,
-            'library': self.library_var.get() if self.library_var else False,
+            'library': self._library_included(),
             'houdini': 'Houdini' in active,
             'blender': 'Blender' in active,
             'freecad': 'FreeCAD' in active,
@@ -276,7 +302,7 @@ class PhysicalExtension(FolderStructureExtension):
             "PROJECT STRUCTURE",
             "======================",
             "Preproduction folder " + ("included" if self.preproduction_var and self.preproduction_var.get() else "not included"),
-            "_LIBRARY folder " + ("included" if self.library_var and self.library_var.get() else "not included"),
+            "_LIBRARY folder " + ("included" if self._library_included() else "not included"),
             "",
         ])
 

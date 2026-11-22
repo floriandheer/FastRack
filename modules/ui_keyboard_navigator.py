@@ -639,6 +639,8 @@ class KeyboardNavigatorMixin:
             # Tools + folder + notes - darken focused item background
             for idx, tool in enumerate(self.tool_buttons):
                 if idx == self.tools_focus_index:
+                    if hasattr(self, "_scroll_tool_into_view"):
+                        self._scroll_tool_into_view(tool["name_chip"])
                     tool["name_chip"].configure(bg=COLORS["bg_hover"])
                     tool["icon_label"].configure(bg=COLORS["bg_hover"])
                     tool["name_label"].configure(bg=COLORS["bg_hover"])

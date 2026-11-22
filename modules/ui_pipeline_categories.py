@@ -43,7 +43,7 @@ DEFAULT_CONFIG_PATH = str(get_appdata_path() / "config.json")
 def _resolve_folder_path(category_name: str, work_path_key) -> str:
     """Build folder_path for a category. Business uses the _LIBRARY drive root,
     Sandbox uses the _Sandbox drive root (same root the Sandbox Browser panel
-    shows), Global has no folder, others use settings.get_work_path(work_path_key)."""
+    shows), tools-only categories (Data) have no folder, others use settings.get_work_path(work_path_key)."""
     if category_name == "Business":
         return join_native_path(get_rack_settings().get_work_drive(), "_LIBRARY")
     if category_name == "Sandbox":
@@ -90,6 +90,7 @@ def _build_menu_entry(category_name: str, cat: Dict[str, Any]) -> Dict[str, Any]
             "name": sub.get("display_name", sub_key),
             "icon": sub.get("emoji", ""),
             "scripts": _scripts_dict(sub.get("scripts", [])),
+            "tools_header": sub.get("tools_header", False),
         }
 
     entry: Dict[str, Any] = {

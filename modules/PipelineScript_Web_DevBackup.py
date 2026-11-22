@@ -21,7 +21,8 @@ import threading
 import subprocess
 import tempfile
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
+from tkinter import ttk, messagebox, filedialog
+from shared_scrollbar_style import CleanScrolledText
 from shared_window_icon import apply_category_icon
 from datetime import datetime
 from pathlib import Path
@@ -1032,7 +1033,7 @@ class DevBackupUI:
         # Output log
         of = tk.Frame(self.root, bg=c["bg"])
         of.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 5))
-        self.output = scrolledtext.ScrolledText(
+        self.output = CleanScrolledText(
             of, wrap=tk.WORD, bg="#0d1117", fg=c["fg"],
             font=("Consolas", 9), insertbackground=c["fg"],
             relief=tk.FLAT, state=tk.DISABLED, height=10)

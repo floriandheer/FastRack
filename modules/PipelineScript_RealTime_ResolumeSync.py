@@ -29,7 +29,8 @@ import subprocess
 import threading
 import datetime
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
+from tkinter import ttk, messagebox, filedialog
+from shared_scrollbar_style import CleanScrolledText
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Callable
 
@@ -430,7 +431,7 @@ class ResolumeSyncUI:
                                   fg=COLORS["fg_dim"], font=("Arial", 9))
         log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 5))
 
-        self.log = scrolledtext.ScrolledText(
+        self.log = CleanScrolledText(
             log_frame, wrap=tk.WORD, bg="#0d1117", fg=COLORS["fg"],
             font=("Consolas", 9), insertbackground=COLORS["fg"],
             relief=tk.FLAT, state=tk.DISABLED, height=14,

@@ -12,7 +12,8 @@ import shutil
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
+from shared_scrollbar_style import CleanScrolledText
 from shared_window_icon import apply_category_icon
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -615,7 +616,7 @@ class LaragonManagerUI:
         output_frame = tk.Frame(self.root, bg=colors["bg"])
         output_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 5))
 
-        self.output_text = scrolledtext.ScrolledText(
+        self.output_text = CleanScrolledText(
             output_frame, wrap=tk.WORD, bg="#0d1117", fg=colors["fg"],
             font=("Consolas", 9), insertbackground=colors["fg"],
             relief=tk.FLAT, state=tk.DISABLED, height=8

@@ -141,12 +141,10 @@ def install_styles(root: tk.Misc, *, set_theme: bool = True) -> None:
         fieldbackground=[("readonly", C["bg_input"])],
     )
 
-    # Scrollbar
-    style.configure(
-        "InvApp.Vertical.TScrollbar",
-        background=C["bg_input"], troughcolor=C["bg"],
-        borderwidth=0, arrowcolor=C["text"],
-    )
+    # Scrollbar: the shared flat look, trough matching this app's background
+    from shared_scrollbar_style import apply_clean_scrollbars
+    apply_clean_scrollbars(root)
+    style.configure("InvApp.Vertical.TScrollbar", troughcolor=C["bg"], bordercolor=C["bg"])
 
     # Separator
     style.configure("InvApp.TSeparator", background=C["card_border"])

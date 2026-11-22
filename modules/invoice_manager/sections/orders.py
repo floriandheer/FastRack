@@ -13,7 +13,8 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, scrolledtext, simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk
+from shared_scrollbar_style import CleanScrolledText
 from typing import Dict, List, Optional
 
 from shared_logging import get_logger
@@ -155,7 +156,7 @@ class OrdersSection(Section):
         # ----- Activity log -----
         log_card = Card(wrap, title="Activity log")
         log_card.pack(fill="x", pady=(12, 0))
-        self._log = scrolledtext.ScrolledText(
+        self._log = CleanScrolledText(
             log_card.body, height=6, wrap=tk.WORD,
             bg=C["bg_input"], fg=C["text"],
             insertbackground=C["text"], relief=tk.FLAT, font=FONTS["mono"],
@@ -412,12 +413,12 @@ class OrdersSection(Section):
             except Exception as e:
                 self._on_status_update(f"Could not create folder: {e}", "error")
                 return
-        # Invoices live in _LIBRARY, next to Order Details, under one
+        # Invoices live in _LIBRARY (always present for orders), next to Order Details, under one
         # canonical name — matches resolve_or_fetch_invoice's convention
         # (order_project_linker.py) so there's a single local copy per
         # order rather than a differently-named duplicate each time.
-        library_dir = order_folder / "_LIBRARY"
-        library_dir.mkdir(parents=True, exist_ok=True)
+        from shared_project_docs import ensure_library_dir
+        library_dir = ensure_library_dir(order_folder)
         invoice_path = library_dir / f"Invoice_{order_number}.pdf"
         if invoice_path.exists():
             self.state.resolve_pdf_open(invoice_path)

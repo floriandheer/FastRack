@@ -54,6 +54,7 @@ from shared_color_button import make_toggle_button
 from shared_scrollable_frame import (
     ScrollableFrame, safe_bind_touchpad_scroll, scroll_canvas_if_room, touchpad_scroll_units,
 )
+from shared_scrollbar_style import apply_clean_scrollbars
 
 # Module name for logging (must match setup_logging call)
 MODULE_NAME = "project_tracker"
@@ -1780,12 +1781,8 @@ class ProjectTrackerApp:
         except:
             pass
 
-        # Style scrollbars to be dark
-        self.tree_style.configure("Vertical.TScrollbar",
-                       background="#1c2128",
-                       troughcolor="#0d1117",
-                       bordercolor="#0d1117",
-                       arrowcolor="#8b949e")
+        # Shared flat scrollbar look (same as the Sandbox browser's)
+        apply_clean_scrollbars()
 
         # Base row height and font size (scaled later)
         self.base_row_height = 32
@@ -2001,8 +1998,7 @@ class ProjectTrackerApp:
 
         # Scrollable body; its scrollbar only appears when the content is
         # taller than the panel (see _sync_details_scrollbar).
-        self.details_scroll = ScrollableFrame(self.details_content, bg=bg,
-                                              scrollbar_style="Vertical.TScrollbar")
+        self.details_scroll = ScrollableFrame(self.details_content, bg=bg)
         self.details_scroll.pack(fill=tk.BOTH, expand=True)
         self._details_scrollbar_shown = True
         body = self.details_scroll.get_frame()
@@ -2195,7 +2191,7 @@ class ProjectTrackerApp:
         website_frame.pack(**self._DETAILS_ROW_PACK)
 
         # --- Documents ---
-        # Project Details lives in _LIBRARY for any category, so it is always
+        # Every category has Project Details (in _LIBRARY, or the root without one), so it is always
         # listed (disabled until a details file exists). Order Details /
         # Invoice only exist once a project is linked to a WooCommerce order
         # (Physical), so they are hidden for every other project.

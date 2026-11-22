@@ -11,7 +11,7 @@ to know about a category and its subtypes:
       description          — one-line description shown in some menus
       work_path_key        — argument for settings.get_work_path() / None
       category_scripts     — script entries shown at the category level in menus
-      subtypes             — {key: subtype_dict}; empty for Business / Global
+      subtypes             — {key: subtype_dict}; empty for Data / Sandbox
 
   Script-level fields (entries inside category_scripts / subtype.scripts):
       key, name, module|url, description, icon
@@ -29,7 +29,8 @@ to know about a category and its subtypes:
                              schema doesn't capture (e.g. wordpress vs static).
 
   Subtype-level fields (keys that may be present on each subtype):
-      display_name, emoji, description, scripts (menu items)
+      display_name, emoji, description, scripts (menu items),
+      tools_header (show the subtype's tools under its own header in the hub),
       title, tree_template, folder_prefix, project_type,
       legacy_project_types, autocomplete_category,
       work_path_category, software_defaults_args, software_chips,
@@ -273,36 +274,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "display_name": "Audio",
         "description": "Audio processing tools for DJs and producers",
         "work_path_key": "Audio",
-        "category_scripts": [
-            {
-                "key": "backup_musicbee",
-                "name": "Sync to Cloud",
-                "module": "PipelineScript_Audio_Backup",
-                "description": "Backup MusicBee library to OneDrive, only transferring changed or new files",
-                "icon": "☁️",
-            },
-            {
-                "key": "musicbee_cleanup",
-                "name": "MusicBee Cleanup",
-                "module": "PipelineScript_Audio_MusicBeeCleanup",
-                "description": "Fix dead and duplicate MusicBee playlist entries; report missing and duplicate library files",
-                "icon": "🧹",
-            },
-            {
-                "key": "format_genres",
-                "name": "Format Genres",
-                "module": "PipelineScript_Audio_FormatGenres",
-                "description": "Normalize clipboard genre strings to '; '-separated; auto-formats while open",
-                "icon": "🏷",
-            },
-            {
-                "key": "format_titles",
-                "name": "Format Titles",
-                "module": "PipelineScript_Audio_FormatTitles",
-                "description": "Fix clipboard track/album titles to iTunes-style title case",
-                "icon": "🔠",
-            },
-        ],
+        "category_scripts": [],
         "subtypes": {
             "DJ": {
                 "display_name": "DJ",
@@ -358,13 +330,6 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                         "module": "PipelineScript_Audio_TraktorStems",
                         "description": "Create stems for a playlist, re-link stems to their tracks, or clean up stem links and stem files - all in one place",
                         "icon": "🎚️",
-                    },
-                    {
-                        "key": "poweramp_sync",
-                        "name": "Sync to PowerAmp",
-                        "module": "PipelineScript_Audio_PowerAmpSync",
-                        "description": "Export MusicBee playlists to M3U8 format for PowerAmp on Android",
-                        "icon": "📱",
                     },
                 ],
             },
@@ -595,15 +560,82 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "icon": "👤",
             },
         ],
-        "subtypes": {},
+        "subtypes": {
+            # Tools-only group (no tree_template / project_type): shown as its
+            # own headed section in the Business tools list.
+            "Inventory": {
+                "display_name": "Inventory",
+                "emoji": "📦",
+                "description": "Stock and possessions tracking",
+                "tools_header": True,
+                "scripts": [
+                    {
+                        "key": "homebox",
+                        "name": "Homebox",
+                        "url": "http://169.254.132.127:3100/home",
+                        "description": "Personal inventory management",
+                        "icon": "📦",
+                    },
+                    {
+                        "key": "inventree",
+                        "name": "InvenTree",
+                        "url": "http://169.254.132.127:8080/web/home",
+                        "description": "Work inventory management",
+                        "icon": "🏭",
+                    },
+                ],
+            },
+        },
     },
-    "Global": {
-        "color": "#6b7280",
-        "emoji": "🛠️",
-        "display_name": "Global Tools",
-        "description": "General-purpose utilities",
+    "Data": {
+        "color": "#ef4444",
+        "emoji": "🗄️",
+        "display_name": "Data Manager",
+        "description": "Sync, back up and tidy personal libraries across devices",
         "work_path_key": None,
         "category_scripts": [
+            {
+                "key": "backup_musicbee",
+                "name": "Sync to Cloud",
+                "module": "PipelineScript_Audio_Backup",
+                "description": "Backup MusicBee library to OneDrive, only transferring changed or new files",
+                "icon": "☁️",
+            },
+            {
+                "key": "musicbee_cleanup",
+                "name": "MusicBee Cleanup",
+                "module": "PipelineScript_Audio_MusicBeeCleanup",
+                "description": "Fix dead and duplicate MusicBee playlist entries; report missing and duplicate library files",
+                "icon": "🧹",
+            },
+            {
+                "key": "poweramp_sync",
+                "name": "Sync to PowerAmp",
+                "module": "PipelineScript_Audio_PowerAmpSync",
+                "description": "Export MusicBee playlists to M3U8 format for PowerAmp on Android",
+                "icon": "📱",
+            },
+            {
+                "key": "open_syncthing",
+                "name": "Syncthing",
+                "module": "PipelineScript_Data_OpenSyncthing",
+                "description": "Open the Syncthing web UI, starting Syncthing in the background if it isn't running",
+                "icon": "🔁",
+            },
+            {
+                "key": "format_genres",
+                "name": "Format Genres",
+                "module": "PipelineScript_Audio_FormatGenres",
+                "description": "Normalize clipboard genre strings to '; '-separated; auto-formats while open",
+                "icon": "🏷",
+            },
+            {
+                "key": "format_titles",
+                "name": "Format Titles",
+                "module": "PipelineScript_Audio_FormatTitles",
+                "description": "Fix clipboard track/album titles to iTunes-style title case",
+                "icon": "🔠",
+            },
             {
                 "key": "global_cleanup",
                 "name": "Global Cleanup",
@@ -624,20 +656,6 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "module": "PipelineScript_Global_SoftwareLauncher",
                 "description": "Download, update, and launch portable software tools from GitHub releases",
                 "icon": "🚀",
-            },
-            {
-                "key": "homebox",
-                "name": "Homebox",
-                "url": "http://169.254.132.127:3100/home",
-                "description": "Personal inventory management",
-                "icon": "📦",
-            },
-            {
-                "key": "inventree",
-                "name": "InvenTree",
-                "url": "http://169.254.132.127:8080/web/home",
-                "description": "Work inventory management",
-                "icon": "🏭",
             },
         ],
         "subtypes": {},

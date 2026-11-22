@@ -31,6 +31,9 @@ from typing import Dict, List, Optional
 from shared_logging import get_logger
 from invoice_manager.wc_monitor import DocumentManager, sanitize_filename
 from shared_folder_structure_creator import upsert_order_number_in_specs
+from shared_project_docs import (
+    LIBRARY_DIRNAME, ensure_library_dir, find_project_details, project_details_target,
+)
 
 logger = get_logger(__name__)
 
@@ -329,12 +332,12 @@ def merge_project_with_order(db, project_row: Dict, order_row: Dict, order: Dict
                     # Genuinely unrecognized folder name — quarantine so
                     # nothing is silently misplaced under an assumed
                     # category it may not belong to.
-                    dest_subdir = target_path / "_LIBRARY" / "FromOrderFolder" / item.name
+                    dest_subdir = ensure_library_dir(target_path) / "FromOrderFolder" / item.name
                 _copy_contents_safe(item, dest_subdir, copied)
             else:
                 # Loose top-level file directly in the order folder
                 # (unusual, but handle it) — same quarantine treatment.
-                dest_dir = target_path / "_LIBRARY" / "FromOrderFolder"
+                dest_dir = ensure_library_dir(target_path) / "FromOrderFolder"
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_path = _safe_destination(dest_dir, item.name)
                 shutil.copy2(str(item), str(dest_path))
@@ -397,16 +400,16 @@ def merge_project_with_order(db, project_row: Dict, order_row: Dict, order: Dict
 # Used by the Project Tracker's details panel (fastrack_project_explorer.py)
 # to open a project's own documentation, for any category. Physical
 # projects linked to a WooCommerce order additionally get order details
-# and an invoice. All three live side by side in the project's _LIBRARY
-# folder.
-
-PROJECT_DETAILS_FILENAME = "Project_Details.txt"
+# and an invoice. Project Details lives in _LIBRARY, or the project root
+# when the project has none; anything linked to a WooCommerce order always
+# has a _LIBRARY, and its order details and invoice links live there.
 
 
 def project_details_path(project_row: Dict) -> Path:
-    """Canonical path to a project's own details file, for any category."""
-    folder = _resolve_folder_path(project_row)
-    return folder / "_LIBRARY" / PROJECT_DETAILS_FILENAME
+    """Canonical path to a project's own details file, for any category:
+    the existing file if there is one, else _LIBRARY when the project has
+    that folder, else the project root."""
+    return project_details_target(_resolve_folder_path(project_row))
 
 
 def _find_legacy_project_details_file(project_row: Dict) -> Optional[Path]:
@@ -450,7 +453,7 @@ def project_details_exists(project_row: Dict) -> bool:
     legacy location — without migrating it. Used to decide whether the
     "Project Details" button should be enabled, so it doesn't rename
     files just to answer that question."""
-    if project_details_path(project_row).exists():
+    if find_project_details(_resolve_folder_path(project_row)) is not None:
         return True
     return _find_legacy_project_details_file(project_row) is not None
 
@@ -508,7 +511,7 @@ def order_details_path(project_row: Dict) -> Optional[Path]:
     if not order_number:
         return None
     folder = _resolve_folder_path(project_row)
-    return folder / "_LIBRARY" / f"Order_Details_{order_number}.txt"
+    return folder / LIBRARY_DIRNAME / f"Order_Details_{order_number}.txt"
 
 
 def _build_wc_client_if_configured():
@@ -800,7 +803,7 @@ def resolve_or_fetch_invoice(project_row: Dict, wc_client=None, db=None) -> Opti
         return None
 
     folder = _resolve_folder_path(project_row)
-    library_dir = folder / "_LIBRARY"
+    library_dir = folder / LIBRARY_DIRNAME
 
     existing_link = _find_library_invoice_link(library_dir)
     if existing_link and _resolve_shortcut_target(existing_link):
@@ -835,7 +838,7 @@ def resolve_or_fetch_invoice(project_row: Dict, wc_client=None, db=None) -> Opti
         existing_archived = _find_invoice_by_number_in_dir(quarter_dir, invoice_info["invoice_number"])
 
     if existing_archived:
-        library_dir.mkdir(parents=True, exist_ok=True)
+        ensure_library_dir(folder)
         shortcut_name = existing_archived.stem + ".lnk"
         invoice_filer._create_shortcut(library_dir / shortcut_name, existing_archived)
     else:
@@ -879,7 +882,7 @@ def ensure_all_invoices_linked(db, wc_client, progress_callback=None) -> Dict[st
             progress_callback(i, len(rows), project_row.get("project_name", "?"))
 
         folder = _resolve_folder_path(project_row)
-        already = _find_library_invoice_link(folder / "_LIBRARY")
+        already = _find_library_invoice_link(folder / LIBRARY_DIRNAME)
         was_already_linked = bool(already and _resolve_shortcut_target(already))
 
         try:

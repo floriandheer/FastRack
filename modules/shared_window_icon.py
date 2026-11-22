@@ -20,7 +20,7 @@ _ASSETS_DIR = os.path.join(
 
 _KNOWN_CATEGORIES = {
     "Visual", "RealTime", "Audio", "Physical",
-    "Photo", "Web", "Business", "Global",
+    "Photo", "Web", "Business", "Global", "Data",
     "Bookkeeping",
 }
 
@@ -28,6 +28,7 @@ _KNOWN_CATEGORIES = {
 # semantically-related category icon).
 _CATEGORY_FALLBACK = {
     "Bookkeeping": "Business",
+    "Data": "Global",
 }
 
 _HUB_AUMID = "floriandheer.fastrack"
@@ -80,6 +81,10 @@ def apply_category_icon(root, category: Optional[str] = None) -> Optional[str]:
     Returns the icon path used, or None if nothing was applied. Silent on
     failure — module windows must keep working if assets are missing.
     """
+    # Every tool window passes through here right after creating its root,
+    # so this is also where they all pick up the shared scrollbar look.
+    from shared_scrollbar_style import apply_clean_scrollbars
+    apply_clean_scrollbars(root)
     try:
         if category is None:
             category = _AUTO_CATEGORY or _detect_category()

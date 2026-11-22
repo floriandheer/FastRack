@@ -19,7 +19,8 @@ import subprocess
 import tempfile
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, scrolledtext
+from tkinter import ttk, messagebox, filedialog
+from shared_scrollbar_style import CleanScrolledText
 from shared_window_icon import apply_category_icon
 from datetime import datetime
 from pathlib import Path
@@ -1435,7 +1436,7 @@ class PublishStaticUI:
         output_frame = tk.Frame(self.root, bg=colors["bg"])
         output_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 5))
 
-        self.output_text = scrolledtext.ScrolledText(
+        self.output_text = CleanScrolledText(
             output_frame, wrap=tk.WORD, bg="#0d1117", fg=colors["fg"],
             font=("Consolas", 9), insertbackground=colors["fg"],
             relief=tk.FLAT, state=tk.DISABLED

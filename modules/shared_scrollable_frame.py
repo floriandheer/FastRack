@@ -7,6 +7,8 @@ grow taller than the window (or the screen).
 import tkinter as tk
 from tkinter import ttk
 
+from shared_scrollbar_style import clean_scrollbar_style
+
 
 def safe_bind_touchpad_scroll(binder, *args):
     """Call a Tk bind method (bind/bind_class/bind_all/unbind_all) with the
@@ -131,28 +133,19 @@ class ScrollableFrame(tk.Frame):
     """A scrollable frame widget with smooth mouse wheel scrolling."""
 
     def __init__(self, parent, bg=None, show_scrollbar=True, scrollbar_style=None):
-        """`scrollbar_style` names a ttk scrollbar style (e.g. the app's
-        themed "Vertical.TScrollbar") so the bar matches the app's other
-        scrollbars. Left unset, a plain tk.Scrollbar is used."""
+        """`scrollbar_style` names a ttk scrollbar style to use instead of
+        the shared clean one (see shared_scrollbar_style)."""
         super().__init__(parent, bg=bg)
 
-        # Plain tk.Scrollbar by default, not ttk: ttk's is a native
-        # NSScroller on macOS, which per that OS's own "Show scroll bars"
-        # preference stays hidden except during an active scroll gesture.
-        # Callers that force a non-native ttk theme (clam) can opt into the
-        # themed ttk bar via scrollbar_style instead.
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
         self.scrollbar = None
         if show_scrollbar:
-            if scrollbar_style:
-                self.scrollbar = ttk.Scrollbar(
-                    self, orient="vertical", command=self.canvas.yview,
-                    style=scrollbar_style,
-                )
-            else:
-                self.scrollbar = tk.Scrollbar(
-                    self, orient="vertical", command=self.canvas.yview, width=16,
-                )
+            # The shared clean bar (never the native one) - its trough
+            # matches this frame's background unless a style is given.
+            self.scrollbar = ttk.Scrollbar(
+                self, orient="vertical", command=self.canvas.yview,
+                style=scrollbar_style or clean_scrollbar_style(self, bg or "#0d1117"),
+            )
         self.scrollable_frame = tk.Frame(self.canvas, bg=bg)
 
         # Never itemconfig the embedded window's height explicitly — leave

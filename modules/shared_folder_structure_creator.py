@@ -25,6 +25,9 @@ sys.path.insert(0, str(MODULES_DIR))
 from shared_logging import get_logger
 from shared_project_db import ProjectDatabase
 from shared_autocomplete_widget import AutocompleteEntry
+from shared_project_docs import (
+    PROJECT_DETAILS_FILENAME, ensure_library_dir, project_details_target, project_docs_dir,
+)
 # Best-effort import: the contacts table only exists if the user has
 # the Invoice Manager / Contacts app set up. If anything is missing
 # we fall back to a no-op resolver and the typed name passes through
@@ -63,11 +66,12 @@ def upsert_order_number_in_specs(project_dir: str, order_number: str) -> None:
     _LIBRARY/Project_Details.txt, creating the file if it's missing (older
     pre-automation projects may not have one yet).
 
-    Metadata-only: touches this one text file and nothing else — no other
-    file or folder in the project is created, moved, or modified.
+    Only called for WooCommerce orders, which always have a _LIBRARY: it is
+    created if missing, and a root Project_Details.txt is moved into it.
+    Nothing else in the project is touched.
     """
-    docs_dir = Path(project_dir, '_LIBRARY')
-    spec_path = docs_dir / 'Project_Details.txt'
+    ensure_library_dir(project_dir)
+    spec_path = project_details_target(project_dir)
 
     if spec_path.exists():
         lines = spec_path.read_text(encoding='utf-8').splitlines()
@@ -80,7 +84,6 @@ def upsert_order_number_in_specs(project_dir: str, order_number: str) -> None:
     insert_at = next((i + 1 for i, l in enumerate(lines) if l.startswith("Project:")), len(lines))
     lines.insert(insert_at, f"Order #: {order_number}")
 
-    docs_dir.mkdir(parents=True, exist_ok=True)
     spec_path.write_text("\n".join(lines) + "\n", encoding='utf-8')
     logger.info(f"Recorded order #{order_number} in {spec_path}")
 
@@ -629,9 +632,9 @@ class GenericFolderStructureCreator(FormKeyboardMixin):
 
     def _write_specs_file(self, project_dir, project_data, software_specs):
         try:
-            docs_dir = os.path.join(project_dir, '_LIBRARY')
-            os.makedirs(docs_dir, exist_ok=True)
-            spec_path = os.path.join(docs_dir, 'Project_Details.txt')
+            # In _LIBRARY only when the template (and its toggles) created one;
+            # otherwise in the project root — never create _LIBRARY just for this.
+            spec_path = project_docs_dir(project_dir) / PROJECT_DETAILS_FILENAME
 
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             notes = project_data.get('notes') or "No notes provided."

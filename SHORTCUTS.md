@@ -140,7 +140,7 @@ Layer 4: Quick Actions (context-sensitive)
 | **Shift+H** | Photo |
 | **Shift+W** | Web |
 | **Shift+B** | Business |
-| **Shift+G** | Global |
+| **Shift+D** | Data Manager |
 
 ### Quick Actions (when category is selected)
 

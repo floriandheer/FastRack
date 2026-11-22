@@ -14,6 +14,7 @@ import importlib
 import tkinter as tk
 from tkinter import ttk, font
 import datetime
+import time
 import threading
 import ctypes
 
@@ -55,6 +56,7 @@ from shared_logging import get_logger, setup_logging, LOG_DIR
 from rack_settings import get_rack_settings, join_native_path
 from shared_open_path import open_path
 from shared_scrollable_frame import ScrollableFrame
+from shared_scrollbar_style import apply_clean_scrollbars, clean_scrollbar_style
 
 from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button, run_without_flicker
 from ui_pipeline_categories import (
@@ -179,13 +181,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.last_left_panel = "categories"  # Remember last left panel for A key from tracker
         self.panel_before_creation = "categories"  # Remember panel before project creation
         self.category_focus_index = 0      # 0-6: 2x3 grid + Sandbox banner row
-        self.operations_focus_index = 0    # 0-1 for BUSINESS, GLOBAL
+        self.operations_focus_index = 0    # 0-1 for BUSINESS, DATA
         self.tools_focus_index = 0         # Index in current tools+actions list
         self.tool_buttons = []             # References to tool buttons for navigation
 
         # Layout constants for keyboard navigation
         self.CATEGORY_ORDER = ["VISUAL", "REALTIME", "AUDIO", "PHYSICAL", "PHOTO", "WEB", "SANDBOX"]
-        self.OPERATIONS_ORDER = ["BUSINESS", "GLOBAL"]
+        self.OPERATIONS_ORDER = ["BUSINESS", "DATA"]
         self.SCOPE_ORDER = ["personal", "client"]
         self.STATUS_ORDER = ["active", "archived", "all"]
 
@@ -249,17 +251,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                             ('!selected', COLORS["text_secondary"])],
                  expand=[("selected", [1, 1, 1, 0])])
 
-        # Configure scrollbar style
-        style.configure("Vertical.TScrollbar",
-                       background=COLORS["bg_secondary"],
-                       bordercolor=COLORS["bg_secondary"],
-                       arrowcolor=COLORS["text_secondary"],
-                       troughcolor=COLORS["bg_primary"])
-
-        # clam paints a disabled (nothing-to-scroll) bar light grey otherwise
-        style.map("Vertical.TScrollbar",
-                 background=[("disabled", COLORS["bg_secondary"]),
-                             ("active", COLORS["bg_hover"])])
+        # Shared flat scrollbar look (same as the Sandbox browser's)
+        apply_clean_scrollbars(self.root)
 
     def create_layout(self):
         """Create the main layout."""
@@ -271,7 +264,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.create_header()
 
         # Status bar before main content: same pack-order rule as
-        # ScrollableFrame above — packing the expand=True content area
+        # ScrollableFrame — packing the expand=True content area
         # first let it claim the whole remaining cavity, squeezing the
         # side=BOTTOM status bar off the window entirely.
         self.create_status_bar()
@@ -466,7 +459,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         def probe_chrome(icon_text, name_text, direct_run, mode_switch=False):
             for child in probe_parent.winfo_children():
                 child.destroy()
-            self._create_tool_button(probe_parent, "GLOBAL", "__probe__", None,
+            self._create_tool_button(probe_parent, "DATA", "__probe__", None,
                                       {"name": name_text, "icon": icon_text, "direct_run": direct_run,
                                        "mode_switch": mode_switch})
             probe_parent.update_idletasks()
@@ -596,19 +589,30 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.right_focus_strip = tk.Frame(main_container, bg=COLORS["bg_primary"], width=3)
         self.right_focus_strip.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Scrollable left panel. Whenever the sidebar's content is taller
-        # than the window, the scrollbar shows (rather than relying on
-        # mouse-wheel/trackpad scrolling alone) so the Tools section is
-        # always reachable — mouse-wheel scroll still works too.
-        self.left_scroll = ScrollableFrame(self.left_content, bg=COLORS["bg_card"],
-                                           scrollbar_style="Vertical.TScrollbar")
-        self.left_scroll.pack(fill=tk.BOTH, expand=True)
-        left_panel = self.left_scroll.get_frame()
-        # Like the Selected Project panel, the scrollbar only shows while
-        # the content is taller than the sidebar.
-        self._left_scrollbar_shown = True
-        left_panel.bind("<Configure>", self._sync_left_scrollbar, add="+")
-        self.left_scroll.canvas.bind("<Configure>", self._sync_left_scrollbar, add="+")
+        # Left panel body. Categories and Operations stay put; normally only
+        # the Tools list scrolls (see tools_scroll below), so a long tool
+        # list never pushes the category buttons out of view. When the
+        # window is too short to fit them plus a usable Tools panel, the
+        # whole body scrolls instead (see _sync_left_scroll).
+        self.left_scroll_area = tk.Frame(self.left_content, bg=COLORS["bg_card"])
+        self.left_scroll_area.pack(fill=tk.BOTH, expand=True)
+        self.left_canvas = tk.Canvas(self.left_scroll_area, bg=COLORS["bg_card"],
+                                     highlightthickness=0, bd=0)
+        self.left_scrollbar = ttk.Scrollbar(
+            self.left_scroll_area, orient="vertical", command=self.left_canvas.yview,
+            style=clean_scrollbar_style(self.left_scroll_area, COLORS["bg_card"]))
+        self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
+        self.left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._left_scrollbar_shown = False
+        left_panel = tk.Frame(self.left_canvas, bg=COLORS["bg_card"])
+        self.left_panel = left_panel
+        self._left_window = self.left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
+        self._left_sync_pending = False
+        self._left_reveal_until = 0.0
+        self.left_canvas.bind("<Configure>", self._queue_left_scroll_sync, add="+")
+        self._left_wheel_active = False
+        self.left_scroll_area.bind("<Enter>", self._activate_left_wheel, add="+")
+        self.left_scroll_area.bind("<Leave>", self._maybe_deactivate_left_wheel, add="+")
 
         # ═══════════════════════════════════════════════════════════
         # CATEGORIES SECTION (includes scope toggles)
@@ -689,7 +693,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.ops_grid.pack(fill=tk.X)
 
         # Operations order and data
-        operations_order = ["BUSINESS", "GLOBAL"]
+        operations_order = ["BUSINESS", "DATA"]
 
         for idx, ops_key in enumerate(operations_order):
             if ops_key not in BUSINESS_CATEGORIES:
@@ -732,13 +736,27 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         )
         self.tools_header.pack(anchor="w", padx=10, pady=(10, 5))
 
-        # Scrollable tools container (takes remaining space)
+        # Scrollable tools list. The canvas asks for exactly its content's
+        # height, so the panel hugs a short list; when the sidebar runs out
+        # of room, pack gives the panel less than that and the scrollbar
+        # appears inside it.
         self.tools_section = tk.Frame(self.category_panel, bg=COLORS["bg_secondary"])
         self.tools_section.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
-
-        # Tools container (no separate scroll - uses left panel scroll)
-        self.tools_container = tk.Frame(self.tools_section, bg=COLORS["bg_secondary"])
-        self.tools_container.pack(fill=tk.BOTH, expand=True)
+        self.tools_scroll = ScrollableFrame(self.tools_section, bg=COLORS["bg_secondary"])
+        self.tools_scroll.pack(fill=tk.BOTH, expand=True)
+        self.tools_container = self.tools_scroll.get_frame()
+        self._tools_scrollbar_shown = True
+        self.tools_container.bind("<Configure>", self._sync_tools_scroll, add="+")
+        self.tools_scroll.canvas.bind("<Configure>", self._sync_tools_scroll, add="+")
+        # The whole-panel fallback needs to know when the panel's natural
+        # height changes (tools swapped, category panel shown or hidden).
+        for w in (self.tools_container, self.category_panel_outer, self.notes_button_container):
+            w.bind("<Configure>", self._queue_left_scroll_sync, add="+")
+            w.bind("<Map>", self._queue_left_scroll_sync, add="+")
+            w.bind("<Unmap>", self._queue_left_scroll_sync, add="+")
+        # Leaving the tools list drops its wheel binding; hand the wheel
+        # back to the outer panel if the pointer is still over it.
+        self.tools_scroll.bind("<Leave>", self._activate_left_wheel_if_inside, add="+")
 
         # ═══════════════════════════════════════════════════════════
         # RIGHT PANEL: Project Tracker (creative categories) OR
@@ -835,23 +853,177 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.config_manager.config["left_panel_collapsed"] = self._left_panel_collapsed
             self.config_manager._save_config()
 
-    def _sync_left_scrollbar(self, _event=None):
-        """Show the sidebar's scrollbar only while its content overflows."""
-        scroll = self.left_scroll
+    def _sync_tools_scroll(self, _event=None):
+        """Size the tools canvas to its content and show the Tools panel's
+        scrollbar only while the list is taller than the room it got."""
+        scroll = self.tools_scroll
+        content_height = self.tools_container.winfo_reqheight()
+        if int(scroll.canvas.cget("height")) != content_height:
+            scroll.canvas.configure(height=content_height)
         if scroll.scrollbar is None:
             return
         view_height = scroll.canvas.winfo_height()
         if view_height <= 1:  # not laid out yet
             return
-        needed = scroll.scrollable_frame.winfo_reqheight() > view_height
-        if needed == self._left_scrollbar_shown:
+        needed = content_height > view_height
+        if needed == self._tools_scrollbar_shown:
             return
-        self._left_scrollbar_shown = needed
+        self._tools_scrollbar_shown = needed
         if needed:
             scroll.scrollbar.pack(side="right", fill="y", before=scroll.canvas)
         else:
             scroll.scrollbar.pack_forget()
             scroll.canvas.yview_moveto(0)
+
+    # How many tool buttons the Tools list keeps in view before the whole
+    # left panel starts scrolling instead.
+    MIN_VISIBLE_TOOLS = 4
+
+    def _min_tools_height(self):
+        """Height of the Tools list down to the bottom of its
+        MIN_VISIBLE_TOOLS-th tool button (group headers included)."""
+        height, rows = 0, 0
+        for child in self.tools_container.pack_slaves():
+            pady = child.pack_info().get("pady", 0)
+            pads = [int(p) for p in str(pady).split()] or [0]
+            height += child.winfo_reqheight() + pads[0] + pads[-1]
+            if isinstance(child, tk.Frame):  # tool rows are frames, headers labels
+                rows += 1
+                if rows >= self.MIN_VISIBLE_TOOLS:
+                    break
+        return height
+
+    def _queue_left_scroll_sync(self, _event=None):
+        if not self._left_sync_pending:
+            self._left_sync_pending = True
+            self.root.after_idle(self._sync_left_scroll)
+
+    def _sync_left_scroll(self):
+        """Give the left panel the canvas's full height while that leaves
+        the Tools list room for MIN_VISIBLE_TOOLS buttons; below that, keep the panel
+        at that minimum and let the whole panel scroll."""
+        self._left_sync_pending = False
+        canvas = self.left_canvas
+        try:
+            view_h = canvas.winfo_height()
+            if view_h <= 1:
+                return
+            natural = self.left_panel.winfo_reqheight()
+            minimum = natural
+            if self.category_panel_outer.winfo_ismapped():
+                tools_h = int(self.tools_scroll.canvas.cget("height"))
+                minimum = natural - tools_h + min(tools_h, self._min_tools_height())
+            needed = view_h < minimum
+            if needed != self._left_scrollbar_shown:
+                self._left_scrollbar_shown = needed
+                if needed:
+                    self._reveal_tools()
+                    self.left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, before=canvas)
+                else:
+                    self.left_scrollbar.pack_forget()
+                # The canvas width changes with the bar; size the panel
+                # once that has settled.
+                self._queue_left_scroll_sync()
+                return
+            height = minimum if needed else view_h
+            canvas.itemconfigure(self._left_window, width=canvas.winfo_width(), height=height)
+            canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), height))
+            if not needed:
+                canvas.yview_moveto(0)
+            elif time.monotonic() < self._left_reveal_until:
+                # Scrolled to the top, a short window shows only the first
+                # tool or so; scroll so the whole Tools panel is in view.
+                canvas.yview_moveto(1.0)
+        except tk.TclError:
+            pass
+
+    def _reveal_tools(self):
+        """Scroll the whole left panel (when it overflows) so the Tools panel
+        is fully in view. The panel's size settles over a few layout passes
+        after a category switch or resize, so keep pinning it to the bottom
+        for a moment rather than once (a single early scroll ends up short
+        when the panel grows afterwards)."""
+        self._left_reveal_until = time.monotonic() + 0.6
+        self._queue_left_scroll_sync()
+        for delay in (150, 400):
+            self.root.after(delay, self._queue_left_scroll_sync)
+
+    def _on_left_wheel(self, event):
+        if not self._left_scrollbar_shown:
+            return "break"
+        if getattr(event, "num", None) == 4 or event.delta > 0:
+            units = -1
+        elif getattr(event, "num", None) == 5 or event.delta < 0:
+            units = 1
+        else:
+            return "break"
+        self.left_canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _activate_left_wheel(self, _event=None):
+        self._left_wheel_active = True
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.left_canvas.bind_all(seq, self._on_left_wheel)
+
+    def _activate_left_wheel_if_inside(self, event):
+        try:
+            under = self.root.winfo_containing(event.x_root, event.y_root)
+        except (tk.TclError, KeyError):
+            return
+        area = str(self.left_scroll_area)
+        if under is not None and (str(under) == area or str(under).startswith(area + ".")):
+            # After the tools list's own <Leave> handler has unbound it.
+            self.root.after_idle(self._activate_left_wheel)
+
+    def _maybe_deactivate_left_wheel(self, event):
+        try:
+            under = self.root.winfo_containing(event.x_root, event.y_root)
+            area = str(self.left_scroll_area)
+            if under is not None and (str(under) == area or str(under).startswith(area + ".")):
+                return
+        except (tk.TclError, KeyError):
+            pass
+        if self._left_wheel_active:
+            self._left_wheel_active = False
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                self.left_canvas.unbind_all(seq)
+
+    def _scroll_left_into_view(self, widget):
+        """Scroll the whole left panel (only when it overflows) to show `widget`."""
+        if not self._left_scrollbar_shown:
+            return
+        canvas = self.left_canvas
+        try:
+            total = self.left_panel.winfo_height()
+            view = canvas.winfo_height()
+            top = widget.winfo_rooty() - self.left_panel.winfo_rooty()
+            bottom = top + widget.winfo_height()
+            first = canvas.canvasy(0)
+            if top < first:
+                canvas.yview_moveto(top / total)
+            elif bottom > first + view:
+                canvas.yview_moveto((bottom - view) / total)
+        except (tk.TclError, ZeroDivisionError):
+            pass
+
+    def _scroll_tool_into_view(self, widget):
+        """Scroll the Tools list just enough to show `widget` (keyboard focus)."""
+        self._scroll_left_into_view(self.tools_section)
+        canvas = self.tools_scroll.canvas
+        try:
+            total = self.tools_container.winfo_height()
+            view = canvas.winfo_height()
+            if total <= view or total <= 1:
+                return
+            top = widget.winfo_rooty() - self.tools_container.winfo_rooty()
+            bottom = top + widget.winfo_height()
+            first = canvas.canvasy(0)
+            if top < first:
+                canvas.yview_moveto(top / total)
+            elif bottom > first + view:
+                canvas.yview_moveto((bottom - view) / total)
+        except tk.TclError:
+            pass
 
     def toggle_left_panel(self):
         """Collapse the categories/tools sidebar to a thin rail, or bring it back (Q)."""
@@ -1119,7 +1291,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             "PHOTO": "Shift+H",
             "WEB": "Shift+W",
             "BUSINESS": "Shift+B",
-            "GLOBAL": "Shift+G",
+            "DATA": "Shift+D",
         }
         shortcut = shortcut_map.get(category_key, "")
 
@@ -1358,7 +1530,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             elif sandbox_selected:
                 self._show_sandbox_browser_panel()
             else:
-                # Operations-only (e.g. Global) or empty — hide all.
+                # Operations-only (e.g. Data Manager) or empty — hide all.
                 self._hide_right_panels()
 
         # The right-hand panel may have just changed (tracker/sandbox/invoices);
@@ -1438,7 +1610,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             return
 
         # Show the category panel in the left panel (full height)
-        self.category_panel_outer.pack(fill=tk.BOTH, expand=True, padx=15, pady=(15, 15))
+        self.category_panel_outer.pack(fill=tk.X, padx=15, pady=(15, 15))
+        self.tools_scroll.canvas.yview_moveto(0)
+        # If the whole panel scrolls, bring the new tools into view.
+        self._reveal_tools()
 
         # Collect tools from every selected category. Each tool is tagged with
         # its source category so it keeps the right color accent. Project-
@@ -1475,12 +1650,34 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         else:
             # Sort by priority within category, then keep categories in selection order.
             cat_order = {k: i for i, k in enumerate(valid_keys)}
+            # Subcategories flagged tools_header (e.g. Business > Inventory)
+            # sort after the category's other tools, grouped under a header.
+            def headed_group(t):
+                if not t[2]:
+                    return ""
+                sub = PIPELINE_CATEGORIES[t[0]]["subcategories"].get(t[2], {})
+                return t[2] if sub.get("tools_header") else ""
+
             all_tools.sort(key=lambda t: (
                 cat_order[t[0]],
+                headed_group(t),
                 self._get_script_priority(t[1], t[3].get("name", ""))
             ))
 
+            current_group = None
             for category_key, script_key, subcat_key, script_data in all_tools:
+                group = (category_key, headed_group((category_key, script_key, subcat_key)))
+                if group[1] and group != current_group:
+                    sub = PIPELINE_CATEGORIES[category_key]["subcategories"][group[1]]
+                    tk.Label(
+                        self.tools_container,
+                        text=f"{sub.get('icon', '')} {sub.get('name', group[1])}".strip().upper(),
+                        font=font.Font(family="Segoe UI", size=8, weight="bold"),
+                        fg=COLORS["text_secondary"],
+                        bg=COLORS["bg_secondary"],
+                        anchor="w",
+                    ).pack(fill=tk.X, pady=(8, 2))
+                current_group = group
                 self._create_tool_button(
                     self.tools_container,
                     category_key,
@@ -1491,10 +1688,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
         # Notes/folder buttons target the primary (last-clicked) category only.
         primary = valid_keys[-1]
-        if primary == "GLOBAL":
+        if primary == "DATA":
             self.notes_button_container.pack_forget()
         else:
-            self.notes_button_container.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=(5, 10))
+            # Packed before the tools list so it keeps its space when the
+            # list has to shrink and scroll.
+            self.notes_button_container.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=(5, 10),
+                                             before=self.tools_section)
             self._update_notes_button(primary)
 
     def _get_traktor_mode(self, module_name):
@@ -1893,7 +2093,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             # Re-pack in correct order: folder button first, then notes button
             self._folder_btn_frame.pack(fill=tk.X, pady=(0, 4), before=self._notes_btn_frame)
         else:
-            # Hide folder button for categories without folder_path (e.g., Global Tools)
+            # Hide folder button for categories without folder_path (e.g., Data Manager)
             self._folder_path = None
             self._folder_category = None
             self._folder_btn_frame.pack_forget()
@@ -2086,7 +2286,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         header_frame = tk.Frame(card_frame, bg=header_color)
         header_frame.pack(fill=tk.X)
 
-        # Make header clickable if folder_path exists (excluding Global Tools)
+        # Make header clickable if folder_path exists (excluding Data Manager)
         folder_path = category_data.get('folder_path')
         if folder_path:
             header_frame.configure(cursor="hand2")
@@ -2751,6 +2951,69 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 # MAIN APPLICATION ENTRY POINT
 # ====================================
 
+def _monitor_rect(root):
+    """(left, top, right, bottom) of the monitor the window is mostly on,
+    or None when that can't be asked (non-Windows, no HWND yet)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        from ctypes import wintypes
+
+        class _MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+        user32 = ctypes.windll.user32
+        user32.MonitorFromWindow.restype = wintypes.HMONITOR
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
+        hwnd = int(root.wm_frame(), 16)
+        monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return None
+        r = info.rcMonitor
+        return r.left, r.top, r.right, r.bottom
+    except (OSError, ValueError, AttributeError, tk.TclError):
+        return None
+
+
+def toggle_fullscreen(root):
+    """F11: borderless fullscreen on the monitor the window is on *now*.
+
+    Tk's own fullscreen on Windows always covers the primary monitor (it
+    places the window at 0,0), so a window dragged to another monitor
+    jumped back on F11. Note the monitor first, go fullscreen, then move
+    the borderless window onto that monitor. Leaving fullscreen maximizes
+    it there again (the hub's normal state)."""
+    if root.attributes("-fullscreen"):
+        root.attributes("-fullscreen", False)
+        try:
+            root.state("zoomed")
+        except tk.TclError:
+            pass
+        return
+    rect = _monitor_rect(root)
+    if rect is not None:
+        try:
+            root.state("normal")
+        except tk.TclError:
+            pass
+    root.attributes("-fullscreen", True)
+    if rect is None:
+        return
+    left, top, right, bottom = rect
+    try:
+        root.update_idletasks()
+        hwnd = int(root.wm_frame(), 16)
+        SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, left, top, right - left, bottom - top,
+                                          SWP_NOZORDER | SWP_NOACTIVATE)
+    except (OSError, ValueError, AttributeError, tk.TclError):
+        pass
+
+
 def main():
     """Main application entry point."""
     # Setup logging when the app actually runs (not at import time)
@@ -2774,7 +3037,7 @@ def main():
     root.bind('<Control-l>', lambda e: app.open_logs_folder())
     root.bind('<F5>', lambda e: app.refresh_projects())
     root.bind('<F1>', lambda e: app.open_help())
-    root.bind('<F11>', lambda e: root.attributes('-fullscreen', not root.attributes('-fullscreen')))
+    root.bind('<F11>', lambda e: toggle_fullscreen(root))
 
     # ====================================
     # FASTRACK KEYBOARD NAVIGATION BINDINGS
@@ -2823,7 +3086,7 @@ def main():
     root.bind('<Shift-H>', lambda e: app._quick_select_category('PHOTO'))
     root.bind('<Shift-W>', lambda e: app._quick_select_category('WEB'))
     root.bind('<Shift-B>', lambda e: app._quick_select_category('BUSINESS'))
-    root.bind('<Shift-G>', lambda e: app._quick_select_category('GLOBAL'))
+    root.bind('<Shift-D>', lambda e: app._quick_select_category('DATA'))
 
     # Search shortcut
     root.bind('<Control-f>', lambda e: app._focus_tracker_search())

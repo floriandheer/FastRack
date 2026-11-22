@@ -29,6 +29,7 @@ from shared_logging import get_logger
 from rack_settings import get_rack_settings
 from shared_project_db import ProjectDatabase
 from shared_appdata import get_appdata_path
+from shared_project_docs import ensure_library_dir
 
 logger = get_logger("invoice_manager.wc_monitor")
 
@@ -769,8 +770,8 @@ class DocumentManager:
                 order_id=order['id']
             )
 
-            library_dir = order_folder / "_LIBRARY"
-            library_dir.mkdir(exist_ok=True)
+            # Orders always have a _LIBRARY; create it if missing.
+            library_dir = ensure_library_dir(order_folder)
             details_path = library_dir / filename
 
             with open(details_path, 'w', encoding='utf-8') as f:
@@ -996,9 +997,9 @@ class InvoiceFiler:
             logger.info(f"Filed invoice: {invoice_path}")
 
             # Create .lnk shortcut in the project's _LIBRARY folder, next to
-            # its other documentation (Project/Order Details, invoice cache).
-            library_dir = project_folder / "_LIBRARY"
-            library_dir.mkdir(parents=True, exist_ok=True)
+            # its other documentation (Project/Order Details). Orders always
+            # have a _LIBRARY; create it if missing.
+            library_dir = ensure_library_dir(project_folder)
             shortcut_name = filename.replace(".pdf", ".lnk")
             self._create_shortcut(library_dir / shortcut_name, invoice_path)
 
