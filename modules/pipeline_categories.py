@@ -22,6 +22,9 @@ to know about a category and its subtypes:
       project_types        — optional list of project_type values to restrict a
                              project-context tool further. Empty/missing means
                              "any project under this category".
+      show_in_tools        — False keeps a tool out of the sidebar Tools
+                             panel (it's reached elsewhere, e.g. from a
+                             Data Manager app card). Defaults to True.
       applies_when         — optional predicate name (see PROJECT_ACTION_PREDICATES
                              in fastrack_project_explorer). Evaluated against the
                              resolved project folder; the action is hidden when
@@ -596,6 +599,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "category_scripts": [
             {
                 "key": "backup_musicbee",
+                "show_in_tools": False,
                 "name": "Sync to Cloud",
                 "module": "PipelineScript_Audio_Backup",
                 "description": "Backup MusicBee library to OneDrive, only transferring changed or new files",
@@ -603,6 +607,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "key": "musicbee_cleanup",
+                "show_in_tools": False,
                 "name": "MusicBee Cleanup",
                 "module": "PipelineScript_Audio_MusicBeeCleanup",
                 "description": "Fix dead and duplicate MusicBee playlist entries; report missing and duplicate library files",
@@ -610,6 +615,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "key": "poweramp_sync",
+                "show_in_tools": False,
                 "name": "Sync to PowerAmp",
                 "module": "PipelineScript_Audio_PowerAmpSync",
                 "description": "Export MusicBee playlists to M3U8 format for PowerAmp on Android",
@@ -617,6 +623,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "key": "open_syncthing",
+                "show_in_tools": False,
                 "name": "Syncthing",
                 "module": "PipelineScript_Data_OpenSyncthing",
                 "description": "Open the Syncthing web UI, starting Syncthing in the background if it isn't running",
@@ -624,6 +631,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "key": "format_genres",
+                "show_in_tools": False,
                 "name": "Format Genres",
                 "module": "PipelineScript_Audio_FormatGenres",
                 "description": "Normalize clipboard genre strings to '; '-separated; auto-formats while open",
@@ -631,6 +639,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "key": "format_titles",
+                "show_in_tools": False,
                 "name": "Format Titles",
                 "module": "PipelineScript_Audio_FormatTitles",
                 "description": "Fix clipboard track/album titles to iTunes-style title case",
@@ -656,6 +665,62 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "module": "PipelineScript_Global_SoftwareLauncher",
                 "description": "Download, update, and launch portable software tools from GitHub releases",
                 "icon": "🚀",
+            },
+        ],
+        # The software whose data runs through the sync pipeline, shown as
+        # cards in the Data Manager's right-hand panel. Each card lists the
+        # tools that move that software's data between devices/instances.
+        # A tool is referenced by (category, subtype or None, script key),
+        # so it can live in any category (e.g. Traktor's sync tools stay
+        # under Audio > DJ). Sync helpers (Syncthing) are tools, not apps.
+        # "launch" names the workstation_apps catalog entry the card's
+        # header starts when clicked.
+        "apps": [
+            {
+                "key": "musicbee",
+                "launch": "MusicBee",
+                "name": "MusicBee",
+                "icon": "🐝",
+                "description": "Music library and playlists",
+                "tools": [
+                    ("Data", None, "backup_musicbee"),
+                    ("Data", None, "poweramp_sync"),
+                    ("Data", None, "musicbee_cleanup"),
+                    ("Data", None, "format_genres"),
+                    ("Data", None, "format_titles"),
+                ],
+            },
+            {
+                "key": "obsidian",
+                "launch": "Obsidian",
+                "name": "Obsidian",
+                "icon": "📓",
+                "description": "Notes vault, synced with Syncthing",
+                "tools": [
+                    ("Data", None, "open_syncthing"),
+                ],
+            },
+            {
+                "key": "traktor",
+                "launch": "Traktor Pro",
+                "name": "Traktor",
+                "icon": "🎧",
+                "description": "DJ collection, playlists and drives",
+                "tools": [
+                    ("Audio", "DJ", "sync_playlists"),
+                    ("Audio", "DJ", "traktor_playlist_sync"),
+                    ("Audio", "DJ", "traktor_drive_sync"),
+                ],
+            },
+            {
+                "key": "resolume",
+                "launch": "Resolume",
+                "name": "Resolume",
+                "icon": "🎛️",
+                "description": "Avenue folder between PC and NAS",
+                "tools": [
+                    ("RealTime", None, "resolume_sync"),
+                ],
             },
         ],
         "subtypes": {},

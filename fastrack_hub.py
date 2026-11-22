@@ -61,7 +61,7 @@ from shared_scrollbar_style import apply_clean_scrollbars, clean_scrollbar_style
 from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button, run_without_flicker
 from ui_pipeline_categories import (
     APP_NAME, APP_VERSION, LOGO_PATH,
-    CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES
+    CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES, data_apps,
 )
 from ui_config_manager import ConfigManager
 from ui_settings_dialog import SettingsDialog
@@ -85,6 +85,8 @@ def _invoice_manager_class():
 # Sandbox Browser is embedded in the right panel when the Sandbox
 # category is selected (in place of the project tracker).
 from ui_sandbox_browser import SandboxBrowserPanel
+from ui_data_apps_panel import DataAppsPanel
+from workstation_apps import launch_app as launch_workstation_app
 
 
 def event_has_shift(event) -> bool:
@@ -807,6 +809,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         )
         self.sandbox_browser = None  # populated by _ensure_sandbox_browser
 
+        # Data Manager panel - synced-software cards, built lazily on
+        # first Data Manager selection.
+        self.data_apps_panel = tk.Frame(
+            main_container, bg=COLORS["bg_primary"]
+        )
+        self.data_apps = None  # populated by _ensure_data_apps
+
         # Restore state from last session (run once at startup)
         self._restore_session_state()
 
@@ -1113,12 +1122,59 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         )
         self.sandbox_browser.pack(fill=tk.BOTH, expand=True)
 
+    def _ensure_data_apps(self):
+        """Lazy-create the Data Manager's synced-software cards."""
+        if self.data_apps is not None:
+            return
+        self.data_apps = DataAppsPanel(
+            self.data_apps_panel, data_apps(), self._make_data_app_tool_row,
+            launch_app=self._launch_data_app,
+            accent=CATEGORY_COLORS.get("DATA", COLORS["accent"]),
+        )
+        self.data_apps.pack(fill=tk.BOTH, expand=True)
+
+    def _launch_data_app(self, app):
+        """Start a Data Manager card's software. Locating the exe can hit
+        the registry, so it runs off the UI thread."""
+        name = app["launch"]
+        self.update_status(f"Launching {app['name']}...")
+
+        def work():
+            try:
+                error = launch_workstation_app(name)
+            except Exception as e:
+                logger.exception(f"Could not launch {name}")
+                error = f"Could not launch {app['name']}: {e}"
+            if error:
+                self.root.after(0, lambda: self.update_status(error, "error"))
+            else:
+                self.root.after(0, lambda: self.update_status(f"{app['name']} launched.", "success"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _make_data_app_tool_row(self, parent, category_key, script_key, subcat_key, script_data):
+        """A sidebar-style tool row for an app card. Kept out of the
+        sidebar's keyboard-navigation list (self.tool_buttons)."""
+        saved, self.tool_buttons = self.tool_buttons, []
+        try:
+            self._create_tool_button(parent, category_key, script_key, subcat_key, script_data)
+        finally:
+            self.tool_buttons = saved
+
+    def _show_data_apps_panel(self):
+        """Swap the right-hand slot to the Data Manager's app cards."""
+        self._hide_right_panels()
+        self._ensure_data_apps()
+        self.data_apps_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
     def _show_sandbox_browser_panel(self):
         """Swap the right-hand slot to the Sandbox Browser."""
         if hasattr(self, 'tracker_panel'):
             self.tracker_panel.pack_forget()
         if hasattr(self, 'invoice_manager_panel'):
             self.invoice_manager_panel.pack_forget()
+        if hasattr(self, 'data_apps_panel'):
+            self.data_apps_panel.pack_forget()
         self._ensure_sandbox_browser()
         if not self.sandbox_browser_panel.winfo_ismapped():
             self.sandbox_browser_panel.pack(
@@ -1138,6 +1194,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.tracker_panel.pack_forget()
         if hasattr(self, 'sandbox_browser_panel'):
             self.sandbox_browser_panel.pack_forget()
+        if hasattr(self, 'data_apps_panel'):
+            self.data_apps_panel.pack_forget()
         if self._detached_invoice_window is not None \
                 and self._detached_invoice_window.winfo_exists():
             self.invoice_manager_panel.pack_forget()
@@ -1211,6 +1269,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.invoice_manager_panel.pack_forget()
         if hasattr(self, 'sandbox_browser_panel'):
             self.sandbox_browser_panel.pack_forget()
+        if hasattr(self, 'data_apps_panel'):
+            self.data_apps_panel.pack_forget()
         if not self.tracker_panel.winfo_ismapped():
             self.tracker_panel.pack(
                 side=tk.RIGHT, fill=tk.BOTH, expand=True,
@@ -1224,6 +1284,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.invoice_manager_panel.pack_forget()
         if hasattr(self, 'sandbox_browser_panel'):
             self.sandbox_browser_panel.pack_forget()
+        if hasattr(self, 'data_apps_panel'):
+            self.data_apps_panel.pack_forget()
 
     def _restore_session_state(self):
         """Restore saved state from last session (category, scope, etc.).
@@ -1529,8 +1591,9 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 self._show_invoice_manager_panel()
             elif sandbox_selected:
                 self._show_sandbox_browser_panel()
+            elif "DATA" in self.selected_categories:
+                self._show_data_apps_panel()
             else:
-                # Operations-only (e.g. Data Manager) or empty — hide all.
                 self._hide_right_panels()
 
         # The right-hand panel may have just changed (tracker/sandbox/invoices);
@@ -1627,6 +1690,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             for script_key, script_data in scripts.items():
                 if script_data.get("context") == "project":
                     continue
+                if script_data.get("show_in_tools") is False:
+                    continue
                 all_tools.append((category_key, script_key, None, script_data))
 
             subcategories = category_data.get("subcategories", {})
@@ -1634,6 +1699,8 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 subcat_scripts = subcat_data.get("scripts", {})
                 for script_key, script_data in subcat_scripts.items():
                     if script_data.get("context") == "project":
+                        continue
+                    if script_data.get("show_in_tools") is False:
                         continue
                     all_tools.append((category_key, script_key, subcat_key, script_data))
 

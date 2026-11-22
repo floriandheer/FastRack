@@ -74,6 +74,8 @@ def _script_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         out["project_types"] = list(spec["project_types"])
     if "applies_when" in spec:
         out["applies_when"] = spec["applies_when"]
+    if spec.get("show_in_tools") is False:
+        out["show_in_tools"] = False
     if "script_args" in spec:
         out["script_args"] = list(spec["script_args"])
     return out
@@ -125,3 +127,37 @@ def _build_menu():
 
 CREATIVE_CATEGORIES, BUSINESS_CATEGORIES = _build_menu()
 PIPELINE_CATEGORIES = {**CREATIVE_CATEGORIES, **BUSINESS_CATEGORIES}
+
+
+def data_apps():
+    """The Data Manager's synced-software cards, resolved to menu entries.
+
+    Returns ``[{key, name, icon, launch, description, tools}]`` where each tool is
+    ``(category_key, script_key, subcat_key, script_data)`` in the
+    UPPER-cased menu keys ``run_script`` expects. Tool references that
+    don't resolve (renamed/removed script) are skipped.
+    """
+    apps = []
+    for app in CATEGORIES.get("Data", {}).get("apps", []):
+        tools = []
+        for cat_name, sub_key, script_key in app.get("tools", []):
+            cat_key = cat_name.upper()
+            sub_menu_key = sub_key.upper() if sub_key else None
+            cat_entry = PIPELINE_CATEGORIES.get(cat_key, {})
+            if sub_menu_key:
+                scripts = cat_entry.get("subcategories", {}).get(sub_menu_key, {}).get("scripts", {})
+            else:
+                scripts = cat_entry.get("scripts", {})
+            script_data = scripts.get(script_key)
+            if script_data is None:
+                continue
+            tools.append((cat_key, script_key, sub_menu_key, script_data))
+        apps.append({
+            "key": app["key"],
+            "name": app.get("name", app["key"]),
+            "icon": app.get("icon", ""),
+            "launch": app.get("launch"),
+            "description": app.get("description", ""),
+            "tools": tools,
+        })
+    return apps

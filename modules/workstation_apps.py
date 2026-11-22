@@ -513,6 +513,29 @@ def resolve_exe_path(app: App) -> Optional[str]:
     return _resolve_from_registry(app)
 
 
+def launch_app(name: str) -> Optional[str]:
+    """Start the catalog app called ``name``, detached from this process.
+
+    Returns None on success, or a short message saying why it couldn't
+    be launched (unknown to the catalog, or not installed/locatable).
+    """
+    app = next((a for a in load_apps() if a.name == name), None)
+    if app is None:
+        return f"{name} isn't in the workstation apps catalog."
+    exe = resolve_exe_path(app)
+    if not exe:
+        return (f"{name} isn't installed (or couldn't be located). "
+                "Install it via Software Launcher / winget.")
+    if sys.platform == "win32":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        subprocess.Popen([exe], creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                         close_fds=True, cwd=os.path.dirname(exe) or None)
+    else:
+        subprocess.Popen([exe], start_new_session=True, close_fds=True)
+    return None
+
+
 def is_installed(app: App) -> bool:
     """Four independent checks, fast first:
       1. ``resolve_exe_path`` — covers PATH + detect_paths file/dir hits + registry-derived exe.
