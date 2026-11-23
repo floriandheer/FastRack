@@ -49,16 +49,29 @@ class KeyboardNavigatorMixin:
 
     _CATEGORY_GRID_COLS = 2
 
+    # Full-width banner buttons that take a row of their own (wherever
+    # they sit in CATEGORY_ORDER); everything else fills 2-wide rows.
+    _CATEGORY_SOLO_KEYS = ("SANDBOX",)
+
     def _category_grid_rows(self):
-        """Row layout of the categories grid: pairs of indices, 2 per row,
-        except a trailing solo item (e.g. Sandbox) which gets its own
-        single-column row."""
-        order = self.CATEGORY_ORDER
+        """Row layout of the categories grid: lists of CATEGORY_ORDER
+        indices, 2 per row, with banner items (Sandbox) on a row alone."""
         cols = self._CATEGORY_GRID_COLS
-        return [
-            list(range(i, min(i + cols, len(order))))
-            for i in range(0, len(order), cols)
-        ]
+        rows, current = [], []
+        for i, key in enumerate(self.CATEGORY_ORDER):
+            if key in self._CATEGORY_SOLO_KEYS:
+                if current:
+                    rows.append(current)
+                    current = []
+                rows.append([i])
+                continue
+            current.append(i)
+            if len(current) == cols:
+                rows.append(current)
+                current = []
+        if current:
+            rows.append(current)
+        return rows
 
     def _category_row_col(self, rows):
         """(row, col) of the currently focused category within `rows`."""

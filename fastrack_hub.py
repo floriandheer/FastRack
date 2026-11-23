@@ -182,13 +182,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.focused_panel = "categories"  # "categories", "operations", "tools", "tracker"
         self.last_left_panel = "categories"  # Remember last left panel for A key from tracker
         self.panel_before_creation = "categories"  # Remember panel before project creation
-        self.category_focus_index = 0      # 0-6: 2x3 grid + Sandbox banner row
+        self.category_focus_index = 0      # 0-6: Sandbox banner row + 2x3 grid
         self.operations_focus_index = 0    # 0-1 for BUSINESS, DATA
         self.tools_focus_index = 0         # Index in current tools+actions list
         self.tool_buttons = []             # References to tool buttons for navigation
 
         # Layout constants for keyboard navigation
-        self.CATEGORY_ORDER = ["VISUAL", "REALTIME", "AUDIO", "PHYSICAL", "PHOTO", "WEB", "SANDBOX"]
+        self.CATEGORY_ORDER = ["SANDBOX", "VISUAL", "REALTIME", "AUDIO", "PHYSICAL", "PHOTO", "WEB"]
         self.OPERATIONS_ORDER = ["BUSINESS", "DATA"]
         self.SCOPE_ORDER = ["personal", "client"]
         self.STATUS_ORDER = ["active", "archived", "all"]
@@ -644,27 +644,28 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         # Category order and data
         category_order = ["VISUAL", "REALTIME", "AUDIO", "PHYSICAL", "PHOTO", "WEB"]
 
+        # Sandbox — wide banner button, top row of the categories grid
+        # (spans both columns). Lives here rather than under Operations
+        # since it behaves like a category for selection/WASD purposes:
+        # it's part of CATEGORY_ORDER and toggles via self.session.toggle_category
+        # like any other category button.
+        first_row = 0
+        if "SANDBOX" in BUSINESS_CATEGORIES:
+            sandbox_data = BUSINESS_CATEGORIES["SANDBOX"]
+            sandbox_btn = self._create_sandbox_button(self.cat_grid, "SANDBOX", sandbox_data)
+            sandbox_btn.grid(row=0, column=0, columnspan=2, padx=4, pady=4, sticky="nsew")
+            first_row = 1
+
         for idx, category_key in enumerate(category_order):
             if category_key not in CREATIVE_CATEGORIES:
                 continue
 
             category_data = CREATIVE_CATEGORIES[category_key]
-            row = idx // 2
+            row = first_row + idx // 2
             col = idx % 2
 
             btn = self._create_category_button(self.cat_grid, category_key, category_data)
             btn.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
-
-        # Sandbox — wide banner button, bottom row of the categories grid
-        # (spans both columns). Lives here rather than under Operations
-        # since it behaves like a category for selection/WASD purposes:
-        # it's part of CATEGORY_ORDER and toggles via self.session.toggle_category
-        # like any other category button.
-        if "SANDBOX" in BUSINESS_CATEGORIES:
-            sandbox_data = BUSINESS_CATEGORIES["SANDBOX"]
-            sandbox_btn = self._create_sandbox_button(self.cat_grid, "SANDBOX", sandbox_data)
-            sandbox_row = (len(category_order) + 1) // 2
-            sandbox_btn.grid(row=sandbox_row, column=0, columnspan=2, padx=4, pady=4, sticky="nsew")
 
         # Configure grid columns to be equal
         self.cat_grid.columnconfigure(0, weight=1)
@@ -1039,10 +1040,13 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         run_without_flicker(self.root, lambda: self._set_left_panel_collapsed(not self._left_panel_collapsed))
 
     def toggle_details_panel(self):
-        """Collapse/expand the tracker's Selected Project side panel (E)."""
+        """Collapse/expand the right-hand side panel (E): the tracker's
+        Selected Project panel, or the Sandbox browser's Selected Item panel."""
         tracker = getattr(self, "project_tracker", None)
-        if tracker is not None and self.tracker_panel.winfo_ismapped():
+        if tracker is not None and self.tracker_panel.winfo_manager():
             tracker.toggle_details_panel()
+        elif self.sandbox_browser is not None and self.sandbox_browser_panel.winfo_manager():
+            run_without_flicker(self.root, self.sandbox_browser.toggle_details_panel)
 
     def _expand_left_panel_if_focused(self):
         """WASD moved keyboard focus into the sidebar: make sure it is visible."""
@@ -1119,6 +1123,11 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         root_path = join_native_path(get_rack_settings().get_work_drive(), "_Sandbox")
         self.sandbox_browser = SandboxBrowserPanel(
             self.sandbox_browser_panel, root_path, status_callback=self.update_status,
+            hint_callback=self._show_hint,
+            # One folded state for every category's side panel: the
+            # tracker's setting is the source of truth.
+            details_collapsed=self._shared_details_collapsed(),
+            on_details_collapsed=self._set_shared_details_collapsed,
         )
         self.sandbox_browser.pack(fill=tk.BOTH, expand=True)
 
@@ -1167,6 +1176,17 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self._ensure_data_apps()
         self.data_apps_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+    def _shared_details_collapsed(self):
+        tracker = getattr(self, "project_tracker", None)
+        return bool(getattr(tracker, "_details_collapsed", False))
+
+    def _set_shared_details_collapsed(self, collapsed):
+        """The Sandbox panel was folded/unfolded: apply it to the tracker's
+        panel too (which also saves it)."""
+        tracker = getattr(self, "project_tracker", None)
+        if tracker is not None and tracker._details_collapsed != collapsed:
+            tracker._set_details_collapsed(collapsed)
+
     def _show_sandbox_browser_panel(self):
         """Swap the right-hand slot to the Sandbox Browser."""
         if hasattr(self, 'tracker_panel'):
@@ -1181,6 +1201,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
                 side=tk.RIGHT, fill=tk.BOTH, expand=True,
             )
         if self.sandbox_browser is not None:
+            self.sandbox_browser.sync_details_collapsed(self._shared_details_collapsed())
             self.sandbox_browser.refresh()
 
     def _show_invoice_manager_panel(self):

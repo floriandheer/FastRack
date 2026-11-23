@@ -45,6 +45,15 @@ _CARD_BG_SELECTED = "#2d333b"
 _ACCENT = "#58a6ff"
 _MUTED = "#8b949e"
 
+# Selected Item side panel: same look and width rules as the project
+# tracker's Selected Project panel (fastrack_project_explorer).
+_DETAILS_BG = "#1c2128"
+_DETAILS_MIN_WIDTH = 280
+_DETAILS_MAX_WIDTH = 400
+_DETAILS_WIDTH_FRACTION = 0.26
+_DETAILS_RAIL_WIDTH = 34
+_DETAILS_PAD = 14
+
 _GRID_BASE_CARD = 120
 _GRID_CARD_PAD = 16
 _GRID_MAX_CARDS = 400
@@ -91,7 +100,8 @@ def _kind_style(path: str, is_dir: bool) -> Tuple[str, str]:
 class SandboxViewSettings:
     """Remembers view mode and the two size sliders between sessions."""
 
-    DEFAULTS = {"view_mode": "list", "list_scale": 100, "grid_scale": 100}
+    DEFAULTS = {"view_mode": "list", "list_scale": 100, "grid_scale": 100,
+                "details_collapsed": False}
 
     def __init__(self):
         self.path = get_appdata_path() / "sandbox_settings.json"
@@ -119,10 +129,17 @@ class SandboxViewSettings:
 
 
 class SandboxBrowserPanel(tk.Frame):
-    def __init__(self, parent, root_path: str, status_callback=None):
+    def __init__(self, parent, root_path: str, status_callback=None, hint_callback=None,
+                 details_collapsed=None, on_details_collapsed=None):
+        """``details_collapsed`` / ``on_details_collapsed`` let the hub share
+        one folded state between this panel and the project tracker's; when
+        not given, the state is kept in this browser's own settings."""
         super().__init__(parent, bg=COLORS["bg_primary"])
         self.root_path = root_path
         self.status_callback = status_callback
+        self.hint_callback = hint_callback
+        self._initial_details_collapsed = details_collapsed
+        self._on_details_collapsed = on_details_collapsed
         self.tag_store = SandboxTagStore()
         self.view_settings = SandboxViewSettings()
 
@@ -188,11 +205,23 @@ class SandboxBrowserPanel(tk.Frame):
 
     def _build_ui(self):
         self._setup_styles()
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+
+        # Two columns, like the project tracker: the browser (all spare
+        # width) and, flush against the right edge, the collapsible Selected
+        # Item panel. The panel is packed first so the expanding browser
+        # column can't squeeze it.
+        self.details_frame = tk.Frame(self, bg=_DETAILS_BG, width=_DETAILS_MIN_WIDTH,
+                                      highlightthickness=0, bd=0)
+        self.details_frame.pack_propagate(False)
+        self.details_frame.pack(side=tk.RIGHT, fill=tk.Y)
+
+        main = tk.Frame(self, bg=COLORS["bg_primary"])
+        main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(2, weight=1)
 
         # --- Header ---
-        header = tk.Frame(self, bg=COLORS["bg_primary"])
+        header = tk.Frame(main, bg=COLORS["bg_primary"])
         header.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 10))
         header.columnconfigure(1, weight=1)
 
@@ -207,7 +236,7 @@ class SandboxBrowserPanel(tk.Frame):
         ).grid(row=1, column=0, sticky="w", columnspan=2)
 
         # --- Top bar: filter / refresh / open in explorer / size / view ---
-        top_bar = tk.Frame(self, bg=COLORS["bg_primary"])
+        top_bar = tk.Frame(main, bg=COLORS["bg_primary"])
         top_bar.grid(row=1, column=0, sticky="ew", padx=15, pady=(0, 10))
         top_bar.columnconfigure(0, weight=1)
 
@@ -267,19 +296,111 @@ class SandboxBrowserPanel(tk.Frame):
             btn.pack(side=tk.LEFT, padx=(0, 2))
             self._view_mode_buttons[mode] = btn
 
-        # --- View (list/grid) + side panel ---
-        body = tk.Frame(self, bg=COLORS["bg_primary"])
-        body.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 15))
-        body.columnconfigure(0, weight=3)
-        body.columnconfigure(1, weight=2, minsize=300)
-        body.rowconfigure(0, weight=1)
-
-        self.view_container = tk.Frame(body, bg=_BG, highlightthickness=0, bd=0)
-        self.view_container.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        # --- View (list/grid) ---
+        self.view_container = tk.Frame(main, bg=_BG, highlightthickness=0, bd=0)
+        self.view_container.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 15))
 
         self._build_list_view()
         self._build_grid_view()
-        self._build_tag_editor(body)
+        self._build_details_panel()
+
+    # ----- Selected Item side panel (same shape as the tracker's) -----
+
+    def _build_details_panel(self):
+        bg = _DETAILS_BG
+        if self._initial_details_collapsed is not None:
+            self._details_collapsed = bool(self._initial_details_collapsed)
+        else:
+            self._details_collapsed = bool(self.view_settings.get("details_collapsed"))
+        self._details_width = None
+        self._wrap_labels: List[tk.Label] = []
+
+        def bind_toggle(*widgets, glyph):
+            def on_enter(_e):
+                glyph.configure(fg="white")
+                if self.hint_callback:
+                    self.hint_callback("Show/Hide Item Panel: E")
+
+            def on_leave(_e):
+                glyph.configure(fg=_MUTED)
+                if self.hint_callback:
+                    self.hint_callback("")
+
+            for w in widgets:
+                w.configure(cursor="hand2")
+                w.bind("<Button-1>", lambda e: self.toggle_details_panel())
+                w.bind("<Enter>", on_enter)
+                w.bind("<Leave>", on_leave)
+
+        # Collapsed: a thin rail, clickable anywhere, to bring it back.
+        self.details_rail = tk.Frame(self.details_frame, bg=bg)
+        expand_glyph = tk.Label(self.details_rail, text="\u00ab", bg=bg, fg=_MUTED, font=("Arial", 13))
+        expand_glyph.pack(fill=tk.X, pady=(6, 0))
+        bind_toggle(self.details_rail, expand_glyph, glyph=expand_glyph)
+
+        # Expanded
+        self.details_content = tk.Frame(self.details_frame, bg=bg)
+        header = tk.Frame(self.details_content, bg=bg)
+        header.pack(fill=tk.X, padx=(_DETAILS_PAD, 4), pady=(6, 0))
+        tk.Label(header, text="SELECTED ITEM", bg=bg, fg=_MUTED,
+                 font=("Arial", 8, "bold")).pack(side=tk.LEFT)
+        collapse_glyph = tk.Label(header, text="\u00bb", bg=bg, fg=_MUTED, font=("Arial", 13), padx=8)
+        collapse_glyph.pack(side=tk.RIGHT)
+        bind_toggle(collapse_glyph, glyph=collapse_glyph)
+
+        self._build_tag_editor(self.details_content)
+
+        self._set_details_collapsed(self._details_collapsed, save=False)
+        self.bind("<Configure>", self._on_resize, add="+")
+
+    def _on_resize(self, event):
+        if event.widget is self:
+            self._apply_details_width(event.width)
+
+    def _apply_details_width(self, outer_width=None):
+        """Size the panel for the browser's width (or to the collapsed rail)
+        and re-wrap its text, using the tracker's width rules."""
+        if self._details_collapsed:
+            width = _DETAILS_RAIL_WIDTH
+        else:
+            if outer_width is None:
+                outer_width = self.winfo_width()
+            width = max(_DETAILS_MIN_WIDTH,
+                        min(_DETAILS_MAX_WIDTH, int(outer_width * _DETAILS_WIDTH_FRACTION)))
+        if width == self._details_width:
+            return
+        self._details_width = width
+        self.details_frame.configure(width=width)
+        if not self._details_collapsed:
+            wrap = width - 2 * _DETAILS_PAD - 8
+            for label in self._wrap_labels:
+                label.configure(wraplength=wrap)
+            self._flow_existing_tags()
+
+    def _set_details_collapsed(self, collapsed, save=True):
+        if self._details_width is not None and bool(collapsed) == self._details_collapsed:
+            return
+        self._details_collapsed = bool(collapsed)
+        if self._details_collapsed:
+            self.details_content.pack_forget()
+            self.details_rail.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.details_rail.pack_forget()
+            self.details_content.pack(fill=tk.BOTH, expand=True)
+        self._apply_details_width()
+        if save:
+            if self._on_details_collapsed:
+                self._on_details_collapsed(self._details_collapsed)
+            else:
+                self.view_settings.set("details_collapsed", self._details_collapsed)
+
+    def sync_details_collapsed(self, collapsed):
+        """Match a folded state set elsewhere (the tracker's panel)."""
+        self._set_details_collapsed(collapsed, save=False)
+
+    def toggle_details_panel(self):
+        """Collapse the Selected Item panel to a thin rail, or bring it back (E)."""
+        self._set_details_collapsed(not self._details_collapsed)
 
     def _build_list_view(self):
         self.list_frame = tk.Frame(self.view_container, bg=_BG, highlightthickness=0, bd=0)
@@ -345,16 +466,21 @@ class SandboxBrowserPanel(tk.Frame):
 
     def _build_tag_editor(self, parent):
         editor = tk.Frame(parent, bg=COLORS["bg_card"])
-        editor.grid(row=0, column=1, sticky="nsew")
+        editor.pack(fill=tk.BOTH, expand=True, padx=_DETAILS_PAD - 12)
         editor.columnconfigure(0, weight=1)
 
+        # Title block: item name with its path underneath (like the
+        # tracker's project name / client), then Show in Explorer.
+        self.selected_name_var = tk.StringVar(value="")
+        name_label = tk.Label(
+            editor, textvariable=self.selected_name_var, font=("Arial", 13, "bold"),
+            fg="white", bg=COLORS["bg_card"], justify="left", anchor="w",
+        )
+        name_label.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+        self._wrap_labels.append(name_label)
+
         sel_header = tk.Frame(editor, bg=COLORS["bg_card"])
-        sel_header.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
-        sel_header.columnconfigure(0, weight=1)
-        tk.Label(
-            sel_header, text="Selected item", font=font.Font(family="Segoe UI", size=9, weight="bold"),
-            fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
-        ).grid(row=0, column=0, sticky="w")
+        sel_header.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 0))
         self.reveal_btn = make_button(
             sel_header, text="Show in Explorer", command=self._reveal_selected,
             bg=COLORS["bg_secondary"], fg=COLORS["text_primary"],
@@ -362,18 +488,20 @@ class SandboxBrowserPanel(tk.Frame):
             relief=tk.FLAT, cursor="hand2", padx=8, pady=1, state=tk.DISABLED,
             font=font.Font(family="Segoe UI", size=8),
         )
-        self.reveal_btn.grid(row=0, column=1, sticky="e")
+        self.reveal_btn.pack(side=tk.LEFT)
 
-        self.selected_path_var = tk.StringVar(value="Nothing selected")
-        tk.Label(
-            editor, textvariable=self.selected_path_var, font=font.Font(family="Segoe UI", size=9),
-            fg=COLORS["text_primary"], bg=COLORS["bg_card"], wraplength=260, justify="left", anchor="w"
-        ).grid(row=1, column=0, sticky="ew", padx=12)
+        self.selected_path_var = tk.StringVar(value="Select a file or folder to see its details.")
+        path_label = tk.Label(
+            editor, textvariable=self.selected_path_var, font=("Arial", 9),
+            fg=_MUTED, bg=COLORS["bg_card"], wraplength=260, justify="left", anchor="w"
+        )
+        path_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(2, 0))
+        self._wrap_labels.append(path_label)
 
         tk.Label(
             editor, text="Tags (comma-separated)", font=font.Font(family="Segoe UI", size=9, weight="bold"),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
-        ).grid(row=2, column=0, sticky="w", padx=12, pady=(16, 4))
+        ).grid(row=3, column=0, sticky="w", padx=12, pady=(16, 4))
 
         self.tags_var = tk.StringVar()
         self.tags_entry = tk.Entry(
@@ -382,7 +510,7 @@ class SandboxBrowserPanel(tk.Frame):
             insertbackground=COLORS["text_primary"], relief=tk.FLAT, state=tk.DISABLED,
             disabledbackground=COLORS["bg_secondary"], disabledforeground=COLORS["text_secondary"],
         )
-        self.tags_entry.grid(row=3, column=0, sticky="ew", padx=12, ipady=4)
+        self.tags_entry.grid(row=4, column=0, sticky="ew", padx=12, ipady=4)
         self.tags_entry.bind("<Return>", lambda e: self._save_tags())
 
         self.save_tags_btn = make_button(
@@ -391,26 +519,26 @@ class SandboxBrowserPanel(tk.Frame):
             activebackground=COLORS["accent_hover"], relief=tk.FLAT, cursor="hand2",
             state=tk.DISABLED
         )
-        self.save_tags_btn.grid(row=4, column=0, sticky="w", padx=12, pady=(8, 16))
+        self.save_tags_btn.grid(row=5, column=0, sticky="w", padx=12, pady=(8, 16))
 
         tk.Label(
             editor, text="Existing tags", font=font.Font(family="Segoe UI", size=9, weight="bold"),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"]
-        ).grid(row=5, column=0, sticky="w", padx=12, pady=(4, 4))
+        ).grid(row=6, column=0, sticky="w", padx=12, pady=(4, 4))
 
         self.existing_tags_frame = tk.Frame(editor, bg=COLORS["bg_card"])
-        self.existing_tags_frame.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 12))
+        self.existing_tags_frame.grid(row=7, column=0, sticky="ew", padx=12, pady=(0, 12))
 
         self._build_versions_section(editor)
 
     def _build_versions_section(self, editor):
-        editor.rowconfigure(9, weight=1, minsize=96)  # versions list never collapses
+        editor.rowconfigure(10, weight=1, minsize=96)  # versions list never collapses
 
         tk.Frame(editor, height=1, bg=COLORS["border"]).grid(
-            row=7, column=0, sticky="ew", padx=12, pady=(0, 10))
+            row=8, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         header = tk.Frame(editor, bg=COLORS["bg_card"])
-        header.grid(row=8, column=0, sticky="ew", padx=12, pady=(0, 6))
+        header.grid(row=9, column=0, sticky="ew", padx=12, pady=(0, 6))
         header.columnconfigure(0, weight=1)
         tk.Label(
             header, text="Versions", font=font.Font(family="Segoe UI", size=9, weight="bold"),
@@ -426,7 +554,7 @@ class SandboxBrowserPanel(tk.Frame):
         self.version_up_btn.grid(row=0, column=1, sticky="e")
 
         list_frame = tk.Frame(editor, bg=COLORS["bg_card"])
-        list_frame.grid(row=9, column=0, sticky="nsew", padx=12, pady=(0, 4))
+        list_frame.grid(row=10, column=0, sticky="nsew", padx=12, pady=(0, 4))
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 
@@ -446,18 +574,21 @@ class SandboxBrowserPanel(tk.Frame):
         self._version_paths = {}  # versions_tree iid -> absolute path
 
         self.versions_hint_var = tk.StringVar(value="Select a file to see its versions.")
-        tk.Label(
+        self._versions_hint_label = tk.Label(
             editor, textvariable=self.versions_hint_var, font=font.Font(family="Segoe UI", size=8),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"], wraplength=260,
             justify="left", anchor="w",
-        ).grid(row=10, column=0, sticky="ew", padx=12, pady=(0, 8))
+        )
+
+        self._versions_hint_label.grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 8))
+        self._wrap_labels.append(self._versions_hint_label)
 
         self._build_note_section(editor)
 
     def _build_note_section(self, editor):
         """Note for the version selected in the Versions list."""
         header = tk.Frame(editor, bg=COLORS["bg_card"])
-        header.grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 4))
+        header.grid(row=12, column=0, sticky="ew", padx=12, pady=(0, 4))
         header.columnconfigure(0, weight=1)
         self.note_title_var = tk.StringVar(value="Note")
         tk.Label(
@@ -474,7 +605,7 @@ class SandboxBrowserPanel(tk.Frame):
         self.note_save_btn.grid(row=0, column=1, sticky="e")
 
         text_frame = tk.Frame(editor, bg=COLORS["bg_card"])
-        text_frame.grid(row=12, column=0, sticky="ew", padx=12, pady=(0, 4))
+        text_frame.grid(row=13, column=0, sticky="ew", padx=12, pady=(0, 4))
         text_frame.columnconfigure(0, weight=1)
         self.note_text = tk.Text(
             text_frame, height=4, wrap="word", undo=True,
@@ -492,11 +623,13 @@ class SandboxBrowserPanel(tk.Frame):
         self.note_text.bind("<Control-S>", lambda e: (self._flush_note(), "break")[1])
 
         self.note_hint_var = tk.StringVar(value="Select a version to write a note about it.")
-        tk.Label(
+        self._note_hint_label = tk.Label(
             editor, textvariable=self.note_hint_var, font=font.Font(family="Segoe UI", size=8),
             fg=COLORS["text_secondary"], bg=COLORS["bg_card"], wraplength=260,
             justify="left", anchor="w",
-        ).grid(row=13, column=0, sticky="ew", padx=12, pady=(0, 12))
+        )
+        self._note_hint_label.grid(row=14, column=0, sticky="ew", padx=12, pady=(0, 12))
+        self._wrap_labels.append(self._note_hint_label)
         self.versions_tree.bind("<<TreeviewSelect>>", self._on_version_select)
 
     def _set_placeholder(self, entry: tk.Entry, text: str):
@@ -1131,13 +1264,15 @@ class SandboxBrowserPanel(tk.Frame):
         the side panel and the grid highlight."""
         self._selected = path
         if path:
+            self.selected_name_var.set(os.path.basename(path.rstrip("\\/")) or path)
             self.selected_path_var.set(path)
             self.tags_var.set(", ".join(self.tag_store.get_tags(path)))
             self.tags_entry.config(state=tk.NORMAL)
             self.save_tags_btn.config(state=tk.NORMAL)
             self.reveal_btn.config(state=tk.NORMAL)
         else:
-            self.selected_path_var.set("Nothing selected")
+            self.selected_name_var.set("")
+            self.selected_path_var.set("Select a file or folder to see its details.")
             self.tags_var.set("")
             self.tags_entry.config(state=tk.DISABLED)
             self.save_tags_btn.config(state=tk.DISABLED)
@@ -1400,6 +1535,7 @@ class SandboxBrowserPanel(tk.Frame):
             self.tree.set(iid, "tags", ", ".join(self.tag_store.get_tags(new_path)))
 
         self._selected = new_path
+        self.selected_name_var.set(os.path.basename(new_path))
         self.selected_path_var.set(new_path)
         self._refresh_versions()
         if self.view_mode.get() == "grid":
@@ -1424,7 +1560,23 @@ class SandboxBrowserPanel(tk.Frame):
                 activebackground=COLORS["bg_hover"], relief=tk.FLAT, cursor="hand2",
                 font=font.Font(family="Segoe UI", size=8)
             )
-            btn.pack(side=tk.LEFT, padx=(0, 4), pady=2)
+        self._flow_existing_tags()
+
+    def _flow_existing_tags(self):
+        """Lay the existing-tag buttons out left to right, wrapping to a new
+        row whenever the next one wouldn't fit the panel."""
+        frame = getattr(self, "existing_tags_frame", None)
+        if frame is None or not self._details_width:
+            return
+        available = self._details_width - 2 * _DETAILS_PAD - 4
+        row = col = used = 0
+        for btn in frame.winfo_children():
+            w = btn.winfo_reqwidth() + 4
+            if col and used + w > available:
+                row, col, used = row + 1, 0, 0
+            btn.grid(row=row, column=col, padx=(0, 4), pady=2, sticky="w")
+            col += 1
+            used += w
 
     def _append_tag(self, tag: str):
         current = [t.strip() for t in self.tags_var.get().split(",") if t.strip()]

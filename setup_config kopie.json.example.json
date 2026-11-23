@@ -293,6 +293,16 @@
       "url": "https://resolume.com/download/"
     },
     {
+      "name": "Kiosk",
+      "category": "General",
+      "install_method": "manual",
+      "exe": "Kiosk",
+      "why": "Asset library for DCC apps",
+      "detect_paths": [
+        "%ProgramFiles%\\Kiosk Library\\Kiosk.exe"
+      ]
+    },
+    {
       "name": "TouchDesigner",
       "category": "Realtime",
       "install_method": "manual",

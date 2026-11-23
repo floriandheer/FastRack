@@ -122,6 +122,10 @@ DEFAULT_CONFIG: dict = {
     # launches anything, and you stay there while each app's window is
     # moved to its own desktop.
     "final_desktop": 1,
+    # If a display an app is assigned to is off at logon, the launcher
+    # keeps watching this many minutes and moves those apps over as soon
+    # as it turns on. 0 = off. Capped at 55 (the task's 1h time limit).
+    "display_watch_minutes": 45,
     "apps": [],
 }
 
@@ -511,6 +515,32 @@ def run_launcher_now() -> tuple[bool, str]:
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"failed to launch: {exc}"
     return True, f"Launched {script.name} in a new console."
+
+
+def arrange_windows_now() -> tuple[bool, str]:
+    """Move the startup apps' already-open windows to their configured
+    monitor + desktop without launching anything (``-Arrange``). For when
+    a display was off at logon and got switched on later. Runs hidden;
+    the result is logged to logs\\startup_launcher.log."""
+    if sys.platform != "win32":
+        return False, "Launcher is Windows-only."
+    # Always redeploy: an older deployed copy has no -Arrange switch.
+    ok, detail = deploy_launcher_script()
+    if not ok:
+        return False, f"could not deploy launcher: {detail}"
+    try:
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-ExecutionPolicy", "Bypass",
+                "-NoProfile", "-WindowStyle", "Hidden",
+                "-File", str(deployed_launcher_path()), "-Arrange",
+            ],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"failed to launch: {exc}"
+    return True, "Moving startup apps to their displays."
 
 
 # ============================================================

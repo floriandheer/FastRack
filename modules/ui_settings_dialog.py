@@ -1889,6 +1889,18 @@ class SettingsDialog:
                  values=list(self._STARTUP_DESKTOP_CHOICES),
                  state="readonly", width=6))
 
+        self._startup_display_watch_var = tk.IntVar(
+            value=int(self._startup_cfg.get("display_watch_minutes", 45))
+        )
+        _bind(self._startup_display_watch_var, self._startup_cfg,
+              "display_watch_minutes", 0)
+        _row(2, "Wait for a display that is off",
+             "Apps for it are moved over once it turns on (0 = off)",
+             lambda p: ttk.Spinbox(
+                 p, from_=0, to=55, increment=5, width=8,
+                 textvariable=self._startup_display_watch_var),
+             unit="min")
+
     def _build_startup_apps_tab(self, parent):
         try:
             import startup_apps_manager as sam  # noqa: WPS433
@@ -1934,6 +1946,8 @@ class SettingsDialog:
         self._startup_task_btn = _btn(top, "...", self._startup_toggle_task)
         _btn(top, "Test now", self._startup_test_now,
              COLORS["accent_dark"]).pack(side=tk.RIGHT)
+        _btn(top, "Move to displays", self._startup_arrange_now).pack(
+            side=tk.RIGHT, padx=(0, 6))
         self._startup_task_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
         # ----- Window placement (wait bound + landing desktop) -----
@@ -2650,6 +2664,21 @@ class SettingsDialog:
         ok, detail = sam.run_launcher_now()
         if not ok:
             messagebox.showerror("Could not run launcher", detail, parent=self.dialog)
+
+    def _startup_arrange_now(self):
+        """Save, then move the already-open startup apps to their
+        configured monitor/desktop (for a display that was off at logon).
+        Nothing is launched."""
+        sam = self._sam
+        self._startup_cfg["enabled"] = bool(self._startup_enabled_var.get())
+        try:
+            sam.save_config(self._startup_cfg)
+        except OSError as e:
+            messagebox.showerror("Save failed", str(e), parent=self.dialog)
+            return
+        ok, detail = sam.arrange_windows_now()
+        if not ok:
+            messagebox.showerror("Could not move apps", detail, parent=self.dialog)
 
     # ============================================================
     # Workstation Apps tab

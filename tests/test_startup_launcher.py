@@ -80,6 +80,11 @@ foreach ($c in $cases) {
                 $out[$c.id] = $null
             }
         }
+        'existing' {
+            $spec = @{ Label = [string]$c.spec.Label; Title = [string]$c.spec.Title; ProcessNames = @($c.spec.ProcessNames); Hints = @($c.spec.Hints) }
+            $pick = Select-ExistingAppWindow -Spec $spec -Windows @($c.windows)
+            if ($pick) { $out[$c.id] = @{ hwnd = $pick.Window.Hwnd; rule = $pick.Rule } } else { $out[$c.id] = $null }
+        }
         'spec' {
             $s = Get-AppSpec -AppEntry $c.app -ProcessRemap (ConvertTo-Table $c.remap) -WindowTitleRemap (ConvertTo-Table $c.titles)
             $out[$c.id] = @{ label = $s.Label; title = $s.Title; names = @($s.ProcessNames); hints = @($s.Hints) }
@@ -196,6 +201,28 @@ CASES = [
                  _win(72, 26780, "musicbee", "MusicBee")]},
     {"id": "sel_nothing", "fn": "select", "tree": [100],
      "spec": _spec(names=["obsidian"]), "windows": []},
+
+    # --- Select-ExistingAppWindow (-Arrange) --------------------------
+    # The real FastRack window is fullscreen (frameless) and bigger; the
+    # "Track" pythonw window must not be taken for it.
+    {"id": "ex_fullscreen_named", "fn": "existing",
+     "spec": dict(_spec(names=["pyw", "pythonw", "python"], hints=["Fastrack", "pyw"]), Label="Fastrack"),
+     "windows": [_win(11, 900, "pythonw", "Track", area=892_004),
+                 _win(12, 901, "pythonw", "FastRack v0.5.0", framed=False, area=3_686_400)]},
+    # "2_Wiki" matches the Edge app window titled "Wiki".
+    {"id": "ex_digit_prefix", "fn": "existing",
+     "spec": dict(_spec(names=["msedge"], hints=["2_Wiki", "msedge_proxy"]), Label="2_Wiki"),
+     "windows": [_win(21, 40, "msedge", "Some page - Microsoft Edge", area=9_000_000),
+                 _win(22, 41, "msedge", "Wiki", area=3_000_000)]},
+    {"id": "ex_single_candidate", "fn": "existing",
+     "spec": dict(_spec(names=["thunderbird"], hints=["mail"]), Label="mail"),
+     "windows": [_win(31, 50, "thunderbird", "Inbox - Mozilla Thunderbird")]},
+    {"id": "ex_ambiguous", "fn": "existing",
+     "spec": dict(_spec(names=["pythonw"], hints=["Fastrack"]), Label="Fastrack"),
+     "windows": [_win(41, 60, "pythonw", "Track"), _win(42, 61, "pythonw", "Tool")]},
+    {"id": "ex_title_remap", "fn": "existing",
+     "spec": dict(_spec(names=["pythonw"], title="FastRack"), Label="launcher"),
+     "windows": [_win(51, 70, "pythonw", "Track"), _win(52, 71, "pythonw", "FastRack v0.5.0")]},
 
     # --- Get-AppSpec / Get-AppWaitMs ----------------------------------
     {"id": "spec_lnk_to_pyw", "fn": "spec", "remap": PROCESS_REMAP,
@@ -324,6 +351,26 @@ def test_browser_tab_mentioning_the_app_is_not_its_window(ps):
 
 def test_larger_window_wins_between_equal_matches(ps):
     assert ps["sel_larger_wins"]["hwnd"] == 52
+
+
+def test_arrange_finds_fullscreen_window_by_its_title(ps):
+    assert ps["ex_fullscreen_named"] == {"hwnd": 12, "rule": "process name + title"}
+
+
+def test_arrange_matches_label_without_its_number_prefix(ps):
+    assert ps["ex_digit_prefix"]["hwnd"] == 22
+
+
+def test_arrange_takes_a_lone_window_of_the_process(ps):
+    assert ps["ex_single_candidate"] == {"hwnd": 31, "rule": "process name"}
+
+
+def test_arrange_leaves_ambiguous_windows_alone(ps):
+    assert ps["ex_ambiguous"] is None
+
+
+def test_arrange_honours_title_remap(ps):
+    assert ps["ex_title_remap"] == {"hwnd": 52, "rule": "title"}
 
 
 def test_title_remap_is_authoritative(ps):
