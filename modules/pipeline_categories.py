@@ -667,9 +667,11 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
                 "icon": "🚀",
             },
         ],
-        # The software whose data runs through the sync pipeline, shown as
-        # cards in the Data Manager's right-hand panel. Each card lists the
-        # tools that move that software's data between devices/instances.
+        # The software whose data runs through the sync pipeline. This only
+        # seeds the Data Manager's data map on first run (shared_data_map);
+        # after that the user edits the map in the UI and it lives in
+        # <appdata>/data_map.json. Each entry lists the tools that move
+        # that software's data between devices/instances.
         # A tool is referenced by (category, subtype or None, script key),
         # so it can live in any category (e.g. Traktor's sync tools stay
         # under Audio > DJ). Sync helpers (Syncthing) are tools, not apps.

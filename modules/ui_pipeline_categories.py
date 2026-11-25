@@ -129,6 +129,40 @@ CREATIVE_CATEGORIES, BUSINESS_CATEGORIES = _build_menu()
 PIPELINE_CATEGORIES = {**CREATIVE_CATEGORIES, **BUSINESS_CATEGORIES}
 
 
+def resolve_tool_ref(ref):
+    """``(category, subtype or None, script key)`` -> ``(category_key,
+    script_key, subcat_key, script_data)`` in the UPPER-cased menu keys
+    ``run_script`` expects, or None when the script no longer exists."""
+    if not ref or len(ref) != 3:
+        return None
+    cat_name, sub_key, script_key = ref
+    cat_key = str(cat_name).upper()
+    sub_menu_key = str(sub_key).upper() if sub_key else None
+    cat_entry = PIPELINE_CATEGORIES.get(cat_key, {})
+    if sub_menu_key:
+        scripts = cat_entry.get("subcategories", {}).get(sub_menu_key, {}).get("scripts", {})
+    else:
+        scripts = cat_entry.get("scripts", {})
+    script_data = scripts.get(script_key)
+    if script_data is None:
+        return None
+    return (cat_key, script_key, sub_menu_key, script_data)
+
+
+def all_tool_refs():
+    """Every script in the menu as ``(ref, label)``, for pickers. ``ref`` is
+    ``[CATEGORY, SUBCAT or None, script_key]``; label reads
+    "Category › Subtype › Script"."""
+    out = []
+    for cat_key, cat in PIPELINE_CATEGORIES.items():
+        for key, data in cat.get("scripts", {}).items():
+            out.append(([cat_key, None, key], f"{cat['name']} › {data['name']}"))
+        for sub_key, sub in cat.get("subcategories", {}).items():
+            for key, data in sub.get("scripts", {}).items():
+                out.append(([cat_key, sub_key, key], f"{cat['name']} › {sub['name']} › {data['name']}"))
+    return out
+
+
 def data_apps():
     """The Data Manager's synced-software cards, resolved to menu entries.
 
@@ -139,19 +173,7 @@ def data_apps():
     """
     apps = []
     for app in CATEGORIES.get("Data", {}).get("apps", []):
-        tools = []
-        for cat_name, sub_key, script_key in app.get("tools", []):
-            cat_key = cat_name.upper()
-            sub_menu_key = sub_key.upper() if sub_key else None
-            cat_entry = PIPELINE_CATEGORIES.get(cat_key, {})
-            if sub_menu_key:
-                scripts = cat_entry.get("subcategories", {}).get(sub_menu_key, {}).get("scripts", {})
-            else:
-                scripts = cat_entry.get("scripts", {})
-            script_data = scripts.get(script_key)
-            if script_data is None:
-                continue
-            tools.append((cat_key, script_key, sub_menu_key, script_data))
+        tools = [t for t in (resolve_tool_ref(r) for r in app.get("tools", [])) if t]
         apps.append({
             "key": app["key"],
             "name": app.get("name", app["key"]),

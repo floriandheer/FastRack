@@ -33,6 +33,7 @@ logger = get_logger("musicbee_playlists")
 
 SEP = b"\xff\xff\xff\xff"
 MBP_VERSION = 4
+MBP_VERSIONS = (4, 5)          # MusicBee 3.x writes 4, newer builds write 5 with the same layout
 MUSICBEE_PROCESS_NAMES = ("musicbee.exe",)
 DEFAULT_XML_NAME = "iTunes Music Library.xml"
 
@@ -87,9 +88,12 @@ def _read7(data: bytes, i: int) -> Tuple[int, int]:
 @dataclass
 class Mbp:
     """version | 7bit-len block(fields joined by \\0, first field = description) | 04 00 |
-    SEP 00000000 SEP | count | per entry: 7bit-len + UTF-8 path + SEP"""
+    SEP 00000000 SEP | count | per entry: 7bit-len + UTF-8 path + SEP | (version 5 only) 4-byte footer,
+    00000000 in every file seen so far; it is kept as read and written back unchanged."""
     entries: List[str]
     fields: List[str] = field(default_factory=lambda: ["", "", "M:\\", "0", "False", "", "-2"])
+    version: int = MBP_VERSION
+    footer: bytes = b""
 
     @property
     def description(self) -> str:
@@ -97,19 +101,21 @@ class Mbp:
 
     def to_bytes(self) -> bytes:
         block = b"\x00".join(f.encode("utf-8") for f in self.fields) + b"\x00"
-        out = bytearray(struct.pack("<I", MBP_VERSION))
+        out = bytearray(struct.pack("<I", self.version))
         out += _enc7(len(block)) + block + b"\x04\x00" + SEP + b"\x00\x00\x00\x00" + SEP
         out += struct.pack("<I", len(self.entries))
         for p in self.entries:
             raw = p.encode("utf-8")
             out += _enc7(len(raw)) + raw + SEP
+        out += self.footer if self.version >= 5 else b""
         return bytes(out)
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Mbp":
         try:
-            if struct.unpack_from("<I", data, 0)[0] != MBP_VERSION:
-                raise MbpFormatError("unsupported .mbp version")
+            (version,) = struct.unpack_from("<I", data, 0)
+            if version not in MBP_VERSIONS:
+                raise MbpFormatError(f"unsupported .mbp version {version}")
             n, i = _read7(data, 4)
             block = data[i:i + n]
             i += n
@@ -135,9 +141,15 @@ class Mbp:
                     raise MbpFormatError("missing entry separator")
                 i += 4
                 entries.append(raw.decode("utf-8"))
+            footer = b""
+            if version >= 5:
+                footer = data[i:i + 4]
+                if len(footer) != 4:
+                    raise MbpFormatError("missing version 5 footer")
+                i += 4
             if i != len(data):
                 raise MbpFormatError("trailing bytes")
-            return cls(entries, fields)
+            return cls(entries, fields, version, footer)
         except (struct.error, IndexError, UnicodeDecodeError) as e:
             raise MbpFormatError(str(e)) from e
 
@@ -209,11 +221,14 @@ class LibraryIndex:
         self.tracks: Dict[str, LibraryTrack] = {}
         self._by_path: Dict[str, str] = {}
         self._tok: Dict[str, Tuple[List[str], frozenset]] = {}
+        self._ctx: Dict[str, frozenset] = {}     # album + folder words, e.g. "Remixes" for an untagged remix
         for t in tracks:
             self.tracks[t.track_id] = t
             if t.path:
                 self._by_path[norm_path(t.path)] = t.track_id
             self._tok[t.track_id] = (_tokens(t.title), frozenset(_tokens(t.artist)))
+            folder = os.path.dirname((t.path or "").replace("\\", "/"))
+            self._ctx[t.track_id] = frozenset(_tokens(t.album) + _tokens(folder))
 
     def __len__(self) -> int:
         return len(self.tracks)
@@ -254,6 +269,7 @@ class LibraryIndex:
         name = os.path.splitext(os.path.basename(dead_path.replace("\\", "/")))[0]
         file_tokens = _tokens(name)
         file_set = set(file_tokens)
+        file_squashed = "".join(file_tokens)
         path_set = set(_tokens(dead_path))
         hits = []
         for tid, (title_toks, artist_toks) in self._tok.items():
@@ -261,14 +277,31 @@ class LibraryIndex:
                 continue
             it = iter(file_tokens)
             if not all(tok in it for tok in title_toks):
-                continue
-            if (file_set & _VERSION_WORDS) - set(title_toks):
+                # "MissionThunderstorm III" is still "Mission Thunderstorm III"
+                squashed = "".join(title_toks)
+                if len(squashed) < 6 or squashed not in file_squashed:
+                    continue
+            # A remix file may only map to a track that is a remix too: by its title, or by its
+            # album/folder when the title tag leaves the version out ("Remixes (Deluxe)").
+            ctx = self._ctx.get(tid, frozenset())
+            missing = (file_set & _VERSION_WORDS) - set(title_toks)
+            if any(not any(c.startswith(w) for c in ctx) for w in missing):
                 continue
             hits.append(tid)
         if not hits:
             return None, 0
         longest = max(len(self._tok[t][0]) for t in hits)
         top = [t for t in hits if len(self._tok[t][0]) == longest]
+        if len(top) > 1:
+            # Same song in several formats: take the one in the dead file's format, then the M: copy.
+            ext = os.path.splitext(dead_path)[1].casefold()
+            for keep in (lambda t: os.path.splitext(self.tracks[t].path)[1].casefold() == ext,
+                         lambda t: on_preferred_drive(self.tracks[t].path)):
+                narrowed = [t for t in top if keep(t)]
+                if len(narrowed) == 1:
+                    return self.tracks[narrowed[0]], 1
+                if narrowed:
+                    top = narrowed
         return (self.tracks[top[0]] if len(top) == 1 else None), len(top)
 
 
@@ -451,6 +484,25 @@ def musicbee_running() -> bool:
     return False
 
 
+def close_musicbee(timeout: float = 30.0, poll: float = 0.5) -> bool:
+    """Ask MusicBee to close the normal way (like clicking its X, so it saves its playlists and library),
+    then wait for it to exit. Never force-kills. Returns True once it is no longer running."""
+    if sys.platform != "win32" or not musicbee_running():
+        return True
+    for image in MUSICBEE_PROCESS_NAMES:
+        try:
+            subprocess.run(["taskkill", "/IM", image], capture_output=True, text=True, timeout=10,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            logger.warning(f"taskkill failed: {e}")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not musicbee_running():
+            return True
+        time.sleep(poll)
+    return not musicbee_running()
+
+
 @dataclass
 class RepairResult:
     files_changed: List[str] = field(default_factory=list)
@@ -538,7 +590,7 @@ def apply_edits(edits: Dict[str, FileEdit], apply: bool = False, backup_root: Op
 
         os.makedirs(backup_dir, exist_ok=True)
         shutil.copy2(file, os.path.join(backup_dir, f"{len(result.files_changed):03d}_{os.path.basename(file)}"))
-        new_bytes = Mbp(new_entries, mbp.fields).to_bytes()
+        new_bytes = Mbp(new_entries, mbp.fields, mbp.version, mbp.footer).to_bytes()
         tmp = f"{file}.tmp-{os.getpid()}"
         with open(tmp, "wb") as f:
             f.write(new_bytes)

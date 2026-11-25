@@ -155,7 +155,9 @@ class CleanupApp:
         self.scan_btn = ttk.Button(bar, text="Scan", command=self._start_scan)
         self.scan_btn.pack(side=tk.LEFT)
         self.musicbee_var = tk.StringVar()
-        ttk.Label(bar, textvariable=self.musicbee_var).pack(side=tk.LEFT, padx=14)
+        ttk.Label(bar, textvariable=self.musicbee_var).pack(side=tk.LEFT, padx=(14, 6))
+        self.close_mb_btn = ttk.Button(bar, text="Close MusicBee", command=self._close_musicbee, state=tk.DISABLED)
+        self.close_mb_btn.pack(side=tk.LEFT, padx=(0, 14))
         self.xml_info_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.xml_info_var, foreground="gray").pack(side=tk.LEFT, padx=4)
 
@@ -278,7 +280,32 @@ class CleanupApp:
     def _refresh_musicbee_status(self) -> bool:
         running = mb.musicbee_running()
         self.musicbee_var.set("MusicBee is running - close it before fixing" if running else "MusicBee is closed")
+        self.close_mb_btn.config(state=tk.NORMAL if running else tk.DISABLED)
         return running
+
+    def _close_musicbee(self) -> None:
+        self.close_mb_btn.config(state=tk.DISABLED)
+        self.musicbee_var.set("Closing MusicBee...")
+        self.status_var.set("Waiting for MusicBee to save and close...")
+
+        def worker():
+            closed = mb.close_musicbee()
+            self.root.after(0, self._musicbee_close_done, closed)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _musicbee_close_done(self, closed: bool) -> None:
+        self._refresh_musicbee_status()
+        if not closed:
+            self.status_var.set("MusicBee did not close")
+            dialogs.show_warning(
+                self.root, APP_NAME, "MusicBee is still open",
+                "MusicBee was asked to close but is still running. It may be showing a question or busy "
+                "with a task. Switch to MusicBee, finish or close it there, then press “Scan” again.")
+            return
+        # MusicBee writes its playlists and the XML when it closes, so the earlier findings may be stale.
+        self.status_var.set("MusicBee closed - rescanning")
+        self._start_scan()
 
     def _start_scan(self) -> None:
         if self.scanning:
@@ -480,7 +507,8 @@ class CleanupApp:
             dialogs.show_warning(
                 self.root, APP_NAME, "Close MusicBee first",
                 "MusicBee rewrites its playlists when it closes, so a change made while it is open would be lost.\n\n"
-                "Close MusicBee, then press \u201cFix ticked\u201d again.")
+                "Press \u201cClose MusicBee\u201d at the top (it rescans once MusicBee has closed), "
+                "then press \u201cFix ticked\u201d again.")
             return
 
         counts = {"replace": 0, "remove": 0, "dedupe": 0}

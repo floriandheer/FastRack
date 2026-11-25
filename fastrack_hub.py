@@ -61,7 +61,7 @@ from shared_scrollbar_style import apply_clean_scrollbars, clean_scrollbar_style
 from ui_theme import COLORS, CATEGORY_COLORS, make_flat_button, run_without_flicker
 from ui_pipeline_categories import (
     APP_NAME, APP_VERSION, LOGO_PATH,
-    CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES, data_apps,
+    CREATIVE_CATEGORIES, BUSINESS_CATEGORIES, PIPELINE_CATEGORIES, resolve_tool_ref, all_tool_refs,
 )
 from ui_config_manager import ConfigManager
 from ui_settings_dialog import SettingsDialog
@@ -85,8 +85,8 @@ def _invoice_manager_class():
 # Sandbox Browser is embedded in the right panel when the Sandbox
 # category is selected (in place of the project tracker).
 from ui_sandbox_browser import SandboxBrowserPanel
-from ui_data_apps_panel import DataAppsPanel
-from workstation_apps import launch_app as launch_workstation_app
+from ui_data_map_panel import DataMapPanel
+from workstation_apps import launch_app as launch_workstation_app, load_apps as load_workstation_apps
 
 
 def event_has_shift(event) -> bool:
@@ -810,7 +810,7 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         )
         self.sandbox_browser = None  # populated by _ensure_sandbox_browser
 
-        # Data Manager panel - synced-software cards, built lazily on
+        # Data Manager panel - the editable data map, built lazily on
         # first Data Manager selection.
         self.data_apps_panel = tk.Frame(
             main_container, bg=COLORS["bg_primary"]
@@ -1041,12 +1041,15 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
 
     def toggle_details_panel(self):
         """Collapse/expand the right-hand side panel (E): the tracker's
-        Selected Project panel, or the Sandbox browser's Selected Item panel."""
+        Selected Project panel, the Sandbox browser's Selected Item panel,
+        or the Data Manager's Selected Dataset panel."""
         tracker = getattr(self, "project_tracker", None)
         if tracker is not None and self.tracker_panel.winfo_manager():
             tracker.toggle_details_panel()
         elif self.sandbox_browser is not None and self.sandbox_browser_panel.winfo_manager():
             run_without_flicker(self.root, self.sandbox_browser.toggle_details_panel)
+        elif self.data_apps is not None and self.data_apps_panel.winfo_manager():
+            run_without_flicker(self.root, self.data_apps.toggle_details_panel)
 
     def _expand_left_panel_if_focused(self):
         """WASD moved keyboard focus into the sidebar: make sure it is visible."""
@@ -1132,32 +1135,45 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
         self.sandbox_browser.pack(fill=tk.BOTH, expand=True)
 
     def _ensure_data_apps(self):
-        """Lazy-create the Data Manager's synced-software cards."""
+        """Lazy-create the Data Manager's data map."""
         if self.data_apps is not None:
             return
-        self.data_apps = DataAppsPanel(
-            self.data_apps_panel, data_apps(), self._make_data_app_tool_row,
-            launch_app=self._launch_data_app,
+
+        def app_names():
+            try:
+                return sorted(a.name for a in load_workstation_apps())
+            except Exception:
+                logger.exception("Could not read the workstation apps catalog")
+                return []
+
+        self.data_apps = DataMapPanel(
+            self.data_apps_panel, self._make_data_app_tool_row, resolve_tool_ref,
+            launch_app=self._launch_data_app, app_names=app_names,
+            tool_refs=all_tool_refs, status=self.update_status,
             accent=CATEGORY_COLORS.get("DATA", COLORS["accent"]),
+            # One folded state for every category's side panel: the
+            # tracker's setting is the source of truth.
+            details_collapsed=self._shared_details_collapsed(),
+            on_details_collapsed=self._set_shared_details_collapsed,
+            hint=self._show_hint,
         )
         self.data_apps.pack(fill=tk.BOTH, expand=True)
 
-    def _launch_data_app(self, app):
-        """Start a Data Manager card's software. Locating the exe can hit
+    def _launch_data_app(self, name):
+        """Start a catalog app from the data map. Locating the exe can hit
         the registry, so it runs off the UI thread."""
-        name = app["launch"]
-        self.update_status(f"Launching {app['name']}...")
+        self.update_status(f"Launching {name}...")
 
         def work():
             try:
                 error = launch_workstation_app(name)
             except Exception as e:
                 logger.exception(f"Could not launch {name}")
-                error = f"Could not launch {app['name']}: {e}"
+                error = f"Could not launch {name}: {e}"
             if error:
                 self.root.after(0, lambda: self.update_status(error, "error"))
             else:
-                self.root.after(0, lambda: self.update_status(f"{app['name']} launched.", "success"))
+                self.root.after(0, lambda: self.update_status(f"{name} launched.", "success"))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1171,9 +1187,10 @@ class ProfessionalPipelineGUI(KeyboardNavigatorMixin):
             self.tool_buttons = saved
 
     def _show_data_apps_panel(self):
-        """Swap the right-hand slot to the Data Manager's app cards."""
+        """Swap the right-hand slot to the Data Manager's data map."""
         self._hide_right_panels()
         self._ensure_data_apps()
+        self.data_apps.sync_details_collapsed(self._shared_details_collapsed())
         self.data_apps_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
     def _shared_details_collapsed(self):
