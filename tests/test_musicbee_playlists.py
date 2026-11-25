@@ -48,6 +48,20 @@ def test_roundtrip_unicode_long_path_and_description():
     assert parsed.to_bytes() == data
 
 
+def test_version5_with_footer_roundtrips():
+    data = b"\x05" + SINGLE_ENTRY_BYTES[1:] + b"\x00\x00\x00\x00"
+    parsed = mb.Mbp.from_bytes(data)
+    assert parsed.version == 5 and parsed.entries == [SINGLE_ENTRY_PATH]
+    assert parsed.to_bytes() == data
+    edited = mb.Mbp([r"M:\Music\x\y.flac"], parsed.fields, parsed.version, parsed.footer).to_bytes()
+    assert mb.Mbp.from_bytes(edited).entries == [r"M:\Music\x\y.flac"]
+
+
+def test_version5_without_footer_is_rejected():
+    with pytest.raises(mb.MbpFormatError):
+        mb.Mbp.from_bytes(b"\x05" + SINGLE_ENTRY_BYTES[1:])
+
+
 def test_reader_rejects_trailing_bytes():
     with pytest.raises(mb.MbpFormatError):
         mb.Mbp.from_bytes(SINGLE_ENTRY_BYTES + b"\x00")
@@ -97,6 +111,29 @@ def test_resolve_ambiguous_returns_none():
 def test_resolve_never_maps_remix_to_original():
     track, _ = make_index().resolve(r"C:\dl\complete\Oklou - Endless (Someone Remix).flac")
     assert track is None
+
+
+def test_resolve_remix_tagged_only_in_album():
+    idx = mb.LibraryIndex([mb.LibraryTrack(
+        "1", r"M:\Music\Rheinzand\Rheinzand Remixes (Deluxe)\2-04 Kills & Kisses.flac",
+        "Rheinzand", "Kills & Kisses", "Rheinzand Remixes (Deluxe)")])
+    track, n = idx.resolve(r"C:\dl\complete\u\CD2\04 - Rheinzand - Kills & Kisses (Skylab Remix).flac")
+    assert track is not None and track.track_id == "1" and n == 1
+
+
+def test_resolve_title_written_without_spaces():
+    idx = mb.LibraryIndex([_track("1", "Mr. Gasmask", "Mission Thunderstorm III")])
+    track, _ = idx.resolve(r"C:\dl\MR GASMASK\02 Mr.Gasmask - MissionThunderstorm III.flac")
+    assert track is not None and track.track_id == "1"
+
+
+def test_resolve_same_song_two_formats_takes_dead_files_format():
+    idx = mb.LibraryIndex([
+        _track("1", "Mr. Gasmask", "Crooked Cooking", r"M:\Music\VA\FTSK07\03 Crooked Cooking.mp3"),
+        _track("2", "Mr. Gasmask", "Crooked Cooking", r"M:\Music\VA\FTSK07\03 Crooked Cooking.flac"),
+    ])
+    track, n = idx.resolve(r"C:\dl\MR GASMASK\B1 - Mr. Gasmask - Crooked Cooking.flac")
+    assert track.track_id == "2" and n == 1
 
 
 def test_resolve_no_match():
@@ -489,3 +526,26 @@ def test_ticking_every_copy_warns_by_song_name(monkeypatch, tk_window):
         assert warned and warned[0][0] == "Keep at least one copy of each song" and "A - B" in warned[0][1]
     finally:
         pass
+
+
+# ---------------------------------------------------------------- close MusicBee
+
+def test_close_musicbee_asks_politely_and_waits(monkeypatch):
+    calls = []
+    state = {"running": True}
+    monkeypatch.setattr(mb.sys, "platform", "win32")
+    monkeypatch.setattr(mb, "musicbee_running", lambda: state["running"])
+
+    def fake_run(args, **kw):
+        calls.append(args)
+        state["running"] = False
+    monkeypatch.setattr(mb.subprocess, "run", fake_run)
+    assert mb.close_musicbee(timeout=1, poll=0) is True
+    assert calls and all("/F" not in c for c in calls)      # never force-kills
+
+
+def test_close_musicbee_reports_when_it_stays_open(monkeypatch):
+    monkeypatch.setattr(mb.sys, "platform", "win32")
+    monkeypatch.setattr(mb, "musicbee_running", lambda: True)
+    monkeypatch.setattr(mb.subprocess, "run", lambda *a, **k: None)
+    assert mb.close_musicbee(timeout=0.05, poll=0.01) is False

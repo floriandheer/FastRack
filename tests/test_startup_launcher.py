@@ -176,11 +176,29 @@ CASES = [
      "spec": _spec(names=["syncthing"], hints=["syncthing"]),
      "windows": [_win(41, 77, "windowsterminal", r"C:\tools\syncthing.exe",
                       cls="CASCADIA_HOSTING_WINDOW_CLASS")]},
-    # ...but a browser tab that merely mentions the app is NOT its window.
-    {"id": "sel_browser_tab_ignored", "fn": "select", "tree": [400],
+    # Syncthing opens its GUI in the default browser: the new Firefox window
+    # titled after the app is its window (provisional - must persist).
+    {"id": "sel_handed_off_browser", "fn": "select", "tree": [400],
      "spec": _spec(names=["syncthing"], hints=["syncthing"]),
      "windows": [_win(42, 78, "firefox", "workstation01 | Syncthing - Mozilla Firefox",
                       cls="MozillaWindowClass")]},
+    # ...but the app's own window still beats it.
+    {"id": "sel_own_window_beats_handoff", "fn": "select", "tree": [400],
+     "spec": _spec(names=["syncthing"], hints=["syncthing"]),
+     "windows": [_win(42, 78, "firefox", "Syncthing - Mozilla Firefox", cls="MozillaWindowClass"),
+                 _win(43, 400, "syncthing", "Syncthing")]},
+    # ...a new window that doesn't name the app is not it...
+    {"id": "sel_unrelated_new_window", "fn": "select", "tree": [400],
+     "spec": _spec(names=["syncthing"], hints=["syncthing"]),
+     "windows": [_win(44, 78, "firefox", "News - Mozilla Firefox", cls="MozillaWindowClass")]},
+    # ...and a browser window that was already open is never taken by title.
+    {"id": "sel_existing_browser_ignored", "fn": "select", "noHints": True,
+     "spec": _spec(names=["syncthing"], hints=["syncthing"]),
+     "windows": [_win(45, 78, "firefox", "Syncthing - Mozilla Firefox", cls="MozillaWindowClass")]},
+    # Another launched app's window that mentions us is still not ours.
+    {"id": "sel_handoff_foreign_blocked", "fn": "select", "tree": [400], "foreign": [400, 900],
+     "spec": _spec(names=["syncthing"], hints=["syncthing"]),
+     "windows": [_win(46, 900, "pythonw", "Syncthing monitor")]},
     # Main window over a small reminder dialog of the same process.
     {"id": "sel_larger_wins", "fn": "select", "tree": [9836],
      "spec": _spec(names=["thunderbird"]),
@@ -220,6 +238,16 @@ CASES = [
     {"id": "ex_ambiguous", "fn": "existing",
      "spec": dict(_spec(names=["pythonw"], hints=["Fastrack"]), Label="Fastrack"),
      "windows": [_win(41, 60, "pythonw", "Track"), _win(42, 61, "pythonw", "Tool")]},
+    # -Arrange: the app has no window of its own; the one window titled
+    # after it (Firefox) is taken, two are ambiguous.
+    {"id": "ex_handed_off", "fn": "existing",
+     "spec": dict(_spec(names=["syncthing"], hints=["syncthing"]), Label="syncthing"),
+     "windows": [_win(61, 78, "firefox", "News - Mozilla Firefox"),
+                 _win(62, 78, "firefox", "workstation01 | Syncthing - Mozilla Firefox")]},
+    {"id": "ex_handed_off_ambiguous", "fn": "existing",
+     "spec": dict(_spec(names=["syncthing"], hints=["syncthing"]), Label="syncthing"),
+     "windows": [_win(61, 78, "firefox", "Syncthing - Mozilla Firefox"),
+                 _win(62, 79, "msedge", "Syncthing docs - Microsoft Edge")]},
     {"id": "ex_title_remap", "fn": "existing",
      "spec": dict(_spec(names=["pythonw"], title="FastRack"), Label="launcher"),
      "windows": [_win(51, 70, "pythonw", "Track"), _win(52, 71, "pythonw", "FastRack v0.5.0")]},
@@ -345,8 +373,32 @@ def test_terminal_hosted_console_app_is_found_by_tab_title(ps):
     assert ps["sel_terminal_title"] == {"hwnd": 41, "rule": "console title", "provisional": True}
 
 
-def test_browser_tab_mentioning_the_app_is_not_its_window(ps):
-    assert ps["sel_browser_tab_ignored"] is None
+def test_new_window_of_another_program_titled_after_the_app_is_its_window(ps):
+    assert ps["sel_handed_off_browser"] == {"hwnd": 42, "rule": "handed-off window", "provisional": True}
+
+
+def test_apps_own_window_beats_a_handed_off_one(ps):
+    assert ps["sel_own_window_beats_handoff"]["hwnd"] == 43
+
+
+def test_unrelated_new_window_is_not_the_apps(ps):
+    assert ps["sel_unrelated_new_window"] is None
+
+
+def test_already_open_browser_window_is_never_taken_by_title(ps):
+    assert ps["sel_existing_browser_ignored"] is None
+
+
+def test_other_launched_apps_window_is_not_a_hand_off(ps):
+    assert ps["sel_handoff_foreign_blocked"] is None
+
+
+def test_arrange_finds_a_lone_handed_off_window(ps):
+    assert ps["ex_handed_off"] == {"hwnd": 62, "rule": "handed-off window"}
+
+
+def test_arrange_leaves_several_handed_off_windows_alone(ps):
+    assert ps["ex_handed_off_ambiguous"] is None
 
 
 def test_larger_window_wins_between_equal_matches(ps):
